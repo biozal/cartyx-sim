@@ -101,7 +101,7 @@ describe('Director', () => {
             loreEntityId: '2418574',
           }),
           toolCall('npc_say', {
-            npcId: 'professor-sella-vaunt',
+            npcId: 'npc-professor-sella-vaunt',
             text: 'Someone has tampered with engine three. Find out who.',
             emotion: 'angry',
           }),

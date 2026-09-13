@@ -1,3 +1,4 @@
+import { makeCombatant } from '@cartyx-sim/rules/testing';
 import { describe, expect, it } from 'vitest';
 import {
   handOff,
@@ -9,6 +10,7 @@ import {
   sceneChange,
 } from '../src/tools/narrative';
 import { toToolSchema } from '../src/tools/types';
+import { startedState } from './helpers';
 import { toolHarness } from './tool-harness';
 
 describe('narrate', () => {
@@ -63,16 +65,18 @@ describe('introduce_npc and npc_say', () => {
     };
     expect(await harness.run(introduceNpc, intro)).toMatchObject({
       ok: true,
-      outcome: { result: 'Introduced Professor Sella Vaunt with npcId "professor-sella-vaunt".' },
+      outcome: {
+        result: 'Introduced Professor Sella Vaunt with npcId "npc-professor-sella-vaunt".',
+      },
     });
     expect(await harness.run(introduceNpc, intro)).toMatchObject({
       ok: true,
       outcome: { result: expect.stringContaining('already introduced') },
     });
-    await harness.run(npcSay, { npcId: 'professor-sella-vaunt', text: 'Find out who.' });
+    await harness.run(npcSay, { npcId: 'npc-professor-sella-vaunt', text: 'Find out who.' });
     expect(harness.recorder.events.map((e) => e.type)).toEqual(['npc_introduced', 'dialogue']);
     expect(harness.recorder.events[1]).toMatchObject({
-      speaker: 'professor-sella-vaunt',
+      speaker: 'npc-professor-sella-vaunt',
       speakerKind: 'npc',
     });
   });
@@ -83,6 +87,55 @@ describe('introduce_npc and npc_say', () => {
       ok: false,
       error: 'Unknown npcId "ghost". Call introduce_npc first. Known NPCs: none',
     });
+  });
+
+  it('namespaces the npcId so it cannot collide with a PC id', async () => {
+    const harness = toolHarness();
+    const intro = await harness.run(introduceNpc, {
+      name: 'Kira',
+      description: 'A doppelganger wearing a familiar face',
+      invented: true,
+    });
+    expect(intro).toMatchObject({
+      ok: true,
+      outcome: { result: 'Introduced Kira with npcId "npc-kira".' },
+    });
+    await harness.run(npcSay, { npcId: 'npc-kira', text: 'Impostor among us.' });
+    expect(harness.recorder.events[1]).toMatchObject({
+      speaker: 'npc-kira',
+      speakerKind: 'npc',
+    });
+    expect(harness.recorder.state.wordsBySpeaker['npc-kira']).toBe(3);
+    expect(harness.recorder.state.wordsBySpeaker['kira']).toBeUndefined();
+  });
+
+  it('namespaces an NPC literally named "DM"', async () => {
+    const harness = toolHarness();
+    const intro = await harness.run(introduceNpc, {
+      name: 'DM',
+      description: 'A meta joke NPC',
+      invented: true,
+    });
+    expect(intro).toMatchObject({
+      ok: true,
+      outcome: { result: 'Introduced DM with npcId "npc-dm".' },
+    });
+  });
+
+  it('rejects an id that already names a combatant', async () => {
+    const started = startedState();
+    const ghost = makeCombatant({ id: 'npc-ghost', name: 'Ghost', kind: 'monster' });
+    const harness = toolHarness({
+      state: { ...started.state, combatants: { ...started.state.combatants, 'npc-ghost': ghost } },
+      history: started.history,
+    });
+    const result = await harness.run(introduceNpc, {
+      name: 'Ghost',
+      description: 'A restless spirit',
+      invented: true,
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
   });
 });
 
@@ -160,7 +213,7 @@ describe('id lookups reject built-in property names', () => {
     });
     expect(result).toMatchObject({
       ok: true,
-      outcome: { result: 'Introduced Constructor with npcId "constructor".' },
+      outcome: { result: 'Introduced Constructor with npcId "npc-constructor".' },
     });
   });
 });

@@ -24,7 +24,9 @@ export const narrate = defineTool({
 export const introduceNpc = defineTool({
   name: 'introduce_npc',
   description:
-    'Introduce a non-player character before they speak. Set loreEntityId when the NPC comes from the lore; set invented to true if you made them up.',
+    'Introduce a non-player character before they speak. The engine namespaces their id as ' +
+    '"npc-<slug>" (returned in the result) so it can never collide with a player character\'s id. ' +
+    'Set loreEntityId when the NPC comes from the lore; set invented to true if you made them up.',
   parameters: z.object({
     name: z.string().trim().min(1).max(200),
     description: z.string().trim().min(1).max(2000),
@@ -32,10 +34,14 @@ export const introduceNpc = defineTool({
     loreEntityId: z.string().min(1).max(200).optional(),
   }),
   run(args, { recorder }) {
-    const npcId = slugify(args.name);
-    if (!npcId) throw new ToolError(`Cannot build an id from NPC name "${args.name}"`);
+    const slug = slugify(args.name);
+    if (!slug) throw new ToolError(`Cannot build an id from NPC name "${args.name}"`);
+    const npcId = `npc-${slug}`;
     if (ownEntry(recorder.state.npcs, npcId)) {
       return { result: `${args.name} is already introduced; use npcId "${npcId}".` };
+    }
+    if (ownEntry(recorder.state.combatants, npcId)) {
+      throw new ToolError(`Id "${npcId}" already names a combatant.`);
     }
     recorder.emit({
       type: 'npc_introduced',
