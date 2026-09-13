@@ -2,14 +2,14 @@ import type { Combatant, Rng } from '@cartyx-sim/rules';
 import { clockInstruction, clockPhase } from './clock';
 import { SessionPausedError } from './errors';
 import type { SimEvent } from './events';
-import type {
-  ChatMessage,
-  LoreHit,
-  LoreIndex,
-  ModelClient,
+import {
   ModelResponse,
-  ToolCall,
-  ToolSchema,
+  type ChatMessage,
+  type LoreHit,
+  type LoreIndex,
+  type ModelClient,
+  type ToolCall,
+  type ToolSchema,
 } from './model';
 import type { PromptBuilder } from './prompts';
 import { TurnRecorder } from './recorder';
@@ -506,14 +506,14 @@ export class Director {
     return [nudge, base, clock].filter(Boolean).join(' ');
   }
 
-  private async callModel(
-    seat: string,
-    messages: ChatMessage[],
-    tools: ToolSchema[]
-  ): Promise<ModelResponse> {
+  /**
+   * Runs `operation`, retrying any failure after each of `retryDelaysMs` in turn; once the delays
+   * run out, pauses the session on `seat` with the last failure's message.
+   */
+  private async withRetries<T>(seat: string, operation: () => Promise<T>): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       try {
-        return await this.deps.model.complete({ seat, messages, tools });
+        return await operation();
       } catch (error) {
         const delay = this.retryDelaysMs[attempt];
         if (delay === undefined) {
@@ -525,6 +525,26 @@ export class Director {
         await this.sleep(delay);
       }
     }
+  }
+
+  /** Calls the model and validates its response; a malformed response is a failed attempt. */
+  private callModel(
+    seat: string,
+    messages: ChatMessage[],
+    tools: ToolSchema[]
+  ): Promise<ModelResponse> {
+    return this.withRetries(seat, async () => {
+      const parsed = ModelResponse.safeParse(
+        await this.deps.model.complete({ seat, messages, tools })
+      );
+      if (!parsed.success) {
+        const issues = parsed.error.issues.map(
+          (issue) => `${issue.path.join('.') || 'response'}: ${issue.message}`
+        );
+        throw new Error(`Malformed model response (${issues.join('; ')})`);
+      }
+      return parsed.data;
+    });
   }
 
   private transcript(audience: Audience): string {
@@ -544,21 +564,8 @@ export class Director {
   }
 
   /** Retries a lore search on the same schedule as model calls, then pauses seat "lore". */
-  private async searchLore(query: string, limit: number): Promise<LoreHit[]> {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await this.deps.lore.search(query, limit);
-      } catch (error) {
-        const delay = this.retryDelaysMs[attempt];
-        if (delay === undefined) {
-          throw new SessionPausedError(
-            'lore',
-            error instanceof Error ? error.message : String(error)
-          );
-        }
-        await this.sleep(delay);
-      }
-    }
+  private searchLore(query: string, limit: number): Promise<LoreHit[]> {
+    return this.withRetries('lore', () => this.deps.lore.search(query, limit));
   }
 
   private newRecorder(): TurnRecorder {

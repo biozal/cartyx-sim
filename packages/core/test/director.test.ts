@@ -748,6 +748,85 @@ describe('Director', () => {
     ).rejects.toThrow(/lore commit/i);
   });
 
+  describe('F5: malformed model responses', () => {
+    const malformed = (value: unknown) => value as ScriptedResponse;
+
+    it('normalizes a response with no text through the schema defaults', async () => {
+      const {
+        deps: built,
+        model,
+        sink,
+      } = deps({
+        dm: [
+          malformed({ toolCalls: [] }),
+          malformed({ toolCalls: [toolCall('hand_off', { target: { kind: 'party' } })] }),
+        ],
+      });
+      const director = await Director.create(config(), built);
+
+      await director.run(2);
+
+      expect(sink.events.map((e) => e.type)).toEqual(['session_start', 'hand_off', 'turn_end']);
+      const secondRequest = model.requests.filter((r) => r.seat === 'dm')[1]!;
+      expect(secondRequest.messages).toContainEqual({
+        role: 'assistant',
+        content: '',
+        toolCalls: [],
+      });
+    });
+
+    it('retries a response whose toolCalls is null, then continues when a valid one arrives', async () => {
+      const sleeps: number[] = [];
+      const { deps: built, sink } = deps(
+        {
+          dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } }))],
+          'player-kira': [
+            malformed({ text: 'x', toolCalls: null }),
+            respond(toolCall('speak', { text: 'Ready.' })),
+          ],
+        },
+        { sleep: async (ms) => void sleeps.push(ms) }
+      );
+      const director = await Director.create(config({ retryDelaysMs: [5] }), built);
+
+      await director.run(3);
+
+      expect(sleeps).toEqual([5]);
+      expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([
+        { speaker: 'kira', text: 'Ready.' },
+      ]);
+    });
+
+    it('pauses on the seat that keeps returning a malformed response, leaving no partial turn', async () => {
+      const sleeps: number[] = [];
+      const bad = malformed({ text: 'x', toolCalls: null });
+      const { deps: built, sink } = deps(
+        {
+          dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } }))],
+          'player-kira': [bad, bad],
+        },
+        { sleep: async (ms) => void sleeps.push(ms) }
+      );
+      const director = await Director.create(config({ retryDelaysMs: [5] }), built);
+
+      const result = await director.run(3);
+
+      expect(result).toMatchObject({
+        status: 'paused',
+        seat: 'player-kira',
+        error: expect.stringContaining('toolCalls'),
+      });
+      expect(sleeps).toEqual([5]);
+      expect(sink.events.map((e) => e.type)).toEqual([
+        'session_start',
+        'hand_off',
+        'turn_end',
+        'ooc_note',
+      ]);
+      expect(foldEvents(sink.events)).toEqual(director.currentState);
+    });
+  });
+
   describe('F4: resuming with a changed party', () => {
     async function startedSink(): Promise<MemorySink> {
       const sink = new MemorySink();
