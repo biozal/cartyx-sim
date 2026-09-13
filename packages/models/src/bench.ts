@@ -16,6 +16,12 @@ export interface BenchResult {
   toolCallTrials: number;
   /** Trials where the model called the test tool exactly as asked. */
   toolCallSuccesses: number;
+  /**
+   * Trials where the model replied with text instead of a tool call, for a seat whose effective
+   * tool choice is "auto" (the engine accepts that as narration or speech, so it counts as usable,
+   * not a miss). Always 0 for a "required" seat, where a text-only reply makes the AI SDK throw.
+   */
+  textReplies: number;
   errors: string[];
 }
 
@@ -57,6 +63,7 @@ export async function benchSeat(
     tokensPerSecond: null,
     toolCallTrials: trials,
     toolCallSuccesses: 0,
+    textReplies: 0,
     errors: [],
   };
   const addError = (message: string) => {
@@ -117,6 +124,10 @@ export async function benchSeat(
       additionalProperties: false,
     }),
   });
+  // Under "required" a text-only reply makes the AI SDK throw, so it lands in the catch below as
+  // an error, same as before. Under "auto" it does not throw, and the engine accepts a text reply
+  // as narration or speech, so it counts as usable here too, not a silently uncounted miss.
+  const toolChoice = seat.toolChoice ?? 'required';
   for (let trial = 1; trial <= trials; trial++) {
     try {
       const reply = await generateText({
@@ -124,7 +135,7 @@ export async function benchSeat(
         instructions: 'You are testing a game engine. Always respond by calling a tool.',
         prompt: `Call roll_dice exactly once with dice "${EXPECTED_DICE}" and a short reason.`,
         tools: { roll_dice: rollDice },
-        toolChoice: seat.toolChoice ?? 'required',
+        toolChoice,
         temperature: seat.temperature,
         maxRetries: 0,
         abortSignal: AbortSignal.timeout(seat.timeoutMs),
@@ -134,6 +145,8 @@ export async function benchSeat(
       const dice = (call?.input as { dice?: unknown } | undefined)?.dice;
       if (call && !invalid && call.toolName === 'roll_dice' && dice === EXPECTED_DICE) {
         result.toolCallSuccesses++;
+      } else if (!call && toolChoice === 'auto' && reply.text.trim().length > 0) {
+        result.textReplies++;
       }
     } catch (error) {
       addError(`tool trial ${trial} failed: ${errorMessage(error)}`);

@@ -71,10 +71,51 @@ describe('benchSeat', () => {
 
     expect(result.toolCallTrials).toBe(6);
     expect(result.toolCallSuccesses).toBe(2);
+    expect(result.textReplies).toBe(0);
     expect(result.errors).toEqual([expect.stringContaining('tool trial 5 failed')]);
     expect(fake.requests.slice(1).every((request) => request.tool_choice === 'required')).toBe(
       true
     );
+  });
+
+  it('counts a plain-text reply as usable, not a miss, for a toolChoice: auto seat', async () => {
+    const trials: FakeReply[] = [
+      { text: 'A torch flickers in the draft.' },
+      { toolCalls: [{ name: 'roll_dice', arguments: { dice: '1d20+3', reason: 'ok' } }] },
+      { text: 'Something scurries in the dark.' },
+    ];
+    const fake = await server((_body, index) =>
+      index === 0 ? { text: 'A corridor.' } : trials[index - 1]!
+    );
+
+    const result = await benchSeat(
+      'player-kira',
+      { endpoint: { baseURL: fake.baseURL }, model: 'gemma', toolChoice: 'auto' },
+      { trials: trials.length }
+    );
+
+    expect(result.toolCallTrials).toBe(3);
+    expect(result.toolCallSuccesses).toBe(1);
+    expect(result.textReplies).toBe(2);
+    expect(result.errors).toEqual([]);
+    expect(fake.requests.slice(1).every((request) => request.tool_choice === 'auto')).toBe(true);
+  });
+
+  it('still fails a malformed tool call for a toolChoice: auto seat, not counting it as text', async () => {
+    const fake = await server((_body, index) =>
+      index === 0
+        ? { text: 'A corridor.' }
+        : { toolCalls: [{ name: 'roll_dice', arguments: '{not json' }] }
+    );
+
+    const result = await benchSeat(
+      'player-kira',
+      { endpoint: { baseURL: fake.baseURL }, model: 'gemma', toolChoice: 'auto' },
+      { trials: 1 }
+    );
+
+    expect(result.toolCallSuccesses).toBe(0);
+    expect(result.textReplies).toBe(0);
   });
 
   it('flags a model the server does not list', async () => {

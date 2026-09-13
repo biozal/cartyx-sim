@@ -17,10 +17,14 @@ export interface BenchReport {
   reportPath: string;
 }
 
-/** Whether every seat is reachable and made every tool call correctly. */
+/**
+ * Whether every seat is reachable and every trial was usable: a well-formed tool call, or (for a
+ * `toolChoice: auto` seat) a plain-text reply, which the engine accepts as narration or speech.
+ */
 export function benchPassed(results: readonly BenchResult[]): boolean {
   return results.every(
-    (result) => result.reachable && result.toolCallSuccesses === result.toolCallTrials
+    (result) =>
+      result.reachable && result.toolCallSuccesses + result.textReplies === result.toolCallTrials
   );
 }
 
@@ -33,7 +37,8 @@ export function formatBenchTable(results: readonly BenchResult[]): string[] {
     result.modelListed === null ? '?' : result.modelListed ? 'yes' : 'NO',
     result.tokensPerSecond === null ? '-' : String(result.tokensPerSecond),
     result.latencyMs === null ? '-' : String(result.latencyMs),
-    `${result.toolCallSuccesses}/${result.toolCallTrials}`,
+    `${result.toolCallSuccesses}/${result.toolCallTrials}` +
+      (result.textReplies > 0 ? ` (+${result.textReplies} text)` : ''),
   ]);
   const widths = header.map((_, column) =>
     Math.max(...[header, ...rows].map((row) => row[column]!.length))
