@@ -7,8 +7,26 @@ function nameOf(id: string, state: GameState): string {
   return ownEntry(state.combatants, id)?.name ?? ownEntry(state.npcs, id)?.name ?? id;
 }
 
+/** True when the entity is a combatant whose stats are hidden from players (any non-PC). */
+function isHiddenStats(id: string, state: GameState): boolean {
+  return ownEntry(state.combatants, id)?.kind !== 'pc';
+}
+
+/** Spec §5.5: monster AC and HP never enter a player prompt or transcript. */
+function describeHpChange(name: string, before: unknown, after: unknown): string {
+  const from = typeof before === 'number' ? before : Number(before);
+  const to = typeof after === 'number' ? after : Number(after);
+  if (to === 0) return `[state] ${name} is down`;
+  if (to < from) return `[state] ${name} is wounded`;
+  return `[state] ${name} recovers`;
+}
+
 /** One human-readable transcript line for an event, or null if the event is not shown. */
-export function describeEvent(event: SimEvent, state: GameState): string | null {
+export function describeEvent(
+  event: SimEvent,
+  state: GameState,
+  audience: Audience = 'dm'
+): string | null {
   switch (event.type) {
     case 'narration':
       return `DM: ${event.text}`;
@@ -19,13 +37,18 @@ export function describeEvent(event: SimEvent, state: GameState): string | null 
     case 'pass':
       return `${nameOf(event.actor, state)} holds back.`;
     case 'roll': {
-      const against = event.target === undefined ? '' : ` vs ${event.target}`;
+      const hideTarget = audience === 'player' && event.kind === 'attack';
+      const against = event.target === undefined || hideTarget ? '' : ` vs ${event.target}`;
       const outcome = event.outcome ? ` — ${event.outcome}` : '';
       return `[roll] ${event.label}: ${event.total}${against}${outcome}`;
     }
     case 'state_change':
       if (event.field === 'hp') {
-        return `[state] ${nameOf(event.entity, state)} HP ${String(event.before)} → ${String(event.after)}`;
+        const name = nameOf(event.entity, state);
+        if (audience === 'player' && isHiddenStats(event.entity, state)) {
+          return describeHpChange(name, event.before, event.after);
+        }
+        return `[state] ${name} HP ${String(event.before)} → ${String(event.after)}`;
       }
       if (event.field === 'conditions') {
         const after = Array.isArray(event.after) ? event.after.join(', ') : '';
@@ -63,7 +86,7 @@ export function renderTranscript(
 ): string {
   return events
     .filter((event) => audience === 'dm' || event.visibility === 'public')
-    .map((event) => describeEvent(event, state))
+    .map((event) => describeEvent(event, state, audience))
     .filter((line): line is string => line !== null)
     .slice(-limit)
     .join('\n');
