@@ -1279,7 +1279,14 @@ describe('Director', () => {
 
     await expect(director.run(2)).rejects.toThrow('disk full');
 
-    expect(director.currentState.session).toBe(1);
+    // The failed DM beat narrated four words and handed off; none of it may reach live state.
+    const state = director.currentState;
+    expect(state.session).toBe(1);
+    expect(state.lastSeq).toBe(0);
+    expect(state.spokenWords).toBe(0);
+    expect(state.wordsBySpeaker.dm).toBeUndefined();
+    expect(state.pendingResponders).toEqual([]);
+    expect(foldEvents(director.events)).toEqual(state);
     expect(director.events).toHaveLength(1);
     expect(director.events[0]).toMatchObject({ type: 'session_start' });
   });
