@@ -452,6 +452,37 @@ describe('cast_spell', () => {
     expect(harness.recorder.state.combatants['goblin-1']?.hp).toBe(0);
   });
 
+  it("F3: a single-target save spell's damage roll names the target as subject", async () => {
+    const harness = withGoblin([10]);
+    await harness.run(castSpell, {
+      casterId: 'kira',
+      spell: 'Thunderwave',
+      slotLevel: 1,
+      targetIds: ['goblin-1'],
+      save: { ability: 'con', dc: 13, damage: '3', damageType: 'thunder' },
+    });
+    const damageRoll = harness.recorder.events.find(
+      (e) => e.type === 'roll' && e.kind === 'damage'
+    );
+    expect(damageRoll).toMatchObject({ actor: 'kira', subject: 'goblin-1' });
+  });
+
+  it("F3: a multi-target save spell's damage roll has no single subject", async () => {
+    const harness = withGoblin([10, 10]);
+    await harness.run(castSpell, {
+      casterId: 'kira',
+      spell: 'Thunderwave',
+      slotLevel: 1,
+      targetIds: ['goblin-1', 'tomas'],
+      save: { ability: 'con', dc: 13, damage: '3', damageType: 'thunder' },
+    });
+    const damageRoll = harness.recorder.events.find(
+      (e) => e.type === 'roll' && e.kind === 'damage'
+    );
+    expect(damageRoll).toBeDefined();
+    expect(damageRoll).not.toHaveProperty('subject', expect.anything());
+  });
+
   it('allows only one effect per cast', async () => {
     const harness = withGoblin([]);
     const result = await harness.run(castSpell, {
@@ -669,6 +700,16 @@ describe('start_combat and end_combat', () => {
       hp: 11,
     });
     expect(harness.recorder.state.combat?.order[0]?.combatantId).toBe('clockwork-sentry-1');
+  });
+
+  it("F3: every initiative roll records mode 'normal'", async () => {
+    const harness = toolHarness({ rng: scriptedRng([10, 5, 17, 3]) });
+    await harness.run(startCombat, sentries);
+    const initiative = harness.recorder.events.filter(
+      (e) => e.type === 'roll' && e.kind === 'initiative'
+    );
+    expect(initiative).toHaveLength(4);
+    for (const roll of initiative) expect(roll).toMatchObject({ mode: 'normal' });
   });
 
   it('refuses to start a second combat and ends the current one', async () => {

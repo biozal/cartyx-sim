@@ -263,6 +263,8 @@ export const castSpell = defineTool({
           rolls: damage.rolls,
           modifier: damage.modifier,
           total: damage.total,
+          // Only unambiguous with exactly one target, as for healing below.
+          subject: uniqueTargets.length === 1 ? uniqueTargets[0]!.id : undefined,
         });
       }
       for (const target of uniqueTargets) {

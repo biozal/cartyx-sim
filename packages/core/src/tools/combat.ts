@@ -74,6 +74,8 @@ export const startCombat = defineTool({
         rolls: [entry.roll],
         modifier: entry.dexMod,
         total: entry.total,
+        // Initiative is always a straight d20, so every d20 roll event carries a mode.
+        mode: 'normal',
       });
     }
     recorder.emit({ type: 'combat_start', order });
