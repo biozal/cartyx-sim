@@ -79,6 +79,6 @@ A session pauses (exit code 2) instead of crashing when:
 - nobody has spoken or changed the game state for 12 turns in a row;
 - the DM hands off 3 times in a row with no player character able to respond.
 
-Fix the cause, then continue with the same command plus `--resume`: the log is the source of truth, so resuming uses the logged party, target minutes, and lore commit, and a backstop pause (the last two cases above) gives the table a fresh budget of turns or hand-offs. If the cause is unfixed, play continues until the same backstop trips again after another full limit.
+Fix the cause, then continue with the same command plus `--resume`: the log is the source of truth, so resuming keeps the logged target minutes (a differently configured value is ignored, with a note in the log), and the party and lore commit must match the log or the resume is refused. A backstop pause (the last two cases above) gives the table a fresh budget of turns or hand-offs; if the cause is unfixed, play continues until the same backstop trips again after another full limit.
 
 Ctrl-C releases the session lock before exiting. If a run was killed without releasing it, the next run replaces a lock whose process is no longer running and says so.

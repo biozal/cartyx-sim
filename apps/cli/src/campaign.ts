@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { ownEntry } from '@cartyx-sim/core';
 import { Endpoint, type SeatConfigInput } from '@cartyx-sim/models';
 import { Combatant } from '@cartyx-sim/rules';
 import YAML from 'yaml';
@@ -156,12 +157,21 @@ export async function loadCampaign(campaignsDir: string, campaignId: string): Pr
   const models: Record<string, SeatConfigInput> = {
     [DM_SEAT]: resolve(file.seats.dm, 'seats.dm'),
   };
-  const players: Record<string, string> = {};
+  // Built as entries and turned into an object at the end, rather than assigning `players[pc.id]
+  // = seat` in the loop: a party member id of "__proto__" would silently be dropped by that plain
+  // assignment (the inherited `__proto__` setter ignores a non-object value) instead of becoming a
+  // real, lookup-safe entry.
+  const playerSeats: [string, string][] = [];
   for (const pc of party) {
     const seat = playerSeat(pc.id);
-    players[pc.id] = seat;
-    models[seat] = resolve(file.seats.players[pc.id]!, `seats.players.${pc.id}`);
+    // `ownEntry`, not bracket access: the seat-coverage check above already guarantees this is
+    // present, but a config-supplied id must never be read by plain bracket access regardless.
+    const ref = ownEntry(file.seats.players, pc.id);
+    if (!ref) throw new Error(`${configPath}: no seat under seats.players for ${pc.id}`);
+    models[seat] = resolve(ref, `seats.players.${pc.id}`);
+    playerSeats.push([pc.id, seat]);
   }
+  const players: Record<string, string> = Object.fromEntries(playerSeats);
   return {
     id: campaignId,
     dir,

@@ -120,6 +120,29 @@ describe('loadCampaign', () => {
     );
   });
 
+  it('handles a character id of "constructor" like any other id, not a prototype property', async () => {
+    const withConstructorSeat = CONFIG.replace(
+      '    kira: { endpoint: ampere, model: player-model, toolChoice: auto }',
+      '    constructor: { endpoint: ampere, model: player-model, toolChoice: auto }'
+    );
+    await writeCampaign(withConstructorSeat, {
+      'constructor.yaml': KIRA.replace('id: kira', 'id: constructor'),
+    });
+    const campaign = await loadCampaign(campaignsDir, 'test');
+    expect(campaign.party.map((pc) => pc.id)).toEqual(['constructor']);
+    expect(campaign.seats.players).toEqual({ constructor: 'player-constructor' });
+    expect(campaign.models['player-constructor']).toMatchObject({ model: 'player-model' });
+
+    // A "constructor"-named character with no matching seat fails with the normal message,
+    // rather than a plain bracket lookup silently resolving to a built-in property.
+    await writeCampaign(CONFIG, {
+      'constructor.yaml': KIRA.replace('id: kira', 'id: constructor'),
+    });
+    await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
+      'no seat under seats.players for constructor'
+    );
+  });
+
   it('reports an invalid character file by path', async () => {
     await writeCampaign(CONFIG, { 'kira.yaml': KIRA.replace('ac: 15', 'ac: nope') });
     await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
