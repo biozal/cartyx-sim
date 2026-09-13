@@ -1,15 +1,6 @@
-import { Command, InvalidArgumentError } from 'commander';
+import { Command } from 'commander';
+import { parseNumber } from './args';
 import { runSession } from './run';
-
-function parseNumber(kind: 'integer' | 'positive'): (value: string) => number {
-  return (value) => {
-    const parsed = Number(value);
-    if (kind === 'integer' ? !Number.isInteger(parsed) : !(parsed > 0)) {
-      throw new InvalidArgumentError(`Expected a ${kind} number, got "${value}".`);
-    }
-    return parsed;
-  };
-}
 
 interface RunCommandOptions {
   campaign: string;
