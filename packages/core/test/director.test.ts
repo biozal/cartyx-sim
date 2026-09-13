@@ -1,0 +1,404 @@
+import { scriptedRng } from '@cartyx-sim/rules';
+import { describe, expect, it } from 'vitest';
+import { Director, type DirectorConfig, type DirectorDeps } from '../src/director';
+import type { SimEvent } from '../src/events';
+import { basicPrompts } from '../src/prompts';
+import { MemorySink } from '../src/sink';
+import { foldEvents } from '../src/state';
+import {
+  respond,
+  ScriptedModelClient,
+  StaticLoreIndex,
+  toolCall,
+  type ScriptedResponse,
+} from '../src/testing';
+import { kira, now, tomas } from './helpers';
+import { SELLA_CHUNK } from './tool-harness';
+
+function config(overrides: Partial<DirectorConfig> = {}): DirectorConfig {
+  return {
+    session: 1,
+    targetMinutes: 60,
+    loreCommit: 'abc123',
+    party: [kira, tomas],
+    seats: { dm: 'dm', players: { kira: 'player-kira', tomas: 'player-tomas' } },
+    retryDelaysMs: [],
+    ...overrides,
+  };
+}
+
+function deps(
+  script: Record<string, ScriptedResponse[]>,
+  options: {
+    sink?: MemorySink;
+    rolls?: number[];
+    turnPrefix?: string;
+    sleep?: DirectorDeps['sleep'];
+  } = {}
+) {
+  let turn = 0;
+  const model = new ScriptedModelClient(script);
+  const sink = options.sink ?? new MemorySink();
+  const built: DirectorDeps = {
+    model,
+    lore: new StaticLoreIndex([SELLA_CHUNK]),
+    rng: scriptedRng(options.rolls ?? []),
+    sink,
+    prompts: basicPrompts,
+    now,
+    newTurnId: () => `${options.turnPrefix ?? 'turn'}-${++turn}`,
+    sleep: options.sleep ?? (async () => {}),
+  };
+  return { deps: built, model, sink };
+}
+
+function lastUserMessage(request: { messages: { role: string; content: string }[] }): string {
+  return request.messages.filter((m) => m.role === 'user').at(-1)?.content ?? '';
+}
+
+/** Every turn's events must be contiguous and seqs must count up from 0 without gaps. */
+function expectWellFormedLog(events: readonly SimEvent[]) {
+  expect(events.map((e) => e.seq)).toEqual(events.map((_, index) => index));
+  const finished = new Set<string>();
+  let current: string | undefined;
+  for (const event of events) {
+    if (event.turnId !== current) {
+      expect(finished.has(event.turnId)).toBe(false);
+      if (current) finished.add(current);
+      current = event.turnId;
+    }
+  }
+}
+
+describe('Director', () => {
+  it('plays a scripted session from start to cliffhanger', async () => {
+    const script = {
+      dm: [
+        respond(
+          toolCall('scene_change', {
+            location: 'Avalon Artificers Academy — Crystal Engine Lab',
+            artPrompt: 'A brass-and-crystal workshop lit by humming engines',
+          }),
+          toolCall('lookup_lore', { query: 'Sella Vaunt' })
+        ),
+        respond(
+          toolCall('introduce_npc', {
+            name: 'Professor Sella Vaunt',
+            description: 'Avalon instructor of applied crystal engines',
+            invented: false,
+            loreEntityId: '2418574',
+          }),
+          toolCall('npc_say', {
+            npcId: 'professor-sella-vaunt',
+            text: 'Someone has tampered with engine three. Find out who.',
+            emotion: 'angry',
+          }),
+          toolCall('hand_off', { target: { kind: 'party' } })
+        ),
+        respond(
+          toolCall('request_check', {
+            combatantId: 'kira',
+            checkType: 'skill',
+            skill: 'investigation',
+            dc: 13,
+            reason: 'spot tool marks',
+          })
+        ),
+        respond(
+          toolCall('narrate', { text: 'You find fresh scratches from an Avalon-issue spanner.' }),
+          toolCall('start_combat', {
+            monsters: [
+              {
+                name: 'Clockwork Sentry',
+                ac: 13,
+                maxHp: 11,
+                attacks: [{ name: 'Slam', bonus: 4, damage: '1d6+2', damageType: 'bludgeoning' }],
+              },
+            ],
+          })
+        ),
+        respond(toolCall('hand_off', { target: { kind: 'party' } })),
+        respond(
+          toolCall('attack', {
+            attackerId: 'clockwork-sentry-1',
+            targetId: 'tomas',
+            attackName: 'Slam',
+          })
+        ),
+        respond(
+          toolCall('narrate', { text: 'The sentry slams Tomas into the workbench.' }),
+          toolCall('hand_off', { target: { kind: 'party' } })
+        ),
+        respond(
+          toolCall('attack', {
+            attackerId: 'kira',
+            targetId: 'clockwork-sentry-1',
+            attackName: 'Light Hammer',
+          })
+        ),
+        respond(
+          toolCall('narrate', { text: 'The sentry collapses in a shower of sparks.' }),
+          toolCall('end_combat'),
+          toolCall('scene_change', {
+            location: "Avalon Artificers Academy — Dean's Office",
+            artPrompt: 'A polished office overlooking the artificer barns',
+          }),
+          toolCall('hand_off', { target: { kind: 'party' } })
+        ),
+      ],
+      'player-kira': [
+        respond(
+          toolCall('speak', {
+            text: 'Engine three? I calibrated it this morning.',
+            emotion: 'surprised',
+          }),
+          toolCall('act', { intent: 'inspect the engine housing for tool marks' })
+        ),
+        respond(
+          toolCall('act', {
+            intent: 'strike the sentry with my light hammer',
+            targetId: 'clockwork-sentry-1',
+          })
+        ),
+      ],
+      'player-tomas': [
+        respond(toolCall('speak', { text: 'Kira attacks the engine with her wrench.' })),
+        respond(toolCall('speak', { text: 'Careful, Kira.' }), toolCall('pass')),
+      ],
+    };
+    // d20 check 15; initiative kira 12, tomas 5, sentry 18; sentry hits (16) for 4+2; kira crits (20) for 4+4+3.
+    const { deps: built, model, sink } = deps(script, { rolls: [15, 12, 5, 18, 16, 4, 20, 4, 4] });
+    const director = await Director.create(config({ targetMinutes: 0.25 }), built);
+
+    const result = await director.run();
+
+    expect(result.status).toBe('ended');
+    expect(sink.events.map((e) => e.type)).toEqual([
+      'session_start',
+      'scene_change',
+      'lore_lookup',
+      'npc_introduced',
+      'dialogue',
+      'hand_off',
+      'turn_end',
+      'dialogue',
+      'action',
+      'turn_end',
+      'dialogue',
+      'pass',
+      'turn_end',
+      'roll',
+      'narration',
+      'combatant_added',
+      'roll',
+      'roll',
+      'roll',
+      'combat_start',
+      'hand_off',
+      'turn_end',
+      'roll',
+      'roll',
+      'state_change',
+      'narration',
+      'hand_off',
+      'combat_turn',
+      'turn_end',
+      'action',
+      'turn_end',
+      'roll',
+      'roll',
+      'state_change',
+      'state_change',
+      'narration',
+      'combat_end',
+      'scene_change',
+      'hand_off',
+      'turn_end',
+      'session_end',
+    ]);
+    expect(sink.events.at(-1)).toMatchObject({ type: 'session_end', reason: 'target_reached' });
+    expectWellFormedLog(sink.events);
+
+    const state = director.currentState;
+    expect(state.combatants.tomas?.hp).toBe(6);
+    expect(state.combatants['clockwork-sentry-1']).toMatchObject({ hp: 0, dead: true });
+    expect(state.combat).toBeNull();
+    expect(state.scene?.location).toBe("Avalon Artificers Academy — Dean's Office");
+    expect(foldEvents(sink.events)).toEqual(state);
+    for (const seat of ['dm', 'player-kira', 'player-tomas']) expect(model.remaining(seat)).toBe(0);
+
+    const kiraFirst = model.requests.find((r) => r.seat === 'player-kira')!;
+    expect(lastUserMessage(kiraFirst)).toContain(
+      'Professor Sella Vaunt: "Someone has tampered with engine three. Find out who."'
+    );
+    expect(lastUserMessage(kiraFirst)).not.toContain('[lore]');
+
+    const tomasRetry = model.requests.filter((r) => r.seat === 'player-tomas')[1]!;
+    expect(tomasRetry.messages.at(-1)).toMatchObject({
+      role: 'tool',
+      content: expect.stringContaining('Not executed. player_controls_other'),
+    });
+
+    const dmRequests = model.requests.filter((r) => r.seat === 'dm');
+    expect(lastUserMessage(dmRequests[5]!)).not.toContain('nearing its time limit');
+    expect(lastUserMessage(dmRequests[7]!)).toContain('nearing its time limit');
+  });
+
+  it('re-prompts the DM after a rejection and forces hand_off at the step limit', async () => {
+    const {
+      deps: built,
+      model,
+      sink,
+    } = deps({
+      dm: [
+        respond(toolCall('narrate', { text: 'Kira decides to open the door.' })),
+        respond(toolCall('narrate', { text: 'The door creaks.' })),
+      ],
+    });
+    const director = await Director.create(config({ maxDmStepsPerBeat: 2 }), built);
+    await director.step();
+    await director.step();
+
+    expect(sink.events.slice(1).map((e) => e.type)).toEqual([
+      'narration',
+      'validator_flag',
+      'hand_off',
+      'turn_end',
+    ]);
+    expect(sink.events[1]).toMatchObject({ text: 'The door creaks.' });
+    expect(sink.events[2]).toMatchObject({ rule: 'dm_step_limit', resolution: 'forced_hand_off' });
+    expect(model.requests[1]!.messages.at(-1)).toMatchObject({
+      role: 'tool',
+      content: expect.stringContaining('Rejected (dm_controls_pc)'),
+    });
+  });
+
+  it('treats a text-only DM reply as narration', async () => {
+    const { deps: built, sink } = deps({
+      dm: [
+        { text: 'The engines roar to life.', toolCalls: [] },
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.slice(1, 3)).toMatchObject([
+      { type: 'narration', text: 'The engines roar to life.' },
+      { type: 'hand_off', responders: ['tomas'] },
+    ]);
+  });
+
+  it('forces a pass after a player keeps breaking the rules', async () => {
+    const outcome = respond(toolCall('speak', { text: 'I successfully pick the lock.' }));
+    const { deps: built, sink } = deps({
+      dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } }))],
+      'player-tomas': [outcome, outcome, outcome],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(3);
+    expect(sink.events.slice(-3)).toMatchObject([
+      {
+        type: 'validator_flag',
+        rule: 'player_narrates_outcome',
+        retries: 2,
+        resolution: 'forced_pass',
+      },
+      { type: 'pass', actor: 'tomas' },
+      { type: 'turn_end', actor: 'tomas' },
+    ]);
+  });
+
+  it('ends at the hard stop even without a scene break', async () => {
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(
+          toolCall('narrate', { text: 'The engines roar to life all around you.' }),
+          toolCall('hand_off', { target: { kind: 'party' } })
+        ),
+      ],
+    });
+    const director = await Director.create(config({ targetMinutes: 0.02 }), built);
+    expect((await director.run()).status).toBe('ended');
+    expect(sink.events.at(-1)).toMatchObject({ type: 'session_end', reason: 'hard_stop' });
+  });
+
+  it('pauses when a seat keeps failing and resumes from the log', async () => {
+    const sink = new MemorySink();
+    const sleeps: number[] = [];
+    const first = deps(
+      {
+        dm: [
+          respond(
+            toolCall('narrate', { text: 'The lab hums.' }),
+            toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })
+          ),
+        ],
+        'player-kira': [{ throw: 'connection refused' }, { throw: 'connection refused' }],
+      },
+      { sink, sleep: async (ms) => void sleeps.push(ms) }
+    );
+    const paused = await (await Director.create(config({ retryDelaysMs: [5] }), first.deps)).run();
+
+    expect(paused).toMatchObject({
+      status: 'paused',
+      seat: 'player-kira',
+      error: 'connection refused',
+    });
+    expect(sleeps).toEqual([5]);
+    expect(sink.events.map((e) => e.type)).toEqual([
+      'session_start',
+      'narration',
+      'hand_off',
+      'turn_end',
+      'ooc_note',
+    ]);
+
+    const second = deps(
+      {
+        'player-kira': [respond(toolCall('speak', { text: 'Sorry, I was daydreaming.' }))],
+        dm: [
+          respond(
+            toolCall('narrate', { text: 'Sella clears her throat.' }),
+            toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })
+          ),
+        ],
+      },
+      { sink, turnPrefix: 'resumed' }
+    );
+    const resumed = await Director.create(config(), second.deps);
+    expect((await resumed.run(2)).status).toBe('turn_limit');
+
+    expect(sink.events.slice(5).map((e) => e.type)).toEqual([
+      'ooc_note',
+      'dialogue',
+      'turn_end',
+      'narration',
+      'hand_off',
+      'turn_end',
+    ]);
+    expectWellFormedLog(sink.events);
+    expect(foldEvents(sink.events)).toEqual(resumed.currentState);
+  });
+
+  it('refuses to resume a finished session or a different session number', async () => {
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(
+          toolCall('narrate', { text: 'The engines roar to life all around you.' }),
+          toolCall('hand_off', { target: { kind: 'party' } })
+        ),
+      ],
+    });
+    await (await Director.create(config({ targetMinutes: 0.02 }), built)).run();
+    await expect(Director.create(config(), { ...built, sink })).rejects.toThrow(
+      'Session 1 has already ended'
+    );
+
+    const other = new MemorySink();
+    await other.append(sink.events.slice(0, 1));
+    await expect(
+      Director.create(config({ session: 2 }), { ...built, sink: other })
+    ).rejects.toThrow('Event log belongs to session 1, not session 2');
+  });
+});
