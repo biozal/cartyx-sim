@@ -193,3 +193,9 @@ storybook-static/
 # =========================
 campaigns/
 .cache/
+
+# =========================
+# Agent tooling
+# =========================
+.claude/worktrees/
+.superpowers/
