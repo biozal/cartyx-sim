@@ -38,6 +38,13 @@ describe('validateDmText', () => {
   ])('accepts ordinary narration: "%s"', (text) => {
     expect(validateDmText(text, { pcNames, mechanicsToolCalled: false })).toBeNull();
   });
+
+  it('stays linear on adversarial input instead of matching quadratically', () => {
+    const text = 'hp '.repeat(40_000);
+    const start = performance.now();
+    validateDmText(text, { pcNames, mechanicsToolCalled: false });
+    expect(performance.now() - start).toBeLessThan(100);
+  });
 });
 
 describe('validatePlayerText', () => {

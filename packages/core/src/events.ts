@@ -34,7 +34,7 @@ export const StateField = z.enum([
 export type StateField = z.infer<typeof StateField>;
 
 export const HandOffTarget = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('pcs'), ids: z.array(z.string().min(1)).min(1) }),
+  z.object({ kind: z.literal('pcs'), ids: z.array(z.string().min(1).max(200)).min(1) }),
   z.object({ kind: z.literal('party') }),
   z.object({ kind: z.literal('open') }),
 ]);

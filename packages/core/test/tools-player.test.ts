@@ -94,3 +94,26 @@ describe('player tools', () => {
     expect(harness.recorder.events[0]).toMatchObject({ type: 'pass', actor: 'kira' });
   });
 });
+
+describe('argument length limits', () => {
+  it('rejects speak text over 4000 characters', async () => {
+    const harness = kiraHarness();
+    const result = await harness.run(speak, { text: 'a'.repeat(4001) });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('rejects act intent over 2000 characters', async () => {
+    const harness = kiraHarness();
+    const result = await harness.run(act, { intent: 'a'.repeat(2001) });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('rejects a declared spell name over 200 characters', async () => {
+    const harness = kiraHarness();
+    const result = await harness.run(declareSpell, { spell: 'a'.repeat(201), slotLevel: 0 });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+});

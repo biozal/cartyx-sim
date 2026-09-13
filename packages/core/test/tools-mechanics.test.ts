@@ -422,6 +422,61 @@ describe('damage, healing, conditions, and items', () => {
   });
 });
 
+describe('argument length limits', () => {
+  it('rejects an attacker or target id over 200 characters', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(attack, {
+      attackerId: 'a'.repeat(201),
+      targetId: 'tomas',
+      attackName: 'Longsword',
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('rejects an attack name over 200 characters', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(attack, {
+      attackerId: 'tomas',
+      targetId: 'kira',
+      attackName: 'a'.repeat(201),
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('rejects a spell name over 200 characters', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(castSpell, {
+      casterId: 'kira',
+      spell: 'a'.repeat(201),
+      slotLevel: 0,
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('rejects a reason over 2000 characters', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(requestCheck, {
+      combatantId: 'kira',
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'a'.repeat(2001),
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('rejects an item name over 200 characters', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(giveItem, { targetId: 'tomas', item: 'a'.repeat(201) });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+});
+
 describe('start_combat and end_combat', () => {
   const sentries = {
     monsters: [

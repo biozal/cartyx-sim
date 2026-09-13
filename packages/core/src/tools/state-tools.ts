@@ -61,10 +61,10 @@ export const applyDamageTool = defineTool({
   description:
     'Apply damage that did not come from attack or cast_spell (traps, falls, hazards). Give a flat amount or dice.',
   parameters: z.object({
-    targetId: z.string().min(1),
+    targetId: z.string().min(1).max(200),
     ...AmountArgs,
     damageType: z.string().trim().min(1),
-    reason: z.string().trim().min(1),
+    reason: z.string().trim().min(1).max(2000),
   }),
   run(args, { recorder, rng }) {
     const target = getCombatant(recorder.state, args.targetId);
@@ -83,9 +83,9 @@ export const healTool = defineTool({
   description:
     'Restore hit points that did not come from cast_spell (potions, rests). Give a flat amount or dice.',
   parameters: z.object({
-    targetId: z.string().min(1),
+    targetId: z.string().min(1).max(200),
     ...AmountArgs,
-    reason: z.string().trim().min(1),
+    reason: z.string().trim().min(1).max(2000),
   }),
   run(args, { recorder, rng }) {
     const target = getCombatant(recorder.state, args.targetId);
@@ -103,9 +103,9 @@ export const addConditionTool = defineTool({
   name: 'add_condition',
   description: 'Give a combatant a 5e condition such as poisoned, prone, or frightened.',
   parameters: z.object({
-    targetId: z.string().min(1),
+    targetId: z.string().min(1).max(200),
     condition: Condition,
-    reason: z.string().trim().min(1),
+    reason: z.string().trim().min(1).max(2000),
   }),
   run(args, { recorder }) {
     const target = getCombatant(recorder.state, args.targetId);
@@ -118,9 +118,9 @@ export const removeConditionTool = defineTool({
   name: 'remove_condition',
   description: 'Remove a condition from a combatant.',
   parameters: z.object({
-    targetId: z.string().min(1),
+    targetId: z.string().min(1).max(200),
     condition: Condition,
-    reason: z.string().trim().min(1),
+    reason: z.string().trim().min(1).max(2000),
   }),
   run(args, { recorder }) {
     const target = getCombatant(recorder.state, args.targetId);
@@ -136,8 +136,8 @@ export const giveItem = defineTool({
   name: 'give_item',
   description: "Add an item to a combatant's inventory.",
   parameters: z.object({
-    targetId: z.string().min(1),
-    item: z.string().trim().min(1),
+    targetId: z.string().min(1).max(200),
+    item: z.string().trim().min(1).max(200),
     quantity: z.number().int().min(1).default(1),
   }),
   run(args, { recorder }) {
@@ -151,8 +151,8 @@ export const removeItemTool = defineTool({
   name: 'remove_item',
   description: "Remove an item from a combatant's inventory (used, lost, or handed over).",
   parameters: z.object({
-    targetId: z.string().min(1),
-    item: z.string().trim().min(1),
+    targetId: z.string().min(1).max(200),
+    item: z.string().trim().min(1).max(200),
     quantity: z.number().int().min(1).default(1),
   }),
   run(args, { recorder }) {

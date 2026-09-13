@@ -40,6 +40,14 @@ describe('narrate', () => {
     expect(harness.recorder.events).toHaveLength(0);
   });
 
+  it('rejects text over 4000 characters, emitting nothing', async () => {
+    const harness = toolHarness();
+    expect(await harness.run(narrate, { text: 'a'.repeat(4000) })).toMatchObject({ ok: true });
+    const result = await harness.run(narrate, { text: 'a'.repeat(4001) });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(1);
+  });
+
   it('publishes a JSON schema where defaulted fields are optional', () => {
     expect(toToolSchema(narrate).parameters).toMatchObject({ required: ['text'] });
   });
@@ -154,6 +162,73 @@ describe('id lookups reject built-in property names', () => {
       ok: true,
       outcome: { result: 'Introduced Constructor with npcId "constructor".' },
     });
+  });
+});
+
+describe('argument length limits', () => {
+  it('rejects an npc name over 200 characters', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(introduceNpc, {
+      name: 'a'.repeat(201),
+      description: 'x',
+      invented: true,
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('rejects an npc description over 2000 characters', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(introduceNpc, {
+      name: 'Golem',
+      description: 'a'.repeat(2001),
+      invented: true,
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('rejects npc_say text over 4000 characters', async () => {
+    const harness = toolHarness();
+    await harness.run(introduceNpc, { name: 'Golem', description: 'x', invented: true });
+    const result = await harness.run(npcSay, { npcId: 'golem', text: 'a'.repeat(4001) });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(1);
+  });
+
+  it('rejects a scene location over 200 characters', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(sceneChange, { location: 'a'.repeat(201), artPrompt: 'x' });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('rejects an art prompt over 2000 characters', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(sceneChange, {
+      location: 'Lab',
+      artPrompt: 'a'.repeat(2001),
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('rejects a lore query over 200 characters', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(lookupLore, { query: 'a'.repeat(201) });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('rejects an invented fact or reason over 2000 characters', async () => {
+    const harness = toolHarness();
+    expect(
+      await harness.run(recordInvention, { fact: 'a'.repeat(2001), reason: 'x' })
+    ).toMatchObject({ ok: false });
+    expect(
+      await harness.run(recordInvention, { fact: 'x', reason: 'a'.repeat(2001) })
+    ).toMatchObject({ ok: false });
+    expect(harness.recorder.events).toHaveLength(0);
   });
 });
 

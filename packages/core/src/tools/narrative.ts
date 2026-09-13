@@ -10,7 +10,10 @@ export const narrate = defineTool({
   name: 'narrate',
   description:
     'Speak as the Dungeon Master: describe scenes, events, and outcomes. Never decide what player characters do, say, or feel.',
-  parameters: z.object({ text: z.string().trim().min(1), emotion: Emotion.default('neutral') }),
+  parameters: z.object({
+    text: z.string().trim().min(1).max(4000),
+    emotion: Emotion.default('neutral'),
+  }),
   narrativeText: (args) => args.text,
   run(args, { recorder }) {
     recorder.emit({ type: 'narration', speaker: 'dm', text: args.text, emotion: args.emotion });
@@ -23,10 +26,10 @@ export const introduceNpc = defineTool({
   description:
     'Introduce a non-player character before they speak. Set loreEntityId when the NPC comes from the lore; set invented to true if you made them up.',
   parameters: z.object({
-    name: z.string().trim().min(1),
-    description: z.string().trim().min(1),
+    name: z.string().trim().min(1).max(200),
+    description: z.string().trim().min(1).max(2000),
     invented: z.boolean(),
-    loreEntityId: z.string().min(1).optional(),
+    loreEntityId: z.string().min(1).max(200).optional(),
   }),
   run(args, { recorder }) {
     const npcId = slugify(args.name);
@@ -50,8 +53,8 @@ export const npcSay = defineTool({
   name: 'npc_say',
   description: 'Speak a line of dialogue as an introduced NPC, using their npcId.',
   parameters: z.object({
-    npcId: z.string().trim().min(1),
-    text: z.string().trim().min(1),
+    npcId: z.string().trim().min(1).max(200),
+    text: z.string().trim().min(1).max(4000),
     emotion: Emotion.default('neutral'),
   }),
   narrativeText: (args) => args.text,
@@ -79,9 +82,9 @@ export const sceneChange = defineTool({
   description:
     'Move the story to a new location or scene. artPrompt describes the scene for an illustrator.',
   parameters: z.object({
-    location: z.string().trim().min(1),
-    artPrompt: z.string().trim().min(1),
-    loreEntityId: z.string().min(1).optional(),
+    location: z.string().trim().min(1).max(200),
+    artPrompt: z.string().trim().min(1).max(2000),
+    loreEntityId: z.string().min(1).max(200).optional(),
   }),
   run(args, { recorder }) {
     recorder.emit({ type: 'scene_change', ...args });
@@ -93,7 +96,7 @@ export const lookupLore = defineTool({
   name: 'lookup_lore',
   description:
     'Search the Cartyx world lore (people, places, factions, history). Look details up before inventing them.',
-  parameters: z.object({ query: z.string().trim().min(3) }),
+  parameters: z.object({ query: z.string().trim().min(3).max(200) }),
   async run(args, { recorder, lore, loreThreshold }) {
     const hits = await lore.search(args.query, LORE_RESULT_LIMIT);
     const used = hits.filter((hit) => hit.score >= loreThreshold);
@@ -123,9 +126,9 @@ export const recordInvention = defineTool({
   description:
     'Record a fact you invented because the lore did not cover it, so the author can review it later.',
   parameters: z.object({
-    fact: z.string().trim().min(1),
-    reason: z.string().trim().min(1),
-    query: z.string().trim().min(1).optional(),
+    fact: z.string().trim().min(1).max(2000),
+    reason: z.string().trim().min(1).max(2000),
+    query: z.string().trim().min(1).max(200).optional(),
   }),
   run(args, { recorder }) {
     recorder.emit({ type: 'lore_invention', visibility: 'dm', ...args });

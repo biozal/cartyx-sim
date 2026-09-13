@@ -11,8 +11,11 @@ export interface Violation {
 const CONTROL_VERBS =
   'decides?|chooses?|agrees?|attacks?|casts?|says?|shouts?|grabs?|runs?|draws?|shoots?|moves?|nods?|follows?|refuses?';
 
+// The hp/hit-points branch bounds its gap to the digit (excluding periods and digits from it,
+// and capping its width) so a long run of text with neither never forces linear backtracking at
+// every "hp" occurrence — unbounded `[^.]*\d` is quadratic on adversarial input with no digit.
 const MECHANICS =
-  /\b\d+\s+(?:points?\s+of\s+)?(?:\w+\s+)?damage\b|\b(?:takes?|deals?|loses?|heals?|regains?)\s+\d+\b|\brolls?\s+(?:a\s+)?\d+\b|\b(?:hp|hit points)\b[^.]*\d/i;
+  /\b\d+\s+(?:points?\s+of\s+)?(?:\w+\s+)?damage\b|\b(?:takes?|deals?|loses?|heals?|regains?)\s+\d+\b|\brolls?\s+(?:a\s+)?\d+\b|\b(?:hp|hit points)\b[^.\d]{0,30}\d/i;
 
 const OUTCOME =
   /\b(?:successfully|succeeds?|it works|falls? dead|is (?:dead|defeated|convinced)|natural (?:20|1)|rolls? (?:a )?\d+|(?:i|we) (?:hit|kill|defeat|convince|persuade|succeed))\b/i;

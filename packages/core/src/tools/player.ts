@@ -9,7 +9,10 @@ export const INTERJECTION_MAX_WORDS = 12;
 export const speak = defineTool({
   name: 'speak',
   description: 'Say something out loud, in character, as your own character.',
-  parameters: z.object({ text: z.string().trim().min(1), emotion: Emotion.default('neutral') }),
+  parameters: z.object({
+    text: z.string().trim().min(1).max(4000),
+    emotion: Emotion.default('neutral'),
+  }),
   narrativeText: (args) => args.text,
   run(args, { recorder, actorId }) {
     recorder.emit({
@@ -28,8 +31,8 @@ export const act = defineTool({
   description:
     'Declare what your character attempts. Describe the attempt only; the DM decides what happens.',
   parameters: z.object({
-    intent: z.string().trim().min(1),
-    targetId: z.string().min(1).optional(),
+    intent: z.string().trim().min(1).max(2000),
+    targetId: z.string().min(1).max(200).optional(),
   }),
   narrativeText: (args) => args.intent,
   run(args, { recorder, actorId }) {
@@ -71,9 +74,9 @@ export const declareSpell = defineTool({
   description:
     'Declare that you cast a spell (slotLevel 0 for cantrips) at optional targets. The DM resolves the effect.',
   parameters: z.object({
-    spell: z.string().trim().min(1),
+    spell: z.string().trim().min(1).max(200),
     slotLevel: z.number().int().min(0).max(9),
-    targetIds: z.array(z.string().min(1)).default([]),
+    targetIds: z.array(z.string().min(1).max(200)).default([]),
   }),
   run(args, { recorder, actorId }) {
     const caster = getCombatant(recorder.state, actorId);

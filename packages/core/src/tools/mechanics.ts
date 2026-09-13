@@ -110,12 +110,12 @@ export const requestCheck = defineTool({
   description:
     'Roll an ability check, skill check, or saving throw for a combatant against a DC. The engine rolls; narrate the result afterwards.',
   parameters: z.object({
-    combatantId: z.string().min(1),
+    combatantId: z.string().min(1).max(200),
     checkType: z.enum(['skill', 'ability', 'save']),
     skill: Skill.optional(),
     ability: Ability.optional(),
     dc: z.number().int().min(1).max(40),
-    reason: z.string().trim().min(1),
+    reason: z.string().trim().min(1).max(2000),
     mode: RollModeArg,
   }),
   run(args, { recorder, rng }) {
@@ -144,9 +144,9 @@ export const attack = defineTool({
   description:
     "Make a weapon or natural attack using one of the attacker's listed attacks. Rolls to hit and applies damage.",
   parameters: z.object({
-    attackerId: z.string().min(1),
-    targetId: z.string().min(1),
-    attackName: z.string().trim().min(1),
+    attackerId: z.string().min(1).max(200),
+    targetId: z.string().min(1).max(200),
+    attackName: z.string().trim().min(1).max(200),
     mode: RollModeArg,
   }),
   run(args, { recorder, rng }) {
@@ -174,10 +174,10 @@ export const castSpell = defineTool({
   description:
     'Resolve a spell. Spends a slot (slotLevel 0 for cantrips) and applies at most one effect: a spell attack, a saving throw, or healing.',
   parameters: z.object({
-    casterId: z.string().min(1),
-    spell: z.string().trim().min(1),
+    casterId: z.string().min(1).max(200),
+    spell: z.string().trim().min(1).max(200),
     slotLevel: z.number().int().min(0).max(9),
-    targetIds: z.array(z.string().min(1)).default([]),
+    targetIds: z.array(z.string().min(1).max(200)).default([]),
     attack: z
       .object({
         bonus: z.number().int(),
