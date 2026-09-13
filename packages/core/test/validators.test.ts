@@ -169,4 +169,44 @@ describe('validatePlayerText', () => {
       expect(validatePlayerText(text, { otherPcNames })?.rule).toBe('player_narrates_outcome');
     });
   });
+
+  describe('F1: questions and opinions are not outcome claims', () => {
+    it.each([
+      'Who killed the professor?',
+      'I am convinced this is a trap.',
+      'Has anyone persuaded the dean yet?',
+      'Do you know how it works?',
+    ])('accepts: "%s"', (text) => {
+      expect(validatePlayerText(text, { otherPcNames })).toBeNull();
+    });
+
+    it.each([
+      'I killed the orc.',
+      'I convinced the guard.',
+      'I successfully pick the lock.',
+      'The goblin falls dead.',
+      'I roll a 20!',
+    ])('still flags: "%s"', (text) => {
+      expect(validatePlayerText(text, { otherPcNames })?.rule).toBe('player_narrates_outcome');
+    });
+
+    it.each(['I roll a 20! Did it work?', 'Who killed him? I killed the orc.'])(
+      'flags a claim in a non-question sentence next to a question: "%s"',
+      (text) => {
+        expect(validatePlayerText(text, { otherPcNames })?.rule).toBe('player_narrates_outcome');
+      }
+    );
+
+    it.each([
+      'we killed '.repeat(20_000),
+      'I am '.repeat(40_000),
+      'it works '.repeat(22_223),
+      '?'.repeat(200_000),
+      ' '.repeat(200_000),
+    ])('stays fast on 200,000 characters of adversarial input (case %#)', (text) => {
+      const start = performance.now();
+      validatePlayerText(text.slice(0, 200_000), { otherPcNames });
+      expect(performance.now() - start).toBeLessThan(100);
+    });
+  });
 });

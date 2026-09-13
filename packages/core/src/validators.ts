@@ -22,11 +22,40 @@ const CONTROL_VERBS =
 const MECHANICS =
   /\b\d+\s+(?:points?\s+of\s+)?(?:\w+\s+)?damage\b|\b(?:heals?|regains?)\s+\d+\b|\b(?:takes?|deals?|loses?)\s+\d+\s+(?:\S+\s+){0,3}(?:damage|hp|hit points?)\b|\brolls?\s+(?:a\s+)?\d+\b|\b(?:hp|hit points)\b[^.\d]{0,30}\d/i;
 
-// Only completed-outcome phrasing: past-tense results, not present-tense declarations, questions,
-// or attempts ("I hit the orc" and "I try to convince" are declarations; "I killed the orc" and
-// "I convinced the guard" claim a result the DM has not decided).
-const OUTCOME =
-  /\b(?:successfully|it works|falls? dead|is (?:dead|defeated|convinced)|natural (?:20|1)|rolls?(?:ed)?\s+(?:a\s+)?\d+|killed|defeated|convinced|persuaded|succeeded)\b/i;
+const COMPLETED_VERBS = 'killed|defeated|convinced|persuaded|succeeded';
+
+// A word between "I/we" and a completed verb that makes it a state, an opinion, or a denial
+// ("I am convinced this is a trap", "we were defeated", "I never killed anyone") rather than a
+// claim that the player's own action worked.
+const NOT_A_CLAIM = 'am|are|was|were|be|been|being|feel|felt|seem|seemed|remain|remained|not|never';
+
+// Only completed-outcome claims: first-person results ("I killed the orc", "we finally
+// persuaded him"), explicit result shapes ("the guard is convinced", "falls dead",
+// "successfully", "natural 20", "roll a 20"), and "it works" as a statement about the player's
+// own action. Present-tense declarations ("I hit the orc"), attempts, and bare verbs in
+// someone else's clause ("Who killed the professor?") are not claims. Tested per sentence;
+// questions are skipped before this runs.
+const OUTCOME = new RegExp(
+  '\\b(?:successfully|falls? dead|(?:is|are) (?:dead|defeated|convinced)|natural (?:20|1)|rolls?(?:ed)?\\s+(?:a\\s+)?\\d+)\\b' +
+    `|\\b(?:I|we)\\s+(?:(?!(?:${NOT_A_CLAIM})\\b)[a-z'’]+\\s+)?(?:${COMPLETED_VERBS})\\b` +
+    '|^(?:(?:and|so|then)\\s+)?it works\\b|\\b(?:and|so) it works\\b',
+  'i'
+);
+
+/** A sentence ending in "?" (optionally followed by closing quotes or brackets). */
+const QUESTION = /\?["'”’)\]]*$/;
+
+/** Splits text after sentence-ending punctuation. Linear: the lookbehind checks one character. */
+function sentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence !== '');
+}
+
+function claimsOutcome(text: string): boolean {
+  return sentences(text).some((sentence) => !QUESTION.test(sentence) && OUTCOME.test(sentence));
+}
 
 /**
  * Checks whether `name` controls a PC in `text`: an action verb right after the name (with up to
@@ -91,7 +120,7 @@ export function validatePlayerText(
       message: `Only play your own character; do not decide what ${other} does.`,
     };
   }
-  if (OUTCOME.test(text)) {
+  if (claimsOutcome(text)) {
     return {
       rule: 'player_narrates_outcome',
       message: 'Declare what you attempt, not the result. The DM decides what happens.',
