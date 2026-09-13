@@ -326,6 +326,44 @@ describe('cast_spell', () => {
     expect(harness.recorder.events).toHaveLength(0);
   });
 
+  it('G3.3: skips a ray whose target already died to an earlier ray in the same cast', async () => {
+    // ray 1: d20 20 (crit, always hits) + flat 10 damage kills the 7-HP goblin.
+    const harness = withGoblin([20, 10]);
+    const cast = await harness.run(castSpell, {
+      casterId: 'kira',
+      spell: 'Scorching Ray',
+      slotLevel: 0,
+      targetIds: ['goblin-1', 'goblin-1', 'goblin-1'],
+      attack: { bonus: 5, damage: '10', damageType: 'fire' },
+    });
+    expect(cast).toMatchObject({ ok: true });
+    expect((cast as { outcome: { result: string } }).outcome.result).toContain(
+      'ray 2 has no target: Goblin is down'
+    );
+    expect((cast as { outcome: { result: string } }).outcome.result).toContain(
+      'ray 3 has no target: Goblin is down'
+    );
+    const stateChanges = harness.recorder.events.filter((e) => e.type === 'state_change');
+    expect(stateChanges).toHaveLength(2);
+    expect(stateChanges[0]).toMatchObject({ field: 'hp', before: 7, after: 0 });
+    expect(stateChanges[1]).toMatchObject({ field: 'dead', before: false, after: true });
+  });
+
+  it('G3.3: de-duplicates repeated targetIds for a save spell so only one save and one damage apply', async () => {
+    const harness = withGoblin([10]);
+    await harness.run(castSpell, {
+      casterId: 'kira',
+      spell: 'Thunderwave',
+      slotLevel: 1,
+      targetIds: ['goblin-1', 'goblin-1'],
+      save: { ability: 'con', dc: 13, damage: '10', damageType: 'thunder', halfOnSuccess: true },
+    });
+    const saveRolls = harness.recorder.events.filter((e) => e.type === 'roll' && e.kind === 'save');
+    expect(saveRolls).toHaveLength(1);
+    // Fails the save (roll 10 + no bonus < DC 13): takes the full 10 damage, once.
+    expect(harness.recorder.state.combatants['goblin-1']?.hp).toBe(0);
+  });
+
   it('allows only one effect per cast', async () => {
     const harness = withGoblin([]);
     const result = await harness.run(castSpell, {

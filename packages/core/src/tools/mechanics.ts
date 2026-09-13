@@ -201,6 +201,12 @@ export const castSpell = defineTool({
     const { state } = recorder;
     const caster = getCombatant(state, args.casterId);
     const targets = args.targetIds.map((id) => getCombatant(state, id));
+    // Save and healing effects hit each target once, regardless of duplicate ids; a repeated
+    // attack (e.g. Scorching Ray) is a separate ray per id.
+    const seenIds = new Set<string>();
+    const uniqueTargets = targets.filter((target) =>
+      seenIds.has(target.id) ? false : (seenIds.add(target.id), true)
+    );
     const effects = [args.attack, args.save, args.healing].filter((effect) => effect !== undefined);
     if (effects.length > 1) {
       throw new ToolError('Use only one of attack, save, or healing in a single cast_spell call.');
@@ -224,14 +230,21 @@ export const castSpell = defineTool({
 
     if (args.attack) {
       const spellAttack: Attack = { name: args.spell, ...args.attack };
-      for (const target of targets) {
-        const result = rollAttack(spellAttack, current(target), rng, args.mode);
+      targets.forEach((target, index) => {
+        const before = current(target);
+        // A ray whose target already died to an earlier ray in this same cast is skipped
+        // instead of throwing; a target dead before the cast started was already rejected above.
+        if (before.dead) {
+          summaries.push(`ray ${index + 1} has no target: ${target.name} is down`);
+          return;
+        }
+        const result = rollAttack(spellAttack, before, rng, args.mode);
         rolls.push(...attackRollEvents(caster.id, `${label} → ${target.name}`, result));
         updated.set(target.id, result.target);
         const verb = result.critical ? 'critically hits' : result.hit ? 'hits' : 'misses';
         const damage = result.damage ? ` for ${result.damage.total} ${spellAttack.damageType}` : '';
         summaries.push(`${verb} ${target.name}${damage}`);
-      }
+      });
     }
     if (args.save) {
       const save = args.save;
@@ -248,7 +261,7 @@ export const castSpell = defineTool({
           total: damage.total,
         });
       }
-      for (const target of targets) {
+      for (const target of uniqueTargets) {
         const check = resolveCheck(
           current(target),
           { type: 'save', ability: save.ability },
@@ -281,7 +294,7 @@ export const castSpell = defineTool({
         modifier: healing.modifier,
         total: healing.total,
       });
-      for (const target of targets) {
+      for (const target of uniqueTargets) {
         updated.set(target.id, applyHealing(current(target), healing.total));
         summaries.push(`${target.name} regains ${healing.total} HP`);
       }
