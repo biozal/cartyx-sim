@@ -1,8 +1,10 @@
 import type { Combatant, Rng } from '@cartyx-sim/rules';
 import { clockInstruction, clockPhase } from './clock';
+import { SessionPausedError } from './errors';
 import type { SimEvent } from './events';
 import type {
   ChatMessage,
+  LoreHit,
   LoreIndex,
   ModelClient,
   ModelResponse,
@@ -66,16 +68,6 @@ export type RunResult =
   | { status: 'ended' | 'turn_limit'; state: GameState }
   | { status: 'paused'; state: GameState; seat: string; error: string };
 
-export class SessionPausedError extends Error {
-  constructor(
-    readonly seat: string,
-    readonly reason: string
-  ) {
-    super(`Seat "${seat}" failed: ${reason}`);
-    this.name = 'SessionPausedError';
-  }
-}
-
 const DM_TOOL_SCHEMAS: ToolSchema[] = DM_TOOLS.map(toToolSchema);
 const PLAYER_TOOL_SCHEMAS: ToolSchema[] = PLAYER_TOOLS.map(toToolSchema);
 
@@ -123,6 +115,12 @@ export class Director {
 
   /** Loads any existing events from the sink and resumes from them. */
   static async create(config: DirectorConfig, deps: DirectorDeps): Promise<Director> {
+    if (!config.seats.dm) throw new Error('No DM seat configured.');
+    for (const pc of config.party) {
+      if (!config.seats.players[pc.id]) {
+        throw new Error(`No player seat configured for "${pc.id}".`);
+      }
+    }
     const prior = await deps.sink.readAll();
     const director = new Director(config, deps, prior);
     const { state } = director;
@@ -471,10 +469,28 @@ export class Director {
       recorder,
       history: this.history,
       rng: this.deps.rng,
-      lore: this.deps.lore,
+      lore: { search: (query, limit) => this.searchLore(query, limit) },
       loreThreshold: this.loreThreshold,
       actorId,
     };
+  }
+
+  /** Retries a lore search on the same schedule as model calls, then pauses seat "lore". */
+  private async searchLore(query: string, limit: number): Promise<LoreHit[]> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.deps.lore.search(query, limit);
+      } catch (error) {
+        const delay = this.retryDelaysMs[attempt];
+        if (delay === undefined) {
+          throw new SessionPausedError(
+            'lore',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+        await this.sleep(delay);
+      }
+    }
   }
 
   private newRecorder(): TurnRecorder {

@@ -1,5 +1,6 @@
 import { RulesError, type Combatant, type Rng } from '@cartyx-sim/rules';
 import { z } from 'zod';
+import { SessionPausedError } from '../errors';
 import type { SimEvent } from '../events';
 import type { LoreIndex, ToolCall, ToolSchema } from '../model';
 import type { TurnRecorder } from '../recorder';
@@ -96,7 +97,12 @@ export async function runPreparedCall(
       context.recorder.rollback(checkpoint);
       return { ok: false, error: `Invalid resulting state: ${z.prettifyError(error)}` };
     }
-    throw error;
+    if (error instanceof SessionPausedError) throw error;
+    context.recorder.rollback(checkpoint);
+    throw new SessionPausedError(
+      context.actorId,
+      error instanceof Error ? error.message : String(error)
+    );
   }
 }
 

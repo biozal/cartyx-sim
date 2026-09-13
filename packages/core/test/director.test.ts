@@ -2,6 +2,7 @@ import { scriptedRng } from '@cartyx-sim/rules';
 import { describe, expect, it } from 'vitest';
 import { Director, type DirectorConfig, type DirectorDeps } from '../src/director';
 import type { SimEvent } from '../src/events';
+import type { LoreHit, LoreIndex } from '../src/model';
 import { basicPrompts } from '../src/prompts';
 import { MemorySink } from '../src/sink';
 import { foldEvents } from '../src/state';
@@ -403,6 +404,81 @@ describe('Director', () => {
     await expect(director.step()).resolves.toBe('continue');
     expect(sink.events.some((e) => e.type === 'state_change')).toBe(false);
     expect(model.remaining('dm')).toBe(0);
+  });
+
+  it('refuses to start without a DM seat or a seat for every party member', async () => {
+    const { deps: built } = deps({});
+    await expect(
+      Director.create(
+        config({ seats: { dm: '', players: { kira: 'player-kira', tomas: 'player-tomas' } } }),
+        built
+      )
+    ).rejects.toThrow('No DM seat configured');
+    await expect(
+      Director.create(config({ seats: { dm: 'dm', players: { kira: 'player-kira' } } }), built)
+    ).rejects.toThrow('No player seat configured for "tomas"');
+  });
+
+  it('pauses on seat "lore" when the lore index keeps failing, leaving no partial lookup', async () => {
+    const sink = new MemorySink();
+    const sleeps: number[] = [];
+    const lore: LoreIndex = {
+      search: async () => {
+        throw new Error('ECONNREFUSED');
+      },
+    };
+    const { deps: built } = deps(
+      { dm: [respond(toolCall('lookup_lore', { query: 'Sella Vaunt' }))] },
+      { sink, sleep: async (ms) => void sleeps.push(ms) }
+    );
+    const director = await Director.create(config({ retryDelaysMs: [5] }), { ...built, lore });
+
+    const result = await director.run();
+
+    expect(result).toMatchObject({ status: 'paused', seat: 'lore', error: 'ECONNREFUSED' });
+    expect(sleeps).toEqual([5]);
+    expect(sink.events.map((e) => e.type)).toEqual(['session_start', 'ooc_note']);
+    expect(sink.events.at(-1)).toMatchObject({
+      type: 'ooc_note',
+      visibility: 'dm',
+      text: expect.stringContaining('ECONNREFUSED'),
+    });
+  });
+
+  it('retries a failing lore search on the model retry schedule before succeeding', async () => {
+    const sink = new MemorySink();
+    const sleeps: number[] = [];
+    let calls = 0;
+    const lore: LoreIndex = {
+      async search(): Promise<LoreHit[]> {
+        calls++;
+        if (calls === 1) throw new Error('ECONNREFUSED');
+        return [];
+      },
+    };
+    const { deps: built } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('lookup_lore', { query: 'Sella Vaunt' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      { sink, sleep: async (ms) => void sleeps.push(ms) }
+    );
+    const director = await Director.create(config({ retryDelaysMs: [5] }), { ...built, lore });
+
+    await director.step();
+    await director.step();
+
+    expect(sleeps).toEqual([5]);
+    expect(sink.events.map((e) => e.type)).toEqual([
+      'session_start',
+      'lore_lookup',
+      'hand_off',
+      'turn_end',
+    ]);
   });
 
   it('refuses to resume a finished session or a different session number', async () => {

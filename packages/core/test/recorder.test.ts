@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { SessionPausedError } from '../src/errors';
 import { TurnRecorder } from '../src/recorder';
 import { MemorySink } from '../src/sink';
 import { defineTool, ToolError } from '../src/tools/types';
@@ -99,6 +100,38 @@ describe('atomic tool execution', () => {
     expect(result.ok).toBe(false);
     expect(harness.recorder.events).toHaveLength(0);
     expect(harness.recorder.state.scene).toBeNull();
+  });
+
+  it('rolls back and pauses resumably when a tool throws an unexpected error', async () => {
+    const harness = toolHarness();
+    const explodes = defineTool({
+      name: 'explodes',
+      description: 'test tool that emits then throws an error nobody expects',
+      parameters: z.object({}),
+      run(_args, { recorder }) {
+        recorder.emit({ type: 'scene_change', location: 'Nowhere', artPrompt: 'x' });
+        throw new Error('ECONNREFUSED');
+      },
+    });
+    await expect(harness.run(explodes, {})).rejects.toThrow(SessionPausedError);
+    expect(harness.recorder.events).toHaveLength(0);
+    expect(harness.recorder.state.scene).toBeNull();
+  });
+
+  it('lets a SessionPausedError propagate unchanged, without rolling back', async () => {
+    const harness = toolHarness();
+    const pauses = defineTool({
+      name: 'pauses',
+      description: 'test tool that throws SessionPausedError directly',
+      parameters: z.object({}),
+      run() {
+        throw new SessionPausedError('lore', 'ECONNREFUSED');
+      },
+    });
+    await expect(harness.run(pauses, {})).rejects.toMatchObject({
+      seat: 'lore',
+      reason: 'ECONNREFUSED',
+    });
   });
 });
 

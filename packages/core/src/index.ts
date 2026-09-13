@@ -1,5 +1,6 @@
 export * from './clock';
 export * from './director';
+export * from './errors';
 export * from './events';
 export * from './model';
 export * from './prompts';
