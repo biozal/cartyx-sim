@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- `packages/core` and `packages/rules` must not import `node:*` modules or do network or filesystem I/O; `npm run typecheck` enforces this after Task 1. `packages/models` and `apps/cli` may do I/O.
+- `packages/core` and `packages/rules` must not import `node:*` modules; `npm run typecheck` enforces that after Task 1 (a Node-free `lib`, no `@types/node`). It does not and cannot enforce "no network I/O": the `DOM` lib still typechecks `fetch`. Network or filesystem I/O in `core`/`rules` is prohibited by convention and review, not by a lint rule. `packages/models` and `apps/cli` may do I/O.
 - The event log is the single source of truth: `foldEvents(log)` must equal live state; a rejected or failed tool call leaves no events; older logs must still parse (new event fields are optional or defaulted).
 - Every lookup keyed by a model- or event-supplied id uses `ownEntry`.
 - Infrastructure failures (model endpoints, lore) retry with the director's delays, then pause resumably with an `ooc_note`; they never crash `Director.run`.
