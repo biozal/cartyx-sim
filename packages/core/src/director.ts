@@ -1,7 +1,7 @@
 import type { Combatant, Rng } from '@cartyx-sim/rules';
 import { clockInstruction, clockPhase } from './clock';
 import { SessionPausedError } from './errors';
-import type { SimEvent } from './events';
+import { EVENT_SCHEMA_VERSION, type SimEvent } from './events';
 import {
   ModelResponse,
   type ChatMessage,
@@ -30,6 +30,7 @@ import {
 } from './tools/types';
 import { renderTranscript, type Audience } from './transcript';
 import { validateDmText, validatePlayerText } from './validators';
+import { playerView } from './view';
 
 export interface DirectorConfig {
   session: number;
@@ -250,6 +251,7 @@ export class Director {
     const recorder = this.newRecorder();
     recorder.emit({
       type: 'session_start',
+      schemaVersion: EVENT_SCHEMA_VERSION,
       session: this.config.session,
       loreCommit: this.config.loreCommit,
       targetMinutes: this.config.targetMinutes,
@@ -282,7 +284,7 @@ export class Director {
     let ended = false;
 
     for (let step = 0; step < this.maxDmStepsPerBeat && !ended; step++) {
-      const response = await this.callModel(seat, messages, DM_TOOL_SCHEMAS);
+      const response = await this.callModel(seat, recorder.turnId, messages, DM_TOOL_SCHEMAS);
       const calls = callsFromResponse(response, 'narrate', `auto-narrate-${step}`);
       messages.push({
         role: 'assistant',
@@ -402,8 +404,7 @@ export class Director {
         ? 'It is your turn in combat. Declare your action with act or declare_spell, and optionally speak.'
         : 'The DM has turned to you. Respond in character: speak, act, or pass.';
     const messages = this.deps.prompts.player({
-      pc,
-      state: this.state,
+      view: playerView(this.state, pcId),
       transcript: this.transcript('player'),
       instruction,
     });
@@ -413,7 +414,7 @@ export class Director {
     const context = this.toolContext(recorder, pcId, seat);
 
     for (let attempt = 0; ; attempt++) {
-      const response = await this.callModel(seat, messages, PLAYER_TOOL_SCHEMAS);
+      const response = await this.callModel(seat, recorder.turnId, messages, PLAYER_TOOL_SCHEMAS);
       const calls = callsFromResponse(response, 'speak', `auto-speak-${attempt}`);
       messages.push({
         role: 'assistant',
@@ -538,12 +539,15 @@ export class Director {
   /** Calls the model and validates its response; a malformed response is a failed attempt. */
   private callModel(
     seat: string,
+    turnId: string,
     messages: ChatMessage[],
     tools: ToolSchema[]
   ): Promise<ModelResponse> {
     return this.withRetries(seat, async () => {
       const parsed = ModelResponse.safeParse(
-        await this.deps.model.complete({ seat, messages, tools })
+        // Every turn must end in a tool call (hand_off, speak, act, pass...), so require one;
+        // a seat's client config may relax this for servers that do not support it.
+        await this.deps.model.complete({ seat, turnId, messages, tools, toolChoice: 'required' })
       );
       if (!parsed.success) {
         const issues = parsed.error.issues.map(

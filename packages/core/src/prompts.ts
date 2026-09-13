@@ -1,6 +1,7 @@
 import type { Combatant } from '@cartyx-sim/rules';
 import type { ChatMessage } from './model';
 import type { GameState } from './state';
+import type { PlayerView } from './view';
 
 export interface PromptInput {
   state: GameState;
@@ -8,10 +9,17 @@ export interface PromptInput {
   instruction: string;
 }
 
-/** Builds the messages for each seat. Plan 2 replaces `basicPrompts` with lore- and persona-rich prompts. */
+export interface PlayerPromptInput {
+  /** A player-safe view of the game: no monster or NPC stat blocks. */
+  view: PlayerView;
+  transcript: string;
+  instruction: string;
+}
+
+/** Builds the messages for each seat. Plan 2C replaces `basicPrompts` with lore- and persona-rich prompts. */
 export interface PromptBuilder {
   dm(input: PromptInput): ChatMessage[];
-  player(input: PromptInput & { pc: Combatant }): ChatMessage[];
+  player(input: PlayerPromptInput): ChatMessage[];
 }
 
 const DM_SYSTEM = [
@@ -53,12 +61,18 @@ export const basicPrompts: PromptBuilder = {
       },
     ];
   },
-  player({ pc, transcript, instruction }) {
+  player({ view, transcript, instruction }) {
+    const allies = view.allies.map((ally) => {
+      const health = ally.dead ? 'DEAD' : `HP ${ally.hp}/${ally.maxHp}`;
+      const conditions = ally.conditions.length > 0 ? `, ${ally.conditions.join(', ')}` : '';
+      return `- ${ally.name} (id: ${ally.id}) ${health}${conditions}`;
+    });
+    const others = view.others.map((other) => `- ${other.name} (id: ${other.id}): ${other.status}`);
     return [
       {
         role: 'system',
         content: [
-          `You are playing ${pc.name} (id: ${pc.id}) in a Dungeons & Dragons 5e session.`,
+          `You are playing ${view.pc.name} (id: ${view.pc.id}) in a Dungeons & Dragons 5e session.`,
           'Stay in character. Use speak for dialogue and act to declare what you attempt; use pass if your character does nothing.',
           'Only ever control your own character, and never describe the outcome of your actions: the DM decides what happens.',
         ].join('\n'),
@@ -66,7 +80,10 @@ export const basicPrompts: PromptBuilder = {
       {
         role: 'user',
         content: [
-          `Your character:\n${describeCombatant(pc)}`,
+          `Your character:\n${describeCombatant(view.pc)}`,
+          `Party:\n${allies.join('\n') || '- just you'}`,
+          `Others here:\n${others.join('\n') || '- none'}`,
+          `Scene: ${view.scene ?? 'not set'}`,
           `Recent events:\n${transcript || '(nothing yet)'}`,
           instruction,
         ].join('\n\n'),

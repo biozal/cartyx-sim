@@ -169,9 +169,13 @@ export const handOff = defineTool({
     }
     const responders = selectResponders(args.target, state);
     recorder.emit({ type: 'hand_off', target: args.target, responders });
-    return {
-      result: responders.length > 0 ? `Handed off to ${responders.join(', ')}.` : 'Handed off.',
-      endsBeat: true,
-    };
+    let result = 'Handed off.';
+    if (responders.length > 0) result = `Handed off to ${responders.join(', ')}.`;
+    else if (!state.combat) {
+      result =
+        'Nobody can respond: no player character you handed off to is able to act. Resolve that in ' +
+        'the story (healing, rescue, or a scene change) before handing off again.';
+    }
+    return { result, endsBeat: true };
   },
 });

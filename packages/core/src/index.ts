@@ -10,5 +10,6 @@ export * from './state';
 export * from './text';
 export * from './transcript';
 export * from './validators';
+export * from './view';
 export { DM_TOOLS, PLAYER_TOOLS } from './tools/registry';
 export { ToolError, toToolSchema, type ToolContext, type ToolDef } from './tools/types';

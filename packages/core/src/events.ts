@@ -40,6 +40,9 @@ export const HandOffTarget = z.discriminatedUnion('kind', [
 ]);
 export type HandOffTarget = z.infer<typeof HandOffTarget>;
 
+/** Bumped whenever the event log format changes incompatibly; stamped on every `session_start`. */
+export const EVENT_SCHEMA_VERSION = 1;
+
 const base = {
   seq: z.number().int().min(0),
   ts: z.string().min(1),
@@ -51,6 +54,8 @@ export const SimEvent = z.discriminatedUnion('type', [
   z.object({
     ...base,
     type: z.literal('session_start'),
+    // Logs written before the field existed are version 1.
+    schemaVersion: z.literal(EVENT_SCHEMA_VERSION).default(EVENT_SCHEMA_VERSION),
     session: z.number().int().min(1),
     loreCommit: z.string(),
     targetMinutes: z.number().positive(),
@@ -164,7 +169,7 @@ export const SimEvent = z.discriminatedUnion('type', [
     seat: z.string().min(1),
     rule: z.string().min(1),
     retries: z.number().int().min(0),
-    resolution: z.enum(['accepted_with_flag', 'forced_pass', 'forced_hand_off']),
+    resolution: z.enum(['re_prompted', 'accepted_with_flag', 'forced_pass', 'forced_hand_off']),
   }),
   z.object({ ...base, type: z.literal('ooc_note'), text: z.string().min(1) }),
 ]);

@@ -26,11 +26,19 @@ export interface ToolSchema {
   parameters: Record<string, unknown>;
 }
 
+/** Whether the model may answer with plain text ("auto") or must call a tool ("required"). */
+export type ToolChoice = 'auto' | 'required';
+
 export interface ModelRequest {
   /** Seat id from the campaign config, e.g. "dm" or "player-kira". */
   seat: string;
+  /** The engine turn this call belongs to. Stable across retries, so usable as an idempotency key. */
+  turnId: string;
   messages: ChatMessage[];
   tools: ToolSchema[];
+  toolChoice: ToolChoice;
+  /** Aborts the call, e.g. on shutdown. Clients apply their own timeout as well. */
+  signal?: AbortSignal;
 }
 
 export interface ModelClient {

@@ -6,7 +6,7 @@ import {
   rollInitiative,
 } from '@cartyx-sim/rules';
 import { z } from 'zod';
-import { isUp, ownEntry } from '../state';
+import { ownEntry } from '../state';
 import { slugify } from '../text';
 import { defineTool, ToolError } from './types';
 
@@ -22,7 +22,7 @@ const MonsterSpec = z.object({
 export const startCombat = defineTool({
   name: 'start_combat',
   description:
-    'Start combat with the given monsters. The engine adds them, rolls initiative for everyone who can act, and fixes turn order.',
+    'Start combat with the given monsters. The engine adds them, rolls initiative for every living combatant (a party member at 0 HP joins the order but is skipped until healed), and fixes turn order.',
   parameters: z.object({ monsters: z.array(MonsterSpec).min(1) }),
   run(args, { recorder, rng }) {
     const { state } = recorder;
@@ -61,7 +61,11 @@ export const startCombat = defineTool({
       }
     }
 
-    const party = state.partyIds.map((id) => state.combatants[id]).filter(isUp);
+    // Every living party member joins initiative, even at 0 HP: the turn loop skips anyone who
+    // cannot act, so a PC healed mid-fight gets turns again.
+    const party = state.partyIds
+      .map((id) => ownEntry(state.combatants, id))
+      .filter((pc): pc is Combatant => pc !== undefined && !pc.dead);
     const participants = [...party, ...monsters];
     const order = rollInitiative(participants, rng);
 

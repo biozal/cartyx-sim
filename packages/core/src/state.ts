@@ -38,6 +38,8 @@ export interface GameState {
   silentTurns: number;
   /** Spoken words so far in the turn being recorded. */
   turnWords: number;
+  /** Consecutive out-of-combat hand-offs that no player character could answer. */
+  idleHandOffs: number;
 }
 
 export const OPEN_FLOOR_RESPONDERS = 2;
@@ -67,6 +69,7 @@ export function initialState(): GameState {
     wordsBySpeaker: {},
     silentTurns: 0,
     turnWords: 0,
+    idleHandOffs: 0,
   };
 }
 
@@ -121,11 +124,15 @@ export function applyEvent(state: GameState, event: SimEvent): GameState {
       next.scene = { location: event.location, loreEntityId: event.loreEntityId };
       break;
     case 'hand_off':
-      if (!next.combat) next.pendingResponders = [...event.responders];
+      if (!next.combat) {
+        next.pendingResponders = [...event.responders];
+        next.idleHandOffs = event.responders.length === 0 ? next.idleHandOffs + 1 : 0;
+      }
       break;
     case 'combat_start':
       next.combat = { order: event.order, round: 1, turnIndex: 0, declared: false };
       next.pendingResponders = [];
+      next.idleHandOffs = 0;
       break;
     case 'combat_turn':
       if (!next.combat) throw new Error('combat_turn without an active combat');
