@@ -315,7 +315,8 @@ export class Director {
       if (forced.ok) await runPreparedCall(forced.def, forced.args, context);
     }
 
-    if (combatAtStart && recorder.state.combat) {
+    const combatRestarted = recorder.events.some((event) => event.type === 'combat_start');
+    if (combatAtStart && !combatRestarted && recorder.state.combat) {
       const advance = advanceCombat(recorder.state);
       if (advance) recorder.emit({ type: 'combat_turn', ...advance });
       else recorder.emit({ type: 'combat_end' });

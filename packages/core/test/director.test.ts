@@ -5,7 +5,7 @@ import type { SimEvent } from '../src/events';
 import type { LoreHit, LoreIndex } from '../src/model';
 import { basicPrompts } from '../src/prompts';
 import { MemorySink } from '../src/sink';
-import { foldEvents } from '../src/state';
+import { foldEvents, nextActor } from '../src/state';
 import {
   respond,
   ScriptedModelClient,
@@ -561,5 +561,48 @@ describe('Director', () => {
     await expect(
       Director.create(config({ session: 2 }), { ...built, sink: other })
     ).rejects.toThrow('Event log belongs to session 1, not session 2');
+  });
+
+  const monsterSpec = (name: string) => ({
+    name,
+    ac: 10,
+    maxHp: 5,
+    attacks: [{ name: 'Scimitar', bonus: 4, damage: '1d6+2', damageType: 'slashing' }],
+  });
+
+  it("G2.1: keeps the new fight's own initiative when combat ends and restarts in one beat", async () => {
+    const { deps: built, sink } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('start_combat', { monsters: [monsterSpec('Goblin')] }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+          respond(
+            toolCall('end_combat'),
+            toolCall('start_combat', { monsters: [monsterSpec('Orc')] }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+        'player-kira': [respond(toolCall('act', { intent: 'size up the goblin' }))],
+      },
+      // initiative 1: kira 22, tomas 16, goblin 2 (kira acts, hands to DM to resolve)
+      // initiative 2: kira 4, tomas 4, orc 20 -> orc, kira, tomas
+      { rolls: [20, 15, 2, 2, 3, 20] }
+    );
+    const director = await Director.create(config(), built);
+
+    await director.run(4);
+
+    const state = director.currentState;
+    expect(state.combat).not.toBeNull();
+    expect(state.combat!.turnIndex).toBe(0);
+    expect(state.combat!.order[0]).toMatchObject({ combatantId: 'orc-1' });
+    expect(nextActor(state)).toMatchObject({
+      kind: 'dm',
+      reason: 'monster',
+      combatantId: 'orc-1',
+    });
+    expect(foldEvents(sink.events)).toEqual(state);
   });
 });
