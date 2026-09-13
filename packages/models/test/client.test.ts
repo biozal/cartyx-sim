@@ -1,7 +1,9 @@
 import {
   basicPrompts,
+  DM_TOOLS,
   Director,
   MemorySink,
+  toToolSchema,
   type ModelRequest,
   type ToolSchema,
 } from '@cartyx-sim/core';
@@ -83,6 +85,22 @@ describe('OpenAICompatibleModelClient', () => {
       name: 'narrate',
       parameters: narrateTool.parameters,
     });
+  });
+
+  it("sends a real tool's generated JSON schema with no $schema key at the wire", async () => {
+    const fake = await server(() => ({
+      toolCalls: [{ id: 'call_1', name: 'narrate', arguments: { text: 'The lab hums.' } }],
+    }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'qwen-dm' },
+    });
+    const narrateSchema = toToolSchema(DM_TOOLS.find((tool) => tool.name === 'narrate')!);
+
+    await client.complete(request({ tools: [narrateSchema] }));
+
+    const sentParameters = fake.requests[0]?.tools?.[0]?.function.parameters;
+    expect(sentParameters).not.toHaveProperty('$schema');
+    expect(sentParameters).toEqual(narrateSchema.parameters);
   });
 
   it('returns plain text when tool calls are optional', async () => {

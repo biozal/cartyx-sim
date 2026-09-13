@@ -56,11 +56,13 @@ export function defineTool<S extends z.ZodType>(def: ToolDef<S>): ToolDef<S> {
 }
 
 export function toToolSchema(def: AnyToolDef): ToolSchema {
-  return {
-    name: def.name,
-    description: def.description,
-    parameters: z.toJSONSchema(def.parameters, { io: 'input' }) as Record<string, unknown>,
-  };
+  // Local OpenAI-compatible servers can be strict about a tool's JSON Schema: drop the root
+  // `$schema` key `z.toJSONSchema` emits, and inline reused sub-schemas instead of `$defs`/`$ref`.
+  const { $schema: _schema, ...parameters } = z.toJSONSchema(def.parameters, {
+    io: 'input',
+    reused: 'inline',
+  }) as Record<string, unknown>;
+  return { name: def.name, description: def.description, parameters };
 }
 
 export type PreparedCall =
