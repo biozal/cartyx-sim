@@ -73,6 +73,8 @@ function attackRollEvents(actor: string, label: string, result: AttackResult): E
       total: result.total,
       target: result.targetAc,
       outcome: result.critical ? 'critical' : result.hit ? 'hit' : 'miss',
+      mode: result.d20.mode,
+      subject: result.target.id,
     },
   ];
   if (result.damage) {
@@ -85,6 +87,7 @@ function attackRollEvents(actor: string, label: string, result: AttackResult): E
       rolls: result.damage.rolls,
       modifier: result.damage.modifier,
       total: result.damage.total,
+      subject: result.target.id,
     });
   }
   return events;
@@ -102,6 +105,7 @@ function checkRollEvent(combatant: Combatant, result: CheckResult, reason: strin
     total: result.total,
     target: result.dc,
     outcome: result.success ? 'success' : 'failure',
+    mode: result.d20.mode,
   };
 }
 
@@ -293,6 +297,8 @@ export const castSpell = defineTool({
         rolls: healing.rolls,
         modifier: healing.modifier,
         total: healing.total,
+        // Only unambiguous with exactly one healed target.
+        subject: uniqueTargets.length === 1 ? uniqueTargets[0]!.id : undefined,
       });
       for (const target of uniqueTargets) {
         updated.set(target.id, applyHealing(current(target), healing.total));

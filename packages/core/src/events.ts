@@ -97,6 +97,10 @@ export const SimEvent = z.discriminatedUnion('type', [
     total: z.number().int(),
     target: z.number().int().optional(),
     outcome: z.enum(['success', 'failure', 'hit', 'miss', 'critical']).optional(),
+    /** d20 mode, set on checks, saves, and attacks. */
+    mode: z.enum(['normal', 'advantage', 'disadvantage']).optional(),
+    /** The combatant this roll affects, when it differs from the roller (e.g. an attack target). */
+    subject: z.string().min(1).optional(),
   }),
   z.object({
     ...base,

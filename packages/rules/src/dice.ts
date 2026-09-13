@@ -57,15 +57,29 @@ export function parseDice(expr: string): DiceExpr {
   return { terms, modifier };
 }
 
+/** Reassembles a dice expression from its parsed terms and modifier, e.g. "2d4+3". */
+function formatDiceExpr(terms: readonly DiceTerm[], modifier: number): string {
+  const dice = terms.map((term) => `${term.count}d${term.sides}`).join('+');
+  if (modifier === 0) return dice || '0';
+  return dice ? `${dice}${formatModifier(modifier)}` : `${modifier}`;
+}
+
 /** Rolls a damage/healing expression. A critical doubles the dice, not the modifier. Never below 0. */
 export function rollDice(expr: string, rng: Rng, options: { critical?: boolean } = {}): DiceResult {
   const { terms, modifier } = parseDice(expr);
-  const multiplier = options.critical ? 2 : 1;
+  const critical = options.critical ?? false;
+  const multiplier = critical ? 2 : 1;
   const rolls = terms.flatMap((term) =>
     Array.from({ length: term.count * multiplier }, () => rng.die(term.sides))
   );
   const total = Math.max(0, rolls.reduce((sum, roll) => sum + roll, 0) + modifier);
-  return { expr, rolls, modifier, total };
+  const resultExpr = critical
+    ? formatDiceExpr(
+        terms.map((term) => ({ ...term, count: term.count * multiplier })),
+        modifier
+      )
+    : expr;
+  return { expr: resultExpr, rolls, modifier, total };
 }
 
 export function rollD20(rng: Rng, mode: RollMode = 'normal'): D20Roll {

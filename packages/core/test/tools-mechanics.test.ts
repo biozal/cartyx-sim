@@ -235,6 +235,35 @@ describe('attack', () => {
       error: 'Kira Vale cannot attack at 0 HP or while dead.',
     });
   });
+
+  it('G3.4: records the roll mode and the target as subject', async () => {
+    const harness = withGoblin([5, 18, 3]);
+    await harness.run(attack, {
+      attackerId: 'tomas',
+      targetId: 'goblin-1',
+      attackName: 'Longsword',
+      mode: 'advantage',
+    });
+    expect(harness.recorder.events[0]).toMatchObject({
+      kind: 'attack',
+      mode: 'advantage',
+      subject: 'goblin-1',
+    });
+    expect(harness.recorder.events[1]).toMatchObject({
+      kind: 'damage',
+      subject: 'goblin-1',
+    });
+  });
+
+  it('G3.4: doubles the dice in a critical damage roll expr', async () => {
+    const harness = withGoblin([20, 4, 6]);
+    await harness.run(attack, {
+      attackerId: 'tomas',
+      targetId: 'goblin-1',
+      attackName: 'Longsword',
+    });
+    expect(harness.recorder.events[1]).toMatchObject({ kind: 'damage', expr: '2d8+3' });
+  });
 });
 
 describe('cast_spell', () => {
@@ -416,6 +445,34 @@ describe('damage, healing, conditions, and items', () => {
     ).toEqual({
       ok: true,
       outcome: { result: 'Tomas Reed regains 3 HP. Tomas Reed: 12/12 HP.' },
+    });
+  });
+
+  it('G3.4: apply_damage records the roll as the environment acting on the target', async () => {
+    const harness = toolHarness({ rng: scriptedRng([4]) });
+    await harness.run(applyDamageTool, {
+      targetId: 'tomas',
+      dice: '1d6',
+      damageType: 'fire',
+      reason: 'trap',
+    });
+    expect(harness.recorder.events[0]).toMatchObject({
+      type: 'roll',
+      kind: 'damage',
+      actor: 'dm',
+      subject: 'tomas',
+    });
+  });
+
+  it('G3.4: heal records the roll as the environment acting on the target', async () => {
+    const { state, history } = startedState([kira, { ...tomas, hp: 2 }]);
+    const harness = toolHarness({ state, history, rng: scriptedRng([4]) });
+    await harness.run(healTool, { targetId: 'tomas', dice: '1d6', reason: 'potion' });
+    expect(harness.recorder.events[0]).toMatchObject({
+      type: 'roll',
+      kind: 'healing',
+      actor: 'dm',
+      subject: 'tomas',
     });
   });
 

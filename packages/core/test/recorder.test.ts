@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { SessionPausedError } from '../src/errors';
+import { SimEvent } from '../src/events';
 import { TurnRecorder } from '../src/recorder';
 import { MemorySink } from '../src/sink';
 import { defineTool, ToolError } from '../src/tools/types';
@@ -132,6 +133,28 @@ describe('atomic tool execution', () => {
       seat: 'lore',
       reason: 'ECONNREFUSED',
     });
+  });
+});
+
+describe('G3.4: roll event schema additions are backward compatible', () => {
+  it('parses an old-format roll event with no mode or subject', () => {
+    const event = SimEvent.parse({
+      seq: 0,
+      ts: '2026-09-13T00:00:00.000Z',
+      turnId: 'turn',
+      visibility: 'public',
+      type: 'roll',
+      actor: 'kira',
+      kind: 'check',
+      label: 'Kira Vale Investigation check',
+      expr: '1d20+5',
+      rolls: [15],
+      modifier: 5,
+      total: 20,
+    });
+    expect(event).toMatchObject({ actor: 'kira' });
+    expect((event as { mode?: string }).mode).toBeUndefined();
+    expect((event as { subject?: string }).subject).toBeUndefined();
   });
 });
 

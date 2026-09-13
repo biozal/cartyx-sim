@@ -59,6 +59,15 @@ describe('rollDice', () => {
     expect(result.total).toBe(12);
   });
 
+  it('G3.4: records the doubled dice in expr on a critical', () => {
+    const result = rollDice('1d4+3', scriptedRng([1, 2]), { critical: true });
+    expect(result.expr).toBe('2d4+3');
+  });
+
+  it('leaves a non-critical expr unchanged', () => {
+    expect(rollDice('1d4+3', scriptedRng([1])).expr).toBe('1d4+3');
+  });
+
   it('never returns a negative total', () => {
     expect(rollDice('1d4-5', scriptedRng([1])).total).toBe(0);
   });

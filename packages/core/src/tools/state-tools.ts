@@ -44,9 +44,11 @@ function emitAmountRoll(
   roll: DiceResult | null
 ): void {
   if (!roll) return;
+  // The environment (a trap, a potion) rolls this, not the victim or the drinker.
   recorder.emit({
     type: 'roll',
-    actor: targetId,
+    actor: 'dm',
+    subject: targetId,
     kind,
     label,
     expr: roll.expr,
