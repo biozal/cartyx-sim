@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { parseNumber } from './args';
 import { benchPassed, runBench } from './bench';
 import { releaseHeldLocks } from './jsonl-sink';
+import { formatPauseMessage } from './pause-message';
 import { runSession } from './run';
 
 // An exit by signal skips `finally`, so release any session lock first; otherwise the lock stays
@@ -59,9 +60,7 @@ program
     });
     console.log(`\nSession ${result.status}. Event log: ${result.eventsPath}`);
     if (result.status === 'paused') {
-      console.error(
-        `Paused on seat ${result.seat}: ${result.error}. Fix it and rerun with --resume.`
-      );
+      console.error(formatPauseMessage(result));
       process.exitCode = 2;
     }
   });

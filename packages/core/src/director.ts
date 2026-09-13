@@ -76,7 +76,7 @@ export interface DirectorDeps {
 
 export type RunResult =
   | { status: 'ended' | 'turn_limit'; state: GameState }
-  | { status: 'paused'; state: GameState; seat: string; error: string };
+  | { status: 'paused'; state: GameState; seat: string; error: string; kind: 'seat' | 'backstop' };
 
 const DM_TOOL_SCHEMAS: ToolSchema[] = DM_TOOLS.map(toToolSchema);
 const PLAYER_TOOL_SCHEMAS: ToolSchema[] = PLAYER_TOOLS.map(toToolSchema);
@@ -228,7 +228,13 @@ export class Director {
         kind: error.kind,
       });
       await this.commit(recorder);
-      return { status: 'paused', state: this.state, seat: error.seat, error: error.reason };
+      return {
+        status: 'paused',
+        state: this.state,
+        seat: error.seat,
+        error: error.reason,
+        kind: error.kind,
+      };
     }
   }
 
@@ -282,7 +288,7 @@ export class Director {
         seat,
         `No one has spoken or changed the game state for ${this.state.stalledTurns} turns in a ` +
           `row. Resuming gives the table another ${this.silentTurnPauseLimit} turns; check the ` +
-          "seats' model output, or raise silentTurnPauseLimit.",
+          "seats' model output.",
         'backstop'
       );
     }
@@ -291,7 +297,7 @@ export class Director {
         seat,
         `The DM handed off ${this.state.idleHandOffs} times in a row with no player character able ` +
           `to respond. Resuming gives the table another ${this.idleHandOffLimit} chances; resolve ` +
-          'the downed party, or raise idleHandOffLimit.',
+          'the downed party.',
         'backstop'
       );
     }

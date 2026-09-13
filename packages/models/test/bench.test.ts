@@ -105,7 +105,12 @@ describe('benchSeat', () => {
     const fake = await server((_body, index) =>
       index === 0
         ? { text: 'A corridor.' }
-        : { toolCalls: [{ name: 'roll_dice', arguments: '{not json' }] }
+        : {
+            // Text alongside the malformed call, so this pins that a present (if invalid) tool
+            // call is still a miss, not the text-reply guard silently letting it through.
+            text: 'Let me roll that for you.',
+            toolCalls: [{ name: 'roll_dice', arguments: '{not json' }],
+          }
     );
 
     const result = await benchSeat(

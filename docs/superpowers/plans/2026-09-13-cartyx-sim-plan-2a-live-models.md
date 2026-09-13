@@ -15,7 +15,7 @@
 - `packages/core` and `packages/rules` must not import `node:*` modules; `npm run typecheck` enforces that after Task 1 (a Node-free `lib`, no `@types/node`). It does not and cannot enforce "no network I/O": the `DOM` lib still typechecks `fetch`. Network or filesystem I/O in `core`/`rules` is prohibited by convention and review, not by a lint rule. `packages/models` and `apps/cli` may do I/O.
 - The event log is the single source of truth: `foldEvents(log)` must equal live state; a rejected or failed tool call leaves no events; older logs must still parse (new event fields are optional or defaulted).
 - Every lookup keyed by a model- or event-supplied id uses `ownEntry`.
-- Infrastructure failures (model endpoints, lore) retry with the director's delays, then pause resumably with an `ooc_note`; they never crash `Director.run`.
+- Infrastructure failures (model endpoints, lore) retry with the director's delays, then pause resumably with a `session_paused` event (`seat`, `reason`, `kind`); they never crash `Director.run`.
 - All dice go through an `Rng`; nothing calls `Math.random`.
 - The director owns retries: model clients call the AI SDK with `maxRetries: 0`.
 - The whole repository must pass `npm run format:check` (single quotes, semicolons, 2-space indent, `trailingComma: es5`, `printWidth: 100`).
@@ -914,6 +914,8 @@ git commit -m "feat(core): harden the engine contract for real models"
 
 Make the director safe to leave running with real models: pause when the table goes silent or the DM keeps handing off to a party that cannot act, cap DM tool calls per beat, and flag every rejected, failed, or accepted-with-flag outcome (spec §5.6, §12).
 
+> **Superseded by the review fix wave (see `fix-wave-findings.md` Fixes 1, 2, and 4):** the task below, as executed, paused on `silentTurns` (spoken words only) and recorded the pause as an `ooc_note`. The fix wave replaced that with `stalledTurns` (narration, dialogue, a roll, a state change, or a scene/combat change — not a PC's own declared action, which is not progress until the DM resolves it), added a `session_paused` event (`seat`, `reason`, `kind: 'seat' | 'backstop'`) that resets every backstop counter so a resume gets a fresh budget, and gave `SessionPausedError` that same `kind` so a backstop pause's message is the reason alone, not `Seat "..." failed: ...`. The code blocks below are left as originally written, for history.
+
 **Files:**
 
 - Modify: `packages/core/src/director.ts`
@@ -923,7 +925,7 @@ Make the director safe to leave running with real models: pause when the table g
 **Interfaces:**
 
 - `DirectorConfig` adds `silentTurnPauseLimit` (default 12), `idleHandOffLimit` (default 3), `maxDmToolCallsPerBeat` (default 24)
-- Pauses surface as `RunResult { status: "paused", seat: <DM seat> }` with an `ooc_note` explaining which limit tripped
+- Pauses surface as `RunResult { status: "paused", seat: <DM seat> }`, recorded in the log as a `session_paused` event (`seat`, `reason`, `kind`)
 - DM `validator_flag` rules: `invalid_tool_call` and `tool_error` (`re_prompted`), the validator rule (`re_prompted`, then `accepted_with_flag` only after the tool succeeds), `dm_step_limit` / `dm_tool_call_limit` (`forced_hand_off`); player re-prompts are flagged `re_prompted` too
 
 - [ ] **Step 1: Write the failing tests**

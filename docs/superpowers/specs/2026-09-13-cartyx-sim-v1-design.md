@@ -88,7 +88,8 @@ Each session writes `campaigns/<id>/sessions/<NNN>/events.jsonl`. It is the sing
 | `scene_change`                  | location, lore entity id, art prompt                                                      |
 | `combat_start` / `combat_end`   | combatants, initiative order                                                              |
 | `validator_flag`                | seat, rule violated, retries, resolution                                                  |
-| `ooc_note`                      | engine notices (pauses, resumes, fallbacks)                                               |
+| `ooc_note`                      | engine notices (resumes, fallbacks)                                                       |
+| `session_paused`                | reason, seat, kind (`seat` or `backstop`)                                                 |
 
 Spoken events (`narration`, `dialogue`) are the only events that produce audio.
 
@@ -260,7 +261,7 @@ Built from `lore_lookup`, `lore_invention`, `npc_introduced`, and `scene_change`
 
 ## 12. Error Handling
 
-- **Endpoints:** health check on every seat before a run. Mid-run failures retry with backoff; persistent failure switches to the seat's configured fallback endpoint if any, else pauses the session with an `ooc_note` for `--resume`.
+- **Endpoints:** health check on every seat before a run. Mid-run failures retry with backoff; persistent failure switches to the seat's configured fallback endpoint if any, else pauses the session (a `session_paused` event: reason, seat, kind) for `--resume`.
 - **Malformed tool calls:** schema validation, one retry with the error text, then the validator fallback (§5.6).
 - **Runaway loops:** cap on DM tool calls per beat; watchdog when N consecutive turns produce no spoken output.
 - **Media failures:** placeholders (initials tile, default voice) plus a flag; re-runs regenerate only missing content-hash outputs.

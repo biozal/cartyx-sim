@@ -59,7 +59,7 @@ Each party member is a file in `characters/` (for example `characters/kira.yaml`
 npm run sim -- bench --campaign avalon
 ```
 
-For each seat this reports whether the server answered, whether it lists the configured model id, generation speed in tokens per second, and how many of the tool-call trials (default 5, `--trials N`) were well-formed. For a `toolChoice: auto` seat, a trial where the model replies with text instead of a tool call counts as usable too and is shown separately, e.g. `3/5 (+2 text)`. A report is saved to `campaigns/avalon/bench/<timestamp>.json`. The command exits with code 1 if any seat is unreachable or a trial returns a malformed or wrong tool call.
+For each seat this reports whether the server answered, whether it lists the configured model id, generation speed in tokens per second, and how many of the tool-call trials (default 5, `--trials N`) were well-formed. For a `toolChoice: auto` seat, a trial where the model replies with text instead of a tool call counts as usable too and is shown separately, e.g. `3/5 (+2 text)`. A report is saved to `campaigns/avalon/bench/<timestamp>.json`. The command exits with code 1 if any seat is unreachable or any trial is not a well-formed `roll_dice` call (for a `toolChoice: auto` seat, a plain-text reply also counts as usable).
 
 ## 5. Play a session
 
