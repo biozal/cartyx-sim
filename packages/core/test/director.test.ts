@@ -605,4 +605,70 @@ describe('Director', () => {
     });
     expect(foldEvents(sink.events)).toEqual(state);
   });
+
+  it('G2.2: skips a PC downed in the same beat that started combat', async () => {
+    const { deps: built, sink } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('start_combat', { monsters: [monsterSpec('Goblin')] }),
+            toolCall('apply_damage', {
+              targetId: 'kira',
+              amount: 10,
+              damageType: 'fire',
+              reason: 'a collapsing rafter',
+            }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      // initiative: kira 22, tomas 2, goblin 1 -> kira first, then dropped to 0 hp in the same beat
+      { rolls: [20, 1, 1] }
+    );
+    const director = await Director.create(config(), built);
+
+    await director.run(2);
+
+    const state = director.currentState;
+    expect(state.combatants.kira).toMatchObject({ hp: 0 });
+    expect(state.combat!.order[0]).toMatchObject({ combatantId: 'kira' });
+    expect(state.combat!.turnIndex).toBe(1);
+    expect(nextActor(state)).toMatchObject({
+      kind: 'pc',
+      pcId: 'tomas',
+      reason: 'combat_turn',
+    });
+    expect(foldEvents(sink.events)).toEqual(state);
+  });
+
+  it('G2.2: skips the first monster when it is killed in the same beat that started combat', async () => {
+    const { deps: built, sink } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('start_combat', { monsters: [monsterSpec('Goblin')] }),
+            toolCall('apply_damage', {
+              targetId: 'goblin-1',
+              amount: 5,
+              damageType: 'fire',
+              reason: 'a collapsing rafter',
+            }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      // initiative: goblin 20, kira 3, tomas 2 -> goblin first, then killed in the same beat
+      { rolls: [1, 1, 20] }
+    );
+    const director = await Director.create(config(), built);
+
+    await director.run(2);
+
+    const state = director.currentState;
+    expect(state.combatants['goblin-1']).toMatchObject({ hp: 0, dead: true });
+    expect(state.combat!.order[0]).toMatchObject({ combatantId: 'goblin-1' });
+    expect(nextActor(state)).toMatchObject({ kind: 'pc', pcId: 'kira', reason: 'combat_turn' });
+    expect(nextActor(state)).not.toMatchObject({ reason: 'monster', combatantId: 'goblin-1' });
+    expect(foldEvents(sink.events)).toEqual(state);
+  });
 });

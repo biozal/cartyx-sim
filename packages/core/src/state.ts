@@ -174,14 +174,20 @@ export function nextActor(state: GameState): NextActor {
     : { kind: 'dm', reason: 'beat' };
 }
 
-/** The next combatant in initiative order who can act, or null if nobody can. */
+/**
+ * The next combatant in initiative order who can act, or null if nobody can. With `inclusive`,
+ * the search starts at the current turn index instead of the one after it (no round increment
+ * when it resolves there) — for checking whether the combatant whose turn it already is can act.
+ */
 export function advanceCombat(
-  state: GameState
+  state: GameState,
+  options: { inclusive?: boolean } = {}
 ): { round: number; turnIndex: number; combatantId: string } | null {
   const combat = state.combat;
   if (!combat) return null;
   const count = combat.order.length;
-  for (let offset = 1; offset <= count; offset++) {
+  const start = options.inclusive ? 0 : 1;
+  for (let offset = start; offset <= count; offset++) {
     const position = combat.turnIndex + offset;
     const entry = combat.order[position % count]!;
     if (isUp(state.combatants[entry.combatantId])) {

@@ -14,7 +14,7 @@ import type {
 import type { PromptBuilder } from './prompts';
 import { TurnRecorder } from './recorder';
 import type { EventSink } from './sink';
-import { advanceCombat, foldEvents, nextActor, ownEntry, type GameState } from './state';
+import { advanceCombat, foldEvents, isUp, nextActor, ownEntry, type GameState } from './state';
 import {
   DM_TOOLS,
   MECHANICS_TOOL_NAMES,
@@ -320,6 +320,16 @@ export class Director {
       const advance = advanceCombat(recorder.state);
       if (advance) recorder.emit({ type: 'combat_turn', ...advance });
       else recorder.emit({ type: 'combat_end' });
+    }
+    if (recorder.state.combat) {
+      const { combat } = recorder.state;
+      const current = combat.order[combat.turnIndex];
+      const combatant = current && recorder.state.combatants[current.combatantId];
+      if (!isUp(combatant)) {
+        const found = advanceCombat(recorder.state, { inclusive: true });
+        if (found) recorder.emit({ type: 'combat_turn', ...found });
+        else recorder.emit({ type: 'combat_end' });
+      }
     }
     recorder.emit({ type: 'turn_end', actor: 'dm' });
 

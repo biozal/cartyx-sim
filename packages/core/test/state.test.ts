@@ -188,6 +188,30 @@ describe('advanceCombat', () => {
   it('returns null when nobody can act', () => {
     expect(advanceCombat(combatState({ kira: 0, tomas: 0, sentry: 0 }, 0))).toBeNull();
   });
+
+  it('with inclusive, returns the current combatant when they can still act', () => {
+    expect(
+      advanceCombat(combatState({ kira: 10, tomas: 12, sentry: 5 }, 1), { inclusive: true })
+    ).toEqual({ round: 1, turnIndex: 1, combatantId: 'kira' });
+  });
+
+  it('with inclusive, searches forward from the current index when they cannot', () => {
+    expect(
+      advanceCombat(combatState({ kira: 0, tomas: 12, sentry: 5 }, 1), { inclusive: true })
+    ).toEqual({ round: 1, turnIndex: 2, combatantId: 'tomas' });
+  });
+
+  it('with inclusive, wraps into the next round when nobody from the current index onward can act', () => {
+    expect(
+      advanceCombat(combatState({ kira: 10, tomas: 0, sentry: 0 }, 2), { inclusive: true })
+    ).toEqual({ round: 2, turnIndex: 1, combatantId: 'kira' });
+  });
+
+  it('with inclusive, returns null when nobody can act', () => {
+    expect(
+      advanceCombat(combatState({ kira: 0, tomas: 0, sentry: 0 }, 0), { inclusive: true })
+    ).toBeNull();
+  });
 });
 
 describe('selectResponders', () => {
