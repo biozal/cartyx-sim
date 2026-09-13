@@ -119,6 +119,56 @@ describe('validateDmText', () => {
       );
     });
   });
+
+  describe('F2: ordinary narration mentioning a PC is not PC control', () => {
+    const party = ['Kira Vale', 'Tomas Reed', 'Will Harrow'];
+    const elodieParty = [...party, 'Élodie Marsh'];
+
+    it.each([
+      'As Kira watches, goblins charge from the dark.',
+      'Kira screams. Goblins charge!',
+      'Kira was attacked by the goblin.',
+      'Kira is shot in the shoulder by an arrow.',
+      'Before Kira can move, the ogre attacks.',
+      'Kira hears someone shout her name.',
+      'Tomas has first move.',
+      'Will the guards attack?',
+      'Kira, you said you wanted answers.',
+    ])('accepts: "%s"', (text) => {
+      expect(validateDmText(text, { pcNames: party, mechanicsToolCalled: false })).toBeNull();
+    });
+
+    it.each([
+      'Kira drew her hammer and attacked the goblin.',
+      'Kira decided to follow the shadow.',
+      'Kira quickly draws her hammer.',
+      'Kira, you draw your hammer and charge.',
+      'Élodie draws her bow.',
+      'Kira decides to open the door.',
+      'Tomas Reed draws his sword and charges.',
+      'Kira says she agrees.',
+      'Will draws his dagger.',
+      'The door bursts open and Will quickly draws his dagger.',
+    ])('still flags: "%s"', (text) => {
+      expect(validateDmText(text, { pcNames: elodieParty, mechanicsToolCalled: false })?.rule).toBe(
+        'dm_controls_pc'
+      );
+    });
+
+    it.each([
+      'Kira quickly '.repeat(15_385),
+      'Kira was '.repeat(22_223),
+      'Will the '.repeat(22_223),
+      '. Will '.repeat(28_572),
+      'Kira, you '.repeat(20_000),
+      `${' '.repeat(199_990)}Will draws`,
+      'Kira '.repeat(40_000),
+    ])('stays fast on 200,000 characters of adversarial input (case %#)', (text) => {
+      const start = performance.now();
+      validateDmText(text.slice(0, 200_000), { pcNames: party, mechanicsToolCalled: false });
+      expect(performance.now() - start).toBeLessThan(100);
+    });
+  });
 });
 
 describe('validatePlayerText', () => {

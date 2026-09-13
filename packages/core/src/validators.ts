@@ -57,17 +57,59 @@ function claimsOutcome(text: string): boolean {
   return sentences(text).some((sentence) => !QUESTION.test(sentence) && OUTCOME.test(sentence));
 }
 
+// Present tense only: "Kira, you draw your hammer" decides for the player, while "Kira, you said
+// you wanted answers" recalls something the player already chose.
+const VOCATIVE_VERBS =
+  'decide|choose|agree|attack|cast|say|shout|grab|run|draw|shoot|move|nod|follow|refuse|charge';
+
+// Words that may not sit between a PC's name and a control verb. Auxiliaries and modals make the
+// PC an object or a possibility ("Kira was attacked", "Before Kira can move"); perception verbs
+// describe what the PC experiences ("Kira hears someone shout her name").
+const GAP_STOP_WORDS =
+  'is|was|were|been|being|am|are|gets|got|can|could|may|might|must|will|would|shall|should|' +
+  'has|have|had|does|did|see|sees|saw|hear|hears|heard|notice|notices|noticed|feel|feels|felt|' +
+  'smell|smells|smelled|sense|senses|sensed|watch|watches|watched';
+
+// One intervening word: letters only, so the gap never crosses "," "." "!" or "?".
+const GAP_WORD = `(?!(?:${GAP_STOP_WORDS})(?![\\p{L}\\p{N}]))[\\p{L}'’\\-]+\\s+`;
+
+// The start of the text or of a sentence. Bounded so the lookbehind stays cheap.
+const SENTENCE_START = `(?:^|[.!?]["'”’)\\]]{0,3}\\s{1,20})`;
+
+// First names that are also common English words. At the start of a sentence their
+// capitalization says nothing ("Will the guards attack?"), so they need the verb right after.
+const COMMON_WORD_NAMES = new Set(
+  (
+    'amber art august bill can chase dawn drew faith frank grace grant hazel holly hope hunter ivy ' +
+    'jack joy june lance mark may miles pat penny ray reed rich river rob robin rose ruby sage sky ' +
+    'summer will wren'
+  ).split(' ')
+);
+
 /**
- * Checks whether `name` controls a PC in `text`: an action verb right after the name (with up to
- * two intervening words, e.g. an adverb), or a vocative "Name, you <verb>". Boundaries are
- * Unicode-aware (`\p{L}`/`\p{N}` lookarounds with the `u` flag) so names like "Élodie" match,
- * since `\b` only recognizes ASCII word characters.
+ * Checks whether `name` controls a PC in `text`: a control verb right after the name, up to two
+ * intervening letter words before it (e.g. an adverb), or a vocative "Name, you <verb>".
+ * Boundaries are Unicode-aware (`\p{L}`/`\p{N}` lookarounds with the `u` flag) so names like
+ * "Élodie" match, since `\b` only recognizes ASCII word characters. With
+ * `directAtSentenceStart`, a match at the start of a sentence only counts with the verb directly
+ * after the name.
  */
-function nameControlsSomeone(text: string, name: string, caseInsensitive: boolean): boolean {
+function nameControlsSomeone(
+  text: string,
+  name: string,
+  options: { caseInsensitive: boolean; directAtSentenceStart: boolean }
+): boolean {
   const escaped = escapeRegExp(name);
+  const notAtSentenceStart = options.directAtSentenceStart
+    ? `(?<!${SENTENCE_START}${escaped})`
+    : '';
   const pattern = new RegExp(
-    `(?<![\\p{L}\\p{N}])${escaped}(?:,\\s*you\\s+(?:${CONTROL_VERBS})|\\s+(?:\\S+\\s+){0,2}(?:${CONTROL_VERBS}))(?![\\p{L}\\p{N}])`,
-    caseInsensitive ? 'iu' : 'u'
+    `(?<![\\p{L}\\p{N}])${escaped}(?:` +
+      `,\\s*you\\s+(?:${VOCATIVE_VERBS})` +
+      `|\\s+(?:${CONTROL_VERBS})` +
+      `|${notAtSentenceStart}\\s+(?:${GAP_WORD}){1,2}(?:${CONTROL_VERBS})` +
+      `)(?![\\p{L}\\p{N}])`,
+    options.caseInsensitive ? 'iu' : 'u'
   );
   return pattern.test(text);
 }
@@ -79,9 +121,19 @@ function nameControlsSomeone(text: string, name: string, caseInsensitive: boolea
  */
 function controlledCharacter(text: string, names: readonly string[]): string | null {
   for (const name of names) {
-    if (nameControlsSomeone(text, name, true)) return name;
+    if (nameControlsSomeone(text, name, { caseInsensitive: true, directAtSentenceStart: false })) {
+      return name;
+    }
     const first = name.split(/\s+/)[0];
-    if (first && first !== name && first.length > 1 && nameControlsSomeone(text, first, false)) {
+    if (
+      first &&
+      first !== name &&
+      first.length > 1 &&
+      nameControlsSomeone(text, first, {
+        caseInsensitive: false,
+        directAtSentenceStart: COMMON_WORD_NAMES.has(first.toLowerCase()),
+      })
+    ) {
       return first;
     }
   }
