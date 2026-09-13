@@ -748,6 +748,55 @@ describe('Director', () => {
     ).rejects.toThrow(/lore commit/i);
   });
 
+  it('G4.4: re-prompts a player after a tool execution error instead of forcing a pass', async () => {
+    const {
+      deps: built,
+      model,
+      sink,
+    } = deps({
+      dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } }))],
+      'player-kira': [
+        respond(toolCall('declare_spell', { spell: 'Fireball', slotLevel: 2 })),
+        respond(toolCall('speak', { text: 'Never mind.' })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+
+    await director.run(3);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toHaveLength(1);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toHaveLength(0);
+    expect(sink.events.some((e) => e.type === 'action')).toBe(false);
+    const kiraRequests = model.requests.filter((r) => r.seat === 'player-kira');
+    expect(kiraRequests).toHaveLength(2);
+    expect(kiraRequests[1]!.messages.at(-1)).toMatchObject({
+      role: 'tool',
+      content: expect.stringContaining('no level 2 spell slots'),
+    });
+  });
+
+  it('G4.4: rolls back an attempt entirely when one of its calls fails, leaving no partial events, and forces a pass once retries are exhausted', async () => {
+    const retryAttempt = respond(
+      toolCall('speak', { text: 'I try again.' }),
+      toolCall('declare_spell', { spell: 'Fireball', slotLevel: 2 })
+    );
+    const finalAttempt = respond(toolCall('declare_spell', { spell: 'Fireball', slotLevel: 2 }));
+    const { deps: built, sink } = deps({
+      dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } }))],
+      'player-kira': [retryAttempt, retryAttempt, finalAttempt],
+    });
+    const director = await Director.create(config(), built);
+
+    await director.run(3);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toHaveLength(0);
+    expect(sink.events.slice(-3)).toMatchObject([
+      { type: 'validator_flag', rule: 'tool_error', retries: 2, resolution: 'forced_pass' },
+      { type: 'pass', actor: 'kira' },
+      { type: 'turn_end', actor: 'kira' },
+    ]);
+  });
+
   it('G2.4: ends at the hard stop on resume before choosing an actor, granting no extra turn', async () => {
     const recorder = new TurnRecorder(initialState(), 'setup', now);
     recorder.emit({

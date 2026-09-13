@@ -432,6 +432,9 @@ export class Director {
         continue;
       }
 
+      // At this point `problems` is empty unless retries are exhausted (otherwise we would have
+      // re-prompted above), so a checkpoint here brackets exactly this attempt's accepted calls.
+      const checkpoint = recorder.checkpoint();
       let tookTurn = false;
       for (const item of accepted) {
         const execution = await runPreparedCall(item.def, item.args, context);
@@ -441,6 +444,17 @@ export class Director {
         }
         if (TURN_ACTION_TOOL_NAMES.has(item.def.name)) tookTurn = true;
       }
+
+      const executionFailed = problems.some((problem) => problem.rule === 'tool_error');
+      if (executionFailed && attempt < this.maxValidatorRetries) {
+        // Roll back so none of this attempt's successful calls leave events behind, then send
+        // the error back to the model and re-prompt instead of forcing a pass.
+        recorder.rollback(checkpoint);
+        const summary = problems.map((problem) => `${problem.rule}: ${problem.message}`).join(' ');
+        for (const call of calls) messages.push(toolMessage(call, `Not executed. ${summary}`));
+        continue;
+      }
+
       if (problems.length > 0) {
         recorder.emit({
           type: 'validator_flag',
