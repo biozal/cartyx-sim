@@ -1,0 +1,16 @@
+{
+  "name": "@cartyx-sim/models",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.48",
+    "@cartyx-sim/core": "*",
+    "ai": "^7.0.99",
+    "zod": "^4.6.4"
+  }
+}
