@@ -41,7 +41,7 @@ Items carried from the Plan 1 reviews. Plan 2A resolved the runaway-loop backsto
 ### Scheduled
 
 - **Plan 2B:** entity and Kanka-ID metadata on `LoreHit`; link `lore_invention` events to the narration they support.
-- **Plan 2C:** a class field (or character-file reference) on PCs for the playback tiles; validate player `act` and `declare_spell` target ids against the combatants in play (Plan 4 roll callouts key on `action.target`); a sticky fallback — skip a timed-out primary target for N calls or T seconds instead of retrying it every call, and document the `timeoutMs` cost this avoids; `sim bench` checks each configured fallback target too (reachability and whether the server lists the model), not just the primary; expose the backstop limits (stalled turns, idle hand-offs, DM tool calls per beat) in `campaign.yaml`, since a pause's advice to "raise the limit" has no config field to raise today.
+- **Plan 2C:** a class field (or character-file reference) on PCs for the playback tiles; validate player `act` and `declare_spell` target ids against the combatants in play (Plan 4 roll callouts key on `action.target`); a sticky fallback — skip a timed-out primary target for N calls or T seconds instead of retrying it every call, and document the `timeoutMs` cost this avoids; `sim bench` checks each configured fallback target too (reachability and whether the server lists the model), not just the primary; expose the backstop limits (stalled turns, idle hand-offs, DM tool calls per beat) in `campaign.yaml`.
 
 ### Unscheduled cleanup
 

@@ -58,7 +58,7 @@ describe('runaway-loop backstop', () => {
       { silentTurnLimit: 99, silentTurnPauseLimit: 5 }
     );
     const result = await run.run(50);
-    expect(result).toMatchObject({ status: 'paused', seat: 'dm' });
+    expect(result).toMatchObject({ status: 'paused', seat: 'dm', kind: 'backstop' });
     expect(sink.events.at(-1)).toMatchObject({
       type: 'session_paused',
       seat: 'dm',
