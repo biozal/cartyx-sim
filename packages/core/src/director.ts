@@ -121,6 +121,14 @@ export class Director {
   /** Loads any existing events from the sink and resumes from them. */
   static async create(config: DirectorConfig, deps: DirectorDeps): Promise<Director> {
     if (!config.seats.dm) throw new Error('No DM seat configured.');
+    for (const pc of config.party) {
+      if (pc.id === 'dm' || pc.id.startsWith('npc-')) {
+        throw new Error(
+          `Party member id "${pc.id}" is reserved: "dm" is the DM's actor id and "npc-" starts ` +
+            'every NPC id. Give the character a different id.'
+        );
+      }
+    }
     const prior = await deps.sink.readAll();
     const director = new Director(config, deps, prior);
     const { state } = director;

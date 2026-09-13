@@ -36,6 +36,16 @@ export const introduceNpc = defineTool({
   run(args, { recorder }) {
     const slug = slugify(args.name);
     if (!slug) throw new ToolError(`Cannot build an id from NPC name "${args.name}"`);
+    const { state } = recorder;
+    const name = args.name.trim().toLowerCase();
+    const pc = state.partyIds
+      .map((id) => ownEntry(state.combatants, id))
+      .find((combatant) => combatant?.name.trim().toLowerCase() === name);
+    if (pc) {
+      throw new ToolError(
+        `"${pc.name}" is a player character's name. Use a distinct name for the NPC.`
+      );
+    }
     const npcId = `npc-${slug}`;
     if (ownEntry(recorder.state.npcs, npcId)) {
       return { result: `${args.name} is already introduced; use npcId "${npcId}".` };

@@ -1,4 +1,5 @@
 import { scriptedRng } from '@cartyx-sim/rules';
+import { makeCombatant } from '@cartyx-sim/rules/testing';
 import { describe, expect, it } from 'vitest';
 import { Director, type DirectorConfig, type DirectorDeps } from '../src/director';
 import type { SimEvent } from '../src/events';
@@ -826,6 +827,24 @@ describe('Director', () => {
       expect(foldEvents(sink.events)).toEqual(director.currentState);
     });
   });
+
+  it.each(['dm', 'npc-ghost'])(
+    'F7: refuses a party member whose id "%s" is reserved for the DM or NPCs',
+    async (id) => {
+      const reserved = makeCombatant({ id, name: 'Reserved Name' });
+      const { deps: built, sink } = deps({});
+      await expect(
+        Director.create(
+          config({
+            party: [reserved, kira],
+            seats: { dm: 'dm', players: { [id]: 'player-reserved', kira: 'player-kira' } },
+          }),
+          built
+        )
+      ).rejects.toThrow(`Party member id "${id}" is reserved`);
+      expect(sink.events).toHaveLength(0);
+    }
+  );
 
   describe('F4: resuming with a changed party', () => {
     async function startedSink(): Promise<MemorySink> {

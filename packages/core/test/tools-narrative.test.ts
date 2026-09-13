@@ -124,6 +124,21 @@ describe('introduce_npc and npc_say', () => {
     expect(harness.recorder.state.wordsBySpeaker['kira']).toBeUndefined();
   });
 
+  it.each(['Kira Vale', '  kira vale  ', 'TOMAS REED'])(
+    'F7: rejects an NPC named like a party member: "%s"',
+    async (name) => {
+      const harness = toolHarness();
+      const result = await harness.run(introduceNpc, {
+        name,
+        description: 'A lookalike',
+        invented: true,
+      });
+      expect(result.ok).toBe(false);
+      expect((result as { error: string }).error).toMatch(/player character.*distinct name/i);
+      expect(harness.recorder.events).toHaveLength(0);
+    }
+  );
+
   it('namespaces an NPC literally named "DM"', async () => {
     const harness = toolHarness();
     const intro = await harness.run(introduceNpc, {

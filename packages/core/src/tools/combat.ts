@@ -6,7 +6,7 @@ import {
   rollInitiative,
 } from '@cartyx-sim/rules';
 import { z } from 'zod';
-import { isUp } from '../state';
+import { isUp, ownEntry } from '../state';
 import { slugify } from '../text';
 import { defineTool, ToolError } from './types';
 
@@ -29,8 +29,11 @@ export const startCombat = defineTool({
     if (state.combat) throw new ToolError('Combat is already running. Call end_combat first.');
 
     const monsters: Combatant[] = [];
+    // Ids share one namespace across combatants and NPCs, so skip any id either already uses.
     const taken = (id: string) =>
-      state.combatants[id] !== undefined || monsters.some((m) => m.id === id);
+      ownEntry(state.combatants, id) !== undefined ||
+      ownEntry(state.npcs, id) !== undefined ||
+      monsters.some((m) => m.id === id);
     for (const spec of args.monsters) {
       const base = slugify(spec.name);
       if (!base) throw new ToolError(`Cannot build an id from monster name "${spec.name}"`);

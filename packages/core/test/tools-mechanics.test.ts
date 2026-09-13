@@ -3,6 +3,7 @@ import { makeCombatant } from '@cartyx-sim/rules/testing';
 import { describe, expect, it } from 'vitest';
 import { endCombat, startCombat } from '../src/tools/combat';
 import { attack, castSpell, requestCheck } from '../src/tools/mechanics';
+import { introduceNpc } from '../src/tools/narrative';
 import {
   addConditionTool,
   applyDamageTool,
@@ -710,6 +711,28 @@ describe('start_combat and end_combat', () => {
     );
     expect(initiative).toHaveLength(4);
     for (const roll of initiative) expect(roll).toMatchObject({ mode: 'normal' });
+  });
+
+  it('F7: skips a monster id already used by an NPC', async () => {
+    const harness = toolHarness({ rng: scriptedRng([10, 5, 17]) });
+    await harness.run(introduceNpc, { name: 'Kira 1', description: 'A lookalike', invented: true });
+
+    const result = await harness.run(startCombat, {
+      monsters: [
+        {
+          name: 'Npc Kira',
+          ac: 12,
+          maxHp: 7,
+          attacks: [{ name: 'Claw', bonus: 3, damage: '1d4', damageType: 'slashing' }],
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    const added = harness.recorder.events.filter((e) => e.type === 'combatant_added');
+    expect(added).toMatchObject([{ combatant: { id: 'npc-kira-2', name: 'Npc Kira' } }]);
+    expect(harness.recorder.state.combatants['npc-kira-1']).toBeUndefined();
+    expect(harness.recorder.state.npcs['npc-kira-1']).toMatchObject({ name: 'Kira 1' });
   });
 
   it('refuses to start a second combat and ends the current one', async () => {
