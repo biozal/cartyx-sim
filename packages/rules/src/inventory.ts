@@ -19,6 +19,9 @@ export function addItem(combatant: Combatant, name: string, quantity = 1): Comba
 }
 
 export function removeItem(combatant: Combatant, name: string, quantity = 1): Combatant {
+  if (!Number.isInteger(quantity) || quantity < 1) {
+    throw new RulesError(`Quantity must be a positive integer, got ${quantity}`);
+  }
   const existing = combatant.inventory.find((item) => sameItem(item.name, name));
   if (!existing || existing.quantity < quantity) {
     const held = existing?.quantity ?? 0;

@@ -38,5 +38,7 @@ describe('inventory', () => {
 
   it('rejects non-positive quantities', () => {
     expect(() => addItem(pc, 'Rope', 0)).toThrow('positive integer');
+    expect(() => removeItem(pc, 'Healing Potion', 0)).toThrow('positive integer');
+    expect(() => removeItem(pc, 'Healing Potion', -1)).toThrow('positive integer');
   });
 });
