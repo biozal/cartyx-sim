@@ -1,6 +1,17 @@
 import { Command } from 'commander';
 import { parseNumber } from './args';
+import { releaseHeldLocks } from './jsonl-sink';
 import { runSession } from './run';
+
+// An exit by signal skips `finally`, so release any session lock first; otherwise the lock stays
+// behind. Exit codes follow the shell convention of 128 + the signal number.
+const SIGNAL_EXIT_CODES = { SIGINT: 130, SIGTERM: 143 } as const;
+for (const [signal, code] of Object.entries(SIGNAL_EXIT_CODES)) {
+  process.once(signal, () => {
+    console.error(`\nReceived ${signal}; releasing the session lock and exiting.`);
+    void releaseHeldLocks().finally(() => process.exit(code));
+  });
+}
 
 interface RunCommandOptions {
   campaign: string;

@@ -1,13 +1,21 @@
+import { spawnSync } from 'node:child_process';
 import type { FileHandle } from 'node:fs/promises';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SimEvent } from '@cartyx-sim/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { JsonlFileSink, type JsonlFileSinkFs } from '../src/jsonl-sink';
+import { JsonlFileSink, releaseHeldLocks, type JsonlFileSinkFs } from '../src/jsonl-sink';
 
 function notFound(): Error {
   return Object.assign(new Error('not found'), { code: 'ENOENT' });
+}
+
+/** The pid of a process that has already exited. */
+function deadPid(): number {
+  const child = spawnSync(process.execPath, ['-e', '']);
+  if (child.pid === undefined) throw new Error('could not spawn a process');
+  return child.pid;
 }
 
 /** A fake filesystem that records call order/counts and lets one test script the file handle. */
@@ -145,6 +153,54 @@ describe('JsonlFileSink', () => {
     it('releaseLock without a held lock is a no-op', async () => {
       const sink = new JsonlFileSink(join(dir, 'events.jsonl'));
       await expect(sink.releaseLock()).resolves.toBeUndefined();
+    });
+
+    it('F6: replaces a lock whose pid is no longer running and returns that pid', async () => {
+      const path = join(dir, 'events.jsonl');
+      const pid = deadPid();
+      await writeFile(`${path}.lock`, `${pid} 2026-09-13T12:00:00.000Z\n`);
+
+      await expect(new JsonlFileSink(path).acquireLock()).resolves.toBe(pid);
+
+      const content = await readFile(`${path}.lock`, 'utf8');
+      expect(content).toMatch(new RegExp(`^${process.pid} `));
+    });
+
+    it('F6: refuses a lock held by a live pid and leaves it in place', async () => {
+      const path = join(dir, 'events.jsonl');
+      const content = `${process.pid} 2026-09-13T12:00:00.000Z\n`;
+      await writeFile(`${path}.lock`, content);
+
+      await expect(new JsonlFileSink(path).acquireLock()).rejects.toThrow(
+        new RegExp(`held by process ${process.pid}: another run may be active`)
+      );
+
+      expect(await readFile(`${path}.lock`, 'utf8')).toBe(content);
+    });
+
+    it('F6: refuses a lock file with no readable pid rather than guessing it is stale', async () => {
+      const path = join(dir, 'events.jsonl');
+      await writeFile(`${path}.lock`, 'not a pid\n');
+      await expect(new JsonlFileSink(path).acquireLock()).rejects.toThrow(
+        /another run may be active/i
+      );
+      expect(await readFile(`${path}.lock`, 'utf8')).toBe('not a pid\n');
+    });
+
+    it('F6: releaseHeldLocks releases every lock this process still holds', async () => {
+      const first = new JsonlFileSink(join(dir, 'a', 'events.jsonl'));
+      const second = new JsonlFileSink(join(dir, 'b', 'events.jsonl'));
+      const released = new JsonlFileSink(join(dir, 'c', 'events.jsonl'));
+      await first.acquireLock();
+      await second.acquireLock();
+      await released.acquireLock();
+      await released.releaseLock();
+
+      await releaseHeldLocks();
+
+      for (const sink of [first, second, released]) {
+        await expect(stat(`${sink.path}.lock`)).rejects.toThrow();
+      }
     });
   });
 

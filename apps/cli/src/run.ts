@@ -27,13 +27,19 @@ export async function runSession(options: RunOptions): Promise<RunSessionResult>
   const fixture = await loadFixture(options.fixturePath);
   const eventsPath = sessionEventsPath(options.campaignsDir, options.campaign, options.session);
   const sink = new JsonlFileSink(eventsPath);
-  if (!options.resume && (await sink.exists())) {
-    throw new Error(`${eventsPath} already exists. Pass --resume to continue that session.`);
-  }
   const log = options.log ?? (() => {});
 
-  await sink.acquireLock();
+  const stalePid = await sink.acquireLock();
+  if (stalePid !== undefined) {
+    log(
+      `Replaced a stale lock from process ${stalePid}, which is no longer running: ${eventsPath}.lock`
+    );
+  }
   try {
+    // Checked under the lock, so a concurrent run cannot create the log between check and use.
+    if (!options.resume && (await sink.exists())) {
+      throw new Error(`${eventsPath} already exists. Pass --resume to continue that session.`);
+    }
     const director = await Director.create(
       {
         session: options.session,

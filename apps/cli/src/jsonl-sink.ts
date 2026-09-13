@@ -11,6 +11,23 @@ function isAlreadyExists(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'EEXIST';
 }
 
+/** Whether `pid` is a running process on this machine. EPERM means it exists but is not ours. */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !(error instanceof Error && 'code' in error && error.code === 'ESRCH');
+  }
+}
+
+/** The pid a lock file starts with, or undefined if it has none (0 and below are not pids). */
+function lockPid(content: string): number | undefined {
+  const match = /^\s*(\d+)(?!\S)/.exec(content);
+  const pid = match ? Number(match[1]) : NaN;
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+}
+
 /**
  * The subset of `node:fs/promises` the sink needs, injectable so its durability is testable
  * (see Group 5). Narrowed to the exact call shapes used below, rather than the fully overloaded
@@ -25,6 +42,17 @@ export interface JsonlFileSinkFs {
 }
 
 const defaultFs: JsonlFileSinkFs = { open, mkdir, readFile, stat, unlink };
+
+/** Sinks holding a session lock in this process, so a signal handler can release them. */
+const heldLocks = new Set<JsonlFileSink>();
+
+/**
+ * Releases every session lock this process still holds. For signal handlers: a SIGINT or SIGTERM
+ * exit skips `finally` blocks, which would otherwise leave the lock behind.
+ */
+export async function releaseHeldLocks(): Promise<void> {
+  await Promise.allSettled([...heldLocks].map((sink) => sink.releaseLock()));
+}
 
 /**
  * Append-only JSON Lines event log. Each turn is written with one append and an fsync.
@@ -107,35 +135,70 @@ export class JsonlFileSink implements EventSink {
 
   /**
    * Claims an exclusive lock on this session so a second concurrent run is refused instead of
-   * interleaving into the log. Throws if the lock is already held; delete the lock file to clear
-   * a stale one left behind by a crashed run.
+   * interleaving into the log. A lock whose recorded pid is not a running process on this machine
+   * is stale (its run crashed or was killed): it is replaced, and its pid is returned so the
+   * caller can say so. Otherwise returns undefined. Throws if a live process holds the lock, or if
+   * the lock file has no readable pid.
    */
-  async acquireLock(): Promise<void> {
+  async acquireLock(): Promise<number | undefined> {
     await this.fs.mkdir(dirname(this.path), { recursive: true });
-    let handle;
-    try {
-      handle = await this.fs.open(this.lockPath, 'wx');
-    } catch (error) {
-      if (isAlreadyExists(error)) {
-        throw new Error(
-          `${this.lockPath} already exists: another run may be active on this session. If it is ` +
-            'stale (the process that created it is gone), delete the lock file and retry.'
-        );
+    let replacedPid: number | undefined;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let handle: FileHandle;
+      try {
+        handle = await this.fs.open(this.lockPath, 'wx');
+      } catch (error) {
+        if (!isAlreadyExists(error)) throw error;
+        const content = await this.readLock();
+        // Released between the open and the read: try again.
+        if (content === undefined) continue;
+        const pid = lockPid(content);
+        if (attempt > 0 || pid === undefined || isProcessAlive(pid)) throw this.lockHeld(pid);
+        // Only remove the lock if it still names the dead process, so a live run that replaced
+        // it in the meantime keeps its lock.
+        if ((await this.readLock()) === content) await this.removeLock();
+        replacedPid = pid;
+        continue;
       }
-      throw error;
+      // Tracked as soon as the file exists, so a signal while writing it still releases it.
+      heldLocks.add(this);
+      try {
+        await handle.writeFile(`${process.pid} ${new Date().toISOString()}\n`);
+      } finally {
+        await handle.close();
+      }
+      return replacedPid;
     }
-    try {
-      await handle.writeFile(`${process.pid} ${new Date().toISOString()}\n`);
-    } finally {
-      await handle.close();
-    }
+    throw this.lockHeld(undefined);
   }
 
   async releaseLock(): Promise<void> {
+    heldLocks.delete(this);
+    await this.removeLock();
+  }
+
+  private async readLock(): Promise<string | undefined> {
+    try {
+      return await this.fs.readFile(this.lockPath, 'utf8');
+    } catch (error) {
+      if (isNotFound(error)) return undefined;
+      throw error;
+    }
+  }
+
+  private async removeLock(): Promise<void> {
     try {
       await this.fs.unlink(this.lockPath);
     } catch (error) {
       if (!isNotFound(error)) throw error;
     }
+  }
+
+  private lockHeld(pid: number | undefined): Error {
+    const holder = pid === undefined ? '' : ` is held by process ${pid}`;
+    return new Error(
+      `${this.lockPath}${holder || ' already exists'}: another run may be active on this ` +
+        'session. If that process is gone, delete the lock file and retry.'
+    );
   }
 }
