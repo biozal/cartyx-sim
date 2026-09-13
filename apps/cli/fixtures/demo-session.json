@@ -1,0 +1,86 @@
+{
+  "loreCommit": "fixture",
+  "targetMinutes": 0.12,
+  "party": [
+    {
+      "id": "kira",
+      "name": "Kira Vale",
+      "kind": "pc",
+      "level": 3,
+      "abilities": { "str": 10, "dex": 14, "con": 12, "int": 16, "wis": 12, "cha": 10 },
+      "proficiencyBonus": 2,
+      "skillProficiencies": ["investigation", "arcana"],
+      "ac": 15,
+      "maxHp": 24,
+      "hp": 24,
+      "spellSlots": [{ "level": 1, "max": 3, "used": 0 }],
+      "attacks": [
+        { "name": "Light Hammer", "bonus": 5, "damage": "1d4+3", "damageType": "bludgeoning" }
+      ]
+    }
+  ],
+  "seats": { "dm": "dm", "players": { "kira": "player-kira" } },
+  "lore": [
+    {
+      "chunkId": "avalon#sella-vaunt",
+      "source": "kanka-export/markdown/characters/2418574-2418574.md",
+      "title": "Professor Sella Vaunt",
+      "text": "Professor Sella Vaunt teaches applied crystal engines at Avalon Artificers Academy.",
+      "score": 0
+    }
+  ],
+  "script": {
+    "dm": [
+      {
+        "toolCalls": [
+          {
+            "id": "dm-1",
+            "name": "scene_change",
+            "args": {
+              "location": "Avalon Artificers Academy — Crystal Engine Lab",
+              "artPrompt": "A brass-and-crystal workshop lit by humming engines"
+            }
+          },
+          {
+            "id": "dm-2",
+            "name": "narrate",
+            "args": { "text": "The lab lights flicker as you arrive." }
+          },
+          { "id": "dm-3", "name": "hand_off", "args": { "target": { "kind": "open" } } }
+        ]
+      },
+      {
+        "toolCalls": [
+          {
+            "id": "dm-4",
+            "name": "narrate",
+            "args": {
+              "text": "A shadow slips out the east door, leaving frost behind.",
+              "emotion": "whisper"
+            }
+          },
+          {
+            "id": "dm-5",
+            "name": "scene_change",
+            "args": {
+              "location": "Avalon Artificers Academy — East Corridor",
+              "artPrompt": "A frosted corridor at night"
+            }
+          },
+          { "id": "dm-6", "name": "hand_off", "args": { "target": { "kind": "party" } } }
+        ]
+      }
+    ],
+    "player-kira": [
+      {
+        "toolCalls": [
+          {
+            "id": "kira-1",
+            "name": "speak",
+            "args": { "text": "Who turned off the wards?", "emotion": "afraid" }
+          }
+        ]
+      }
+    ]
+  }
+}
