@@ -23,6 +23,8 @@ export interface ToolContext {
   loreThreshold: number;
   /** "dm" or the acting PC's id. */
   actorId: string;
+  /** The configured model seat for the acting DM or PC (e.g. "player-kira"), distinct from actorId. */
+  seat: string;
 }
 
 export interface ToolOutcome {
@@ -100,7 +102,7 @@ export async function runPreparedCall(
     if (error instanceof SessionPausedError) throw error;
     context.recorder.rollback(checkpoint);
     throw new SessionPausedError(
-      context.actorId,
+      context.seat,
       error instanceof Error ? error.message : String(error)
     );
   }

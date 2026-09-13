@@ -57,6 +57,16 @@ function lastUserMessage(request: { messages: { role: string; content: string }[
   return request.messages.filter((m) => m.role === 'user').at(-1)?.content ?? '';
 }
 
+/** A clock that throws on its Nth call (e.g. simulating a clock/emit failure mid-turn) and works otherwise. */
+function flakyNow(failOnCall: number): () => Date {
+  let calls = 0;
+  return () => {
+    calls++;
+    if (calls === failOnCall) throw new Error('clock unavailable');
+    return now();
+  };
+}
+
 /** Every turn's events must be contiguous and seqs must count up from 0 without gaps. */
 function expectWellFormedLog(events: readonly SimEvent[]) {
   expect(events.map((e) => e.seq)).toEqual(events.map((_, index) => index));
@@ -479,6 +489,57 @@ describe('Director', () => {
       'hand_off',
       'turn_end',
     ]);
+  });
+
+  it('pauses with the configured DM seat, not the literal "dm" actor id, on an unexpected tool error', async () => {
+    const gmConfig = config({
+      seats: { dm: 'game-master', players: { kira: 'player-kira', tomas: 'player-tomas' } },
+    });
+    const { deps: built, sink } = deps({
+      'game-master': [respond(toolCall('narrate', { text: 'The engines hum quietly.' }))],
+    });
+    const director = await Director.create(gmConfig, { ...built, now: flakyNow(2) });
+
+    const result = await director.run();
+
+    expect(result).toMatchObject({
+      status: 'paused',
+      seat: 'game-master',
+      error: 'clock unavailable',
+    });
+    expect(sink.events.map((e) => e.type)).toEqual(['session_start', 'ooc_note']);
+    expect(sink.events.at(-1)).toMatchObject({
+      type: 'ooc_note',
+      visibility: 'dm',
+      text: expect.stringContaining('game-master'),
+    });
+  });
+
+  it('pauses with the configured player seat, not the bare PC id, on an unexpected tool error', async () => {
+    const { deps: built, sink } = deps({
+      dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } }))],
+      'player-kira': [respond(toolCall('speak', { text: 'Hello?' }))],
+    });
+    const director = await Director.create(config(), { ...built, now: flakyNow(4) });
+
+    const result = await director.run();
+
+    expect(result).toMatchObject({
+      status: 'paused',
+      seat: 'player-kira',
+      error: 'clock unavailable',
+    });
+    expect(sink.events.map((e) => e.type)).toEqual([
+      'session_start',
+      'hand_off',
+      'turn_end',
+      'ooc_note',
+    ]);
+    expect(sink.events.at(-1)).toMatchObject({
+      type: 'ooc_note',
+      visibility: 'dm',
+      text: expect.stringContaining('player-kira'),
+    });
   });
 
   it('refuses to resume a finished session or a different session number', async () => {

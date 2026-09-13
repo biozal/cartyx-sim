@@ -223,7 +223,7 @@ export class Director {
       transcript: this.transcript('dm'),
       instruction: this.dmInstruction(reason, combatantId, nudge),
     });
-    const context = this.toolContext(recorder, 'dm');
+    const context = this.toolContext(recorder, 'dm', seat);
     const pcNames = this.state.partyIds.map(
       (id) => ownEntry(this.state.combatants, id)?.name ?? id
     );
@@ -349,7 +349,7 @@ export class Director {
     const otherPcNames = this.state.partyIds
       .filter((id) => id !== pcId)
       .map((id) => ownEntry(this.state.combatants, id)?.name ?? id);
-    const context = this.toolContext(recorder, pcId);
+    const context = this.toolContext(recorder, pcId, seat);
 
     for (let attempt = 0; ; attempt++) {
       const response = await this.callModel(seat, messages, PLAYER_TOOL_SCHEMAS);
@@ -464,7 +464,7 @@ export class Director {
     return renderTranscript(this.history, this.state, audience, this.transcriptWindow);
   }
 
-  private toolContext(recorder: TurnRecorder, actorId: string): ToolContext {
+  private toolContext(recorder: TurnRecorder, actorId: string, seat: string): ToolContext {
     return {
       recorder,
       history: this.history,
@@ -472,6 +472,7 @@ export class Director {
       lore: { search: (query, limit) => this.searchLore(query, limit) },
       loreThreshold: this.loreThreshold,
       actorId,
+      seat,
     };
   }
 

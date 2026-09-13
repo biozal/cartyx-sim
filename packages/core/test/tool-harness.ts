@@ -38,19 +38,22 @@ export function toolHarness(
     rng?: Rng;
     lore?: LoreIndex;
     actorId?: string;
+    seat?: string;
   } = {}
 ): ToolHarness {
   const started = options.state
     ? { state: options.state, history: options.history ?? [] }
     : startedState();
   const recorder = new TurnRecorder(started.state, 'turn-1', now);
+  const actorId = options.actorId ?? 'dm';
   const context: ToolContext = {
     recorder,
     history: started.history,
     rng: options.rng ?? scriptedRng([]),
     lore: options.lore ?? new StaticLoreIndex([SELLA_CHUNK]),
     loreThreshold: 0.35,
-    actorId: options.actorId ?? 'dm',
+    actorId,
+    seat: options.seat ?? actorId,
   };
   return {
     recorder,
