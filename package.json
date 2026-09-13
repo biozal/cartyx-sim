@@ -13,7 +13,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p packages/rules/tsconfig.json && tsc -p packages/core/tsconfig.json",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "sim": "tsx apps/cli/src/main.ts"
