@@ -367,8 +367,9 @@ describe('Director', () => {
       'narration',
       'hand_off',
       'turn_end',
-      'ooc_note',
+      'session_paused',
     ]);
+    expect(sink.events.at(-1)).toMatchObject({ kind: 'seat', seat: 'player-kira' });
 
     const second = deps(
       {
@@ -452,11 +453,13 @@ describe('Director', () => {
 
     expect(result).toMatchObject({ status: 'paused', seat: 'lore', error: 'ECONNREFUSED' });
     expect(sleeps).toEqual([5]);
-    expect(sink.events.map((e) => e.type)).toEqual(['session_start', 'ooc_note']);
+    expect(sink.events.map((e) => e.type)).toEqual(['session_start', 'session_paused']);
     expect(sink.events.at(-1)).toMatchObject({
-      type: 'ooc_note',
+      type: 'session_paused',
       visibility: 'dm',
-      text: expect.stringContaining('ECONNREFUSED'),
+      seat: 'lore',
+      kind: 'seat',
+      reason: expect.stringContaining('ECONNREFUSED'),
     });
   });
 
@@ -512,11 +515,13 @@ describe('Director', () => {
       seat: 'game-master',
       error: 'clock unavailable',
     });
-    expect(sink.events.map((e) => e.type)).toEqual(['session_start', 'ooc_note']);
+    expect(sink.events.map((e) => e.type)).toEqual(['session_start', 'session_paused']);
     expect(sink.events.at(-1)).toMatchObject({
-      type: 'ooc_note',
+      type: 'session_paused',
       visibility: 'dm',
-      text: expect.stringContaining('game-master'),
+      seat: 'game-master',
+      kind: 'seat',
+      reason: expect.stringContaining('game-master'),
     });
   });
 
@@ -538,12 +543,14 @@ describe('Director', () => {
       'session_start',
       'hand_off',
       'turn_end',
-      'ooc_note',
+      'session_paused',
     ]);
     expect(sink.events.at(-1)).toMatchObject({
-      type: 'ooc_note',
+      type: 'session_paused',
       visibility: 'dm',
-      text: expect.stringContaining('player-kira'),
+      seat: 'player-kira',
+      kind: 'seat',
+      reason: expect.stringContaining('player-kira'),
     });
   });
 
@@ -825,8 +832,9 @@ describe('Director', () => {
         'session_start',
         'hand_off',
         'turn_end',
-        'ooc_note',
+        'session_paused',
       ]);
+      expect(sink.events.at(-1)).toMatchObject({ kind: 'seat', seat: 'player-kira' });
       expect(foldEvents(sink.events)).toEqual(director.currentState);
     });
   });

@@ -58,6 +58,48 @@ describe('applyEvent', () => {
     expect(recorder.state.turnWords).toBe(0);
   });
 
+  it('counts stalled turns for turns with no progress, and resets on progress', () => {
+    const recorder = recorderAfterStart();
+    // hand_off and pass are bookkeeping, not progress: this turn is stalled.
+    recorder.emit({ type: 'hand_off', target: { kind: 'party' }, responders: ['kira'] });
+    recorder.emit({ type: 'turn_end', actor: 'dm' });
+    expect(recorder.state.stalledTurns).toBe(1);
+    recorder.emit({ type: 'pass', actor: 'kira' });
+    recorder.emit({ type: 'turn_end', actor: 'kira' });
+    expect(recorder.state.stalledTurns).toBe(2);
+
+    // A state_change is progress even with no spoken words, so the next turn resets the count.
+    recorder.emit({
+      type: 'state_change',
+      entity: 'kira',
+      field: 'hp',
+      before: 10,
+      after: 8,
+      cause: 'test',
+    });
+    recorder.emit({ type: 'turn_end', actor: 'dm' });
+    expect(recorder.state.stalledTurns).toBe(0);
+  });
+
+  it('resets every backstop counter on session_paused', () => {
+    const recorder = recorderAfterStart();
+    recorder.emit({ type: 'hand_off', target: { kind: 'party' }, responders: [] });
+    recorder.emit({ type: 'turn_end', actor: 'dm' });
+    expect(recorder.state.stalledTurns).toBe(1);
+    expect(recorder.state.silentTurns).toBe(1);
+    expect(recorder.state.idleHandOffs).toBe(1);
+    recorder.emit({
+      type: 'session_paused',
+      visibility: 'dm',
+      seat: 'dm',
+      reason: 'stuck',
+      kind: 'backstop',
+    });
+    expect(recorder.state.stalledTurns).toBe(0);
+    expect(recorder.state.silentTurns).toBe(0);
+    expect(recorder.state.idleHandOffs).toBe(0);
+  });
+
   it('queues hand-off responders and removes them as they finish', () => {
     const recorder = recorderAfterStart();
     recorder.emit({ type: 'hand_off', target: { kind: 'party' }, responders: ['kira', 'tomas'] });

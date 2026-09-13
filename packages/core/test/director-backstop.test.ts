@@ -60,8 +60,10 @@ describe('runaway-loop backstop', () => {
     const result = await run.run(50);
     expect(result).toMatchObject({ status: 'paused', seat: 'dm' });
     expect(sink.events.at(-1)).toMatchObject({
-      type: 'ooc_note',
-      text: expect.stringContaining('No one has spoken for 5 turns'),
+      type: 'session_paused',
+      seat: 'dm',
+      kind: 'backstop',
+      reason: expect.stringContaining('No one has spoken or changed the game state for 5 turns'),
     });
     expect(foldEvents(sink.events)).toEqual(run.currentState);
   });
@@ -100,9 +102,77 @@ describe('runaway-loop backstop', () => {
     expect(result).toMatchObject({ status: 'paused' });
     expect(run.currentState.combat).not.toBeNull();
     expect(sink.events.at(-1)).toMatchObject({
-      type: 'ooc_note',
-      text: expect.stringContaining('No one has spoken for 3 turns'),
+      type: 'session_paused',
+      kind: 'backstop',
+      reason: expect.stringContaining('No one has spoken or changed the game state for 3 turns'),
     });
+  });
+
+  it('does not pause a mechanics-only combat that keeps making progress (final review Probe H)', async () => {
+    const goblin = makeCombatant({
+      id: 'goblin-1',
+      name: 'Goblin',
+      kind: 'monster',
+      hp: 7,
+      maxHp: 7,
+      attacks: [{ name: 'Scimitar', bonus: 4, damage: '1d6+2', damageType: 'slashing' }],
+    });
+    const sink = new MemorySink();
+    const { state, history } = startedState([kira]);
+    const recorder = new TurnRecorder(state, 'setup-combat', now);
+    recorder.emit({ type: 'combatant_added', combatant: goblin });
+    recorder.emit({
+      type: 'combat_start',
+      order: [
+        { combatantId: 'kira', roll: 20, dexMod: 2, total: 22 },
+        { combatantId: 'goblin-1', roll: 10, dexMod: 0, total: 10 },
+      ],
+    });
+    await sink.append([...history, ...recorder.events]);
+
+    // 3 turns per round (the PC declares, the DM resolves it, the DM takes the goblin's turn) for
+    // well past the pause limit below, with no narration at all: only attack and hand_off.
+    const rounds = 6;
+    const dmScript = Array.from({ length: rounds }, () => [
+      respond(
+        toolCall('attack', {
+          attackerId: 'kira',
+          targetId: 'goblin-1',
+          attackName: 'Light Hammer',
+        }),
+        handOffParty
+      ),
+      respond(
+        toolCall('attack', { attackerId: 'goblin-1', targetId: 'kira', attackName: 'Scimitar' }),
+        handOffParty
+      ),
+    ]).flat();
+    const playerScript = Array.from({ length: rounds }, () =>
+      respond(toolCall('act', { intent: 'attacks the goblin', targetId: 'goblin-1' }))
+    );
+    const model = new ScriptedModelClient({ dm: dmScript, 'player-kira': playerScript });
+    const run = await Director.create(
+      config({
+        party: [kira],
+        seats: { dm: 'dm', players: { kira: 'player-kira' } },
+        silentTurnLimit: 99,
+        silentTurnPauseLimit: 5,
+      }),
+      {
+        model,
+        lore: new StaticLoreIndex([]),
+        rng: { die: () => 1 }, // a natural 1 always misses, so the fight runs on with no damage
+        sink,
+        prompts: basicPrompts,
+        now,
+      }
+    );
+
+    const result = await run.run(rounds * 3);
+
+    expect(result.status).toBe('turn_limit');
+    expect(sink.events.some((event) => event.type === 'session_paused')).toBe(false);
+    expect(foldEvents(sink.events)).toEqual(run.currentState);
   });
 
   it('pauses when the DM keeps handing off to a party that cannot act', async () => {
@@ -127,9 +197,56 @@ describe('runaway-loop backstop', () => {
     expect(result).toMatchObject({ status: 'paused', seat: 'dm' });
     expect(model.remaining('dm')).toBe(1);
     expect(sink.events.at(-1)).toMatchObject({
-      type: 'ooc_note',
-      text: expect.stringContaining('handed off 2 times in a row'),
+      type: 'session_paused',
+      seat: 'dm',
+      kind: 'backstop',
+      reason: expect.stringContaining('handed off 2 times in a row'),
     });
+  });
+
+  it('resumes after a backstop pause with a fresh budget, and pauses again if still stuck', async () => {
+    const downed = [
+      { ...kira, hp: 0, conditions: ['unconscious' as const] },
+      { ...tomas, hp: 0, conditions: ['unconscious' as const] },
+    ];
+    const narrateAndHandOff = () =>
+      respond(
+        toolCall('narrate', { text: 'The party lies still on the cold floor.' }),
+        handOffParty
+      );
+    const sink = new MemorySink();
+    const {
+      director: firstRun,
+      sink: firstSink,
+      model: firstModel,
+    } = await director(
+      { dm: [narrateAndHandOff(), narrateAndHandOff(), narrateAndHandOff()] },
+      { party: downed, idleHandOffLimit: 2 },
+      sink
+    );
+    const paused = await firstRun.run(50);
+    expect(paused.status).toBe('paused');
+    expect(firstModel.remaining('dm')).toBe(1);
+    expect(firstSink.events.at(-1)).toMatchObject({ type: 'session_paused', kind: 'backstop' });
+    expect(firstRun.currentState.idleHandOffs).toBe(0);
+
+    // Resuming loads a Director from the same log; the backstop's own reset (not a fresh process)
+    // is what has to give the table a new budget, so the very next step must run a turn, not
+    // immediately re-throw the same pause.
+    const { director: resumed, model: resumedModel } = await director(
+      { dm: [narrateAndHandOff(), narrateAndHandOff(), narrateAndHandOff()] },
+      { party: downed, idleHandOffLimit: 2 },
+      sink
+    );
+    const stepResult = await resumed.step();
+    expect(stepResult).toBe('continue');
+    expect(resumedModel.remaining('dm')).toBe(2);
+
+    // Still stuck: the same cause trips the backstop again after another full idleHandOffLimit.
+    const result = await resumed.run(50);
+    expect(result).toMatchObject({ status: 'paused', seat: 'dm' });
+    expect(sink.events.at(-1)).toMatchObject({ type: 'session_paused', kind: 'backstop' });
+    expect(foldEvents(sink.events)).toEqual(resumed.currentState);
   });
 
   it('caps DM tool calls per beat and forces the hand-off', async () => {

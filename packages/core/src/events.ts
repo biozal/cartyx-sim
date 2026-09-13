@@ -172,6 +172,13 @@ export const SimEvent = z.discriminatedUnion('type', [
     resolution: z.enum(['re_prompted', 'accepted_with_flag', 'forced_pass', 'forced_hand_off']),
   }),
   z.object({ ...base, type: z.literal('ooc_note'), text: z.string().min(1) }),
+  z.object({
+    ...base,
+    type: z.literal('session_paused'),
+    seat: z.string().min(1),
+    reason: z.string().min(1),
+    kind: z.enum(['seat', 'backstop']),
+  }),
 ]);
 export type SimEvent = z.output<typeof SimEvent>;
 export type SimEventType = SimEvent['type'];

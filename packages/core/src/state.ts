@@ -1,6 +1,24 @@
 import { Combatant, type InitiativeEntry } from '@cartyx-sim/rules';
-import type { HandOffTarget, SimEvent } from './events';
+import type { HandOffTarget, SimEvent, SimEventType } from './events';
 import { countWords } from './text';
+
+/**
+ * Event types that count as real progress for the runaway-loop backstop: they change the story or
+ * the game state, not just bookkeeping (`hand_off`, `pass`, `combat_turn`, `validator_flag`,
+ * `ooc_note`, lore events).
+ */
+const PROGRESS_EVENT_TYPES: ReadonlySet<SimEventType> = new Set([
+  'narration',
+  'dialogue',
+  'action',
+  'roll',
+  'state_change',
+  'combatant_added',
+  'npc_introduced',
+  'scene_change',
+  'combat_start',
+  'combat_end',
+]);
 
 export interface NpcRecord {
   npcId: string;
@@ -38,6 +56,10 @@ export interface GameState {
   silentTurns: number;
   /** Spoken words so far in the turn being recorded. */
   turnWords: number;
+  /** Whether the turn being recorded has made progress (a `PROGRESS_EVENT_TYPES` event), in-flight. */
+  turnProgress: boolean;
+  /** Consecutive completed turns with no spoken words and no game-state progress. */
+  stalledTurns: number;
   /** Consecutive out-of-combat hand-offs that no player character could answer. */
   idleHandOffs: number;
 }
@@ -69,6 +91,8 @@ export function initialState(): GameState {
     wordsBySpeaker: {},
     silentTurns: 0,
     turnWords: 0,
+    turnProgress: false,
+    stalledTurns: 0,
     idleHandOffs: 0,
   };
 }
@@ -80,6 +104,7 @@ export function applyEvent(state: GameState, event: SimEvent): GameState {
   }
   const next = structuredClone(state);
   next.lastSeq = event.seq;
+  if (PROGRESS_EVENT_TYPES.has(event.type)) next.turnProgress = true;
 
   switch (event.type) {
     case 'session_start':
@@ -147,10 +172,18 @@ export function applyEvent(state: GameState, event: SimEvent): GameState {
     case 'turn_end':
       next.silentTurns = next.turnWords > 0 ? 0 : next.silentTurns + 1;
       next.turnWords = 0;
+      next.stalledTurns = next.turnProgress ? 0 : next.stalledTurns + 1;
+      next.turnProgress = false;
       if (next.partyIds.includes(event.actor)) {
         if (next.combat) next.combat.declared = true;
         else next.pendingResponders = next.pendingResponders.filter((id) => id !== event.actor);
       }
+      break;
+    case 'session_paused':
+      // The operator has seen the pause; resuming grants a fresh budget for every backstop counter.
+      next.silentTurns = 0;
+      next.stalledTurns = 0;
+      next.idleHandOffs = 0;
       break;
     default:
       break;

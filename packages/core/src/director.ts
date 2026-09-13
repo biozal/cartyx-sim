@@ -49,7 +49,10 @@ export interface DirectorConfig {
   transcriptWindow?: number;
   /** Consecutive silent turns before the DM is nudged to narrate. Default 6. */
   silentTurnLimit?: number;
-  /** Consecutive silent turns, in or out of combat, before the session pauses. Default 12. */
+  /**
+   * Consecutive completed turns, in or out of combat, with no spoken words and no game-state
+   * progress before the session pauses. Default 12.
+   */
   silentTurnPauseLimit?: number;
   /** Consecutive hand-offs that no player character can answer before the session pauses. Default 3. */
   idleHandOffLimit?: number;
@@ -218,9 +221,11 @@ export class Director {
       if (!(error instanceof SessionPausedError)) throw error;
       const recorder = this.newRecorder();
       recorder.emit({
-        type: 'ooc_note',
+        type: 'session_paused',
         visibility: 'dm',
-        text: `Session paused. ${error.message}`,
+        seat: error.seat,
+        reason: `Session paused. ${error.message}`,
+        kind: error.kind,
       });
       await this.commit(recorder);
       return { status: 'paused', state: this.state, seat: error.seat, error: error.reason };
@@ -272,18 +277,22 @@ export class Director {
    */
   private pauseIfStuck(): void {
     const seat = this.config.seats.dm;
-    if (this.state.silentTurns >= this.silentTurnPauseLimit) {
+    if (this.state.stalledTurns >= this.silentTurnPauseLimit) {
       throw new SessionPausedError(
         seat,
-        `No one has spoken for ${this.state.silentTurns} turns in a row. Check the seats' model ` +
-          'output, then resume.'
+        `No one has spoken or changed the game state for ${this.state.stalledTurns} turns in a ` +
+          `row. Resuming gives the table another ${this.silentTurnPauseLimit} turns; check the ` +
+          "seats' model output, or raise silentTurnPauseLimit.",
+        'backstop'
       );
     }
     if (this.state.idleHandOffs >= this.idleHandOffLimit) {
       throw new SessionPausedError(
         seat,
         `The DM handed off ${this.state.idleHandOffs} times in a row with no player character able ` +
-          'to respond. Resolve the downed party (or raise idleHandOffLimit), then resume.'
+          `to respond. Resuming gives the table another ${this.idleHandOffLimit} chances; resolve ` +
+          'the downed party, or raise idleHandOffLimit.',
+        'backstop'
       );
     }
   }

@@ -76,9 +76,9 @@ Until Plan 2B there is no lore index: every lore lookup reports a gap, and the D
 A session pauses (exit code 2) instead of crashing when:
 
 - a seat keeps failing after its fallbacks and the retry delays (the message names the seat);
-- nobody has spoken for 12 turns in a row;
+- nobody has spoken or changed the game state for 12 turns in a row;
 - the DM hands off 3 times in a row with no player character able to respond.
 
-Fix the cause, then continue with the same command plus `--resume`. The log is the source of truth: resuming uses the logged party, target minutes, and lore commit.
+Fix the cause, then continue with the same command plus `--resume`: the log is the source of truth, so resuming uses the logged party, target minutes, and lore commit, and a backstop pause (the last two cases above) gives the table a fresh budget of turns or hand-offs. If the cause is unfixed, play continues until the same backstop trips again after another full limit.
 
 Ctrl-C releases the session lock before exiting. If a run was killed without releasing it, the next run replaces a lock whose process is no longer running and says so.
