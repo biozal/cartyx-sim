@@ -748,6 +748,45 @@ describe('Director', () => {
     ).rejects.toThrow(/lore commit/i);
   });
 
+  describe('F4: resuming with a changed party', () => {
+    async function startedSink(): Promise<MemorySink> {
+      const sink = new MemorySink();
+      const { deps: built } = deps({}, { sink });
+      await (await Director.create(config(), built)).step();
+      expect(sink.events.map((e) => e.type)).toEqual(['session_start']);
+      return sink;
+    }
+
+    it('refuses to resume when a logged PC has no configured seat, naming the PC', async () => {
+      const sink = await startedSink();
+      const { deps: built } = deps({}, { sink, turnPrefix: 'resumed' });
+      await expect(
+        Director.create(
+          config({ party: [kira], seats: { dm: 'dm', players: { kira: 'player-kira' } } }),
+          built
+        )
+      ).rejects.toThrow('No player seat configured for "tomas"');
+      expect(sink.events).toHaveLength(1);
+    });
+
+    it('refuses to resume when the configured party differs from the logged party', async () => {
+      const sink = await startedSink();
+      const { deps: built } = deps({}, { sink, turnPrefix: 'resumed' });
+      await expect(Director.create(config({ party: [kira] }), built)).rejects.toThrow(
+        /started with party "kira, tomas", but the configured party is "kira"/
+      );
+      expect(sink.events).toHaveLength(1);
+    });
+
+    it('still resumes when the configured party lists the logged PCs in a different order', async () => {
+      const sink = await startedSink();
+      const { deps: built } = deps({}, { sink, turnPrefix: 'resumed' });
+      await expect(
+        Director.create(config({ party: [tomas, kira] }), built)
+      ).resolves.toBeInstanceOf(Director);
+    });
+  });
+
   it('G4.4: re-prompts a player after a tool execution error instead of forcing a pass', async () => {
     const {
       deps: built,

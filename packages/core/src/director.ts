@@ -75,6 +75,11 @@ function toolMessage(call: ToolCall, content: string): ChatMessage {
   return { role: 'tool', toolCallId: call.id, toolName: call.name, content };
 }
 
+/** The same ids, ignoring order. */
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  return JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+}
+
 /** A text-only response is treated as a call to the seat's main speaking tool. */
 function callsFromResponse(response: ModelResponse, fallbackTool: string, id: string): ToolCall[] {
   if (response.toolCalls.length > 0) return response.toolCalls;
@@ -116,11 +121,6 @@ export class Director {
   /** Loads any existing events from the sink and resumes from them. */
   static async create(config: DirectorConfig, deps: DirectorDeps): Promise<Director> {
     if (!config.seats.dm) throw new Error('No DM seat configured.');
-    for (const pc of config.party) {
-      if (!config.seats.players[pc.id]) {
-        throw new Error(`No player seat configured for "${pc.id}".`);
-      }
-    }
     const prior = await deps.sink.readAll();
     const director = new Director(config, deps, prior);
     const { state } = director;
@@ -128,6 +128,21 @@ export class Director {
     if (state.session !== null && state.session !== config.session) {
       throw new Error(
         `Event log belongs to session ${state.session}, not session ${config.session}`
+      );
+    }
+    // A resumed session schedules the logged party (the log wins over config), so every logged
+    // PC needs a seat; a new session plays the configured party.
+    const configuredIds = config.party.map((pc) => pc.id);
+    const partyIds = state.session === null ? configuredIds : state.partyIds;
+    for (const id of partyIds) {
+      if (!ownEntry(config.seats.players, id)) {
+        throw new Error(`No player seat configured for "${id}".`);
+      }
+    }
+    if (state.session !== null && !sameIds(configuredIds, state.partyIds)) {
+      throw new Error(
+        `Session ${state.session} started with party "${state.partyIds.join(', ')}", but the ` +
+          `configured party is "${configuredIds.join(', ')}". Resume with the original party.`
       );
     }
     if (state.loreCommit !== null && state.loreCommit !== config.loreCommit) {
@@ -371,7 +386,7 @@ export class Director {
   private async playerTurn(pcId: string, reason: 'response' | 'combat_turn'): Promise<void> {
     const recorder = this.newRecorder();
     const pc = ownEntry(this.state.combatants, pcId);
-    const seat = this.config.seats.players[pcId];
+    const seat = ownEntry(this.config.seats.players, pcId);
     if (!pc || !seat) throw new Error(`No player seat configured for "${pcId}"`);
 
     const instruction =
