@@ -1,5 +1,5 @@
 import type { FileHandle } from 'node:fs/promises';
-import { mkdir, open, readFile, stat, unlink } from 'node:fs/promises';
+import { mkdir, open, readFile, stat, truncate, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { SimEvent, type EventSink } from '@cartyx-sim/core';
 
@@ -39,9 +39,10 @@ export interface JsonlFileSinkFs {
   readFile: (path: string, encoding: BufferEncoding) => Promise<string>;
   stat: (path: string) => Promise<unknown>;
   unlink: (path: string) => Promise<void>;
+  truncate: (path: string, length: number) => Promise<void>;
 }
 
-const defaultFs: JsonlFileSinkFs = { open, mkdir, readFile, stat, unlink };
+const defaultFs: JsonlFileSinkFs = { open, mkdir, readFile, stat, unlink, truncate };
 
 /** Sinks holding a session lock in this process, so a signal handler can release them. */
 const heldLocks = new Set<JsonlFileSink>();
@@ -65,6 +66,14 @@ export class JsonlFileSink implements EventSink {
   private readonly fs: JsonlFileSinkFs;
   private readonly lockPath: string;
   private lastSeq: number | undefined;
+  /** How to make the file end cleanly before the next append, when `readAll` found it did not. */
+  private repair: { truncateTo: number } | { appendNewline: true } | undefined;
+  /**
+   * Set by `readAll` when the log ended in an unterminated line that is not a valid event: the
+   * remains of a write cut off by a crash or power loss. The line is ignored on read and removed
+   * before the next append.
+   */
+  tornTail: { line: number; text: string } | undefined;
 
   constructor(
     readonly path: string,
@@ -96,13 +105,23 @@ export class JsonlFileSink implements EventSink {
       throw error;
     }
     const events: SimEvent[] = [];
-    for (const [index, line] of content.split('\n').entries()) {
+    const lines = content.split('\n');
+    const terminated = content === '' || content.endsWith('\n');
+    this.tornTail = undefined;
+    this.repair = undefined;
+    for (const [index, line] of lines.entries()) {
       if (line.trim() === '') continue;
       const number = index + 1;
       let event: SimEvent;
       try {
         event = SimEvent.parse(JSON.parse(line));
       } catch (error) {
+        // Only an unterminated final line can be a torn write; anything else is corruption.
+        if (!terminated && index === lines.length - 1) {
+          this.tornTail = { line: number, text: line };
+          this.repair = { truncateTo: Buffer.byteLength(content) - Buffer.byteLength(line) };
+          break;
+        }
         const reason = error instanceof Error ? error.message : String(error);
         throw new Error(`${this.path}:${number}: invalid event (${reason})`);
       }
@@ -115,6 +134,7 @@ export class JsonlFileSink implements EventSink {
       }
       events.push(event);
     }
+    if (!terminated && !this.tornTail) this.repair = { appendNewline: true };
     this.lastSeq = events.length - 1;
     return events;
   }
@@ -131,13 +151,21 @@ export class JsonlFileSink implements EventSink {
       );
     }
     await this.fs.mkdir(dirname(this.path), { recursive: true });
+    if (this.repair && 'truncateTo' in this.repair) {
+      await this.fs.truncate(this.path, this.repair.truncateTo);
+    }
+    const separator = this.repair && 'appendNewline' in this.repair ? '\n' : '';
     const handle = await this.fs.open(this.path, 'a');
     try {
-      await handle.appendFile(`${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
+      await handle.appendFile(
+        `${separator}${events.map((event) => JSON.stringify(event)).join('\n')}\n`
+      );
       await handle.sync();
     } finally {
       await handle.close();
     }
+    this.repair = undefined;
+    this.tornTail = undefined;
     this.lastSeq = events.at(-1)!.seq;
   }
 

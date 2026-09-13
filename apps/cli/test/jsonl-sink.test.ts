@@ -26,6 +26,7 @@ function fakeFs(handle: {
 }): { fs: JsonlFileSinkFs; calls: string[] } {
   const calls: string[] = [];
   const fs: JsonlFileSinkFs = {
+    truncate: async () => {},
     open: async () => {
       calls.push('open');
       return {
@@ -226,6 +227,7 @@ describe('JsonlFileSink', () => {
       const real = await import('node:fs/promises');
       const calls: string[] = [];
       const fs: JsonlFileSinkFs = {
+        truncate: (path, length) => real.truncate(path, length),
         open: (path, flags) => {
           calls.push('open');
           return real.open(path, flags);

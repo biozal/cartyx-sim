@@ -63,6 +63,12 @@ export async function runSession(options: RunOptions): Promise<RunSessionResult>
         },
       }
     );
+    if (sink.tornTail) {
+      log(
+        `Ignoring an incomplete final line (line ${sink.tornTail.line}) left by an interrupted ` +
+          `write; it will be removed on the next write: ${eventsPath}`
+      );
+    }
     const result = await director.run();
     return { ...result, eventsPath };
   } finally {
