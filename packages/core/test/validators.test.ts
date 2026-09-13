@@ -7,7 +7,7 @@ describe('validateDmText', () => {
   it.each([
     'Kira decides to open the door.',
     'Tomas Reed draws his sword and charges.',
-    'kira says she agrees.',
+    'Kira says she agrees.',
   ])('flags the DM controlling a PC: "%s"', (text) => {
     expect(validateDmText(text, { pcNames, mechanicsToolCalled: false })?.rule).toBe(
       'dm_controls_pc'
@@ -76,6 +76,47 @@ describe('validateDmText', () => {
       'Kira hears a click.',
     ])('still accepts: "%s"', (text) => {
       expect(validateDmText(text, { pcNames, mechanicsToolCalled: false })).toBeNull();
+    });
+  });
+
+  describe('G4.3: fewer DM validator false positives', () => {
+    it('accepts a capitalized common word that only lowercase-matches a PC first name', () => {
+      expect(
+        validateDmText('The guards will attack at dawn.', {
+          pcNames: ['Will Harrow'],
+          mechanicsToolCalled: false,
+        })
+      ).toBeNull();
+    });
+
+    it('accepts a PC first name that appears lowercase as an ordinary word', () => {
+      expect(
+        validateDmText('The old sage says nothing.', {
+          pcNames: ['Sage Thorn'],
+          mechanicsToolCalled: false,
+        })
+      ).toBeNull();
+    });
+
+    it('accepts a mechanics-shaped number with no damage/HP noun', () => {
+      expect(
+        validateDmText('The merchant takes 5 gold from the table.', {
+          pcNames,
+          mechanicsToolCalled: false,
+        })
+      ).toBeNull();
+    });
+
+    it.each([
+      'The goblin deals 7 damage to you.',
+      'You take 5 points of fire damage.',
+      'Kira loses 3 hit points.',
+      'The guard rolls a 17.',
+      'Tomas regains 4 hit points.',
+    ])('still flags mechanics without a tool: "%s"', (text) => {
+      expect(validateDmText(text, { pcNames, mechanicsToolCalled: false })?.rule).toBe(
+        'mechanics_without_tool'
+      );
     });
   });
 });
