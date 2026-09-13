@@ -63,8 +63,8 @@ export const applyDamageTool = defineTool({
   parameters: z.object({
     targetId: z.string().min(1),
     ...AmountArgs,
-    damageType: z.string().min(1),
-    reason: z.string().min(1),
+    damageType: z.string().trim().min(1),
+    reason: z.string().trim().min(1),
   }),
   run(args, { recorder, rng }) {
     const target = getCombatant(recorder.state, args.targetId);
@@ -85,7 +85,7 @@ export const healTool = defineTool({
   parameters: z.object({
     targetId: z.string().min(1),
     ...AmountArgs,
-    reason: z.string().min(1),
+    reason: z.string().trim().min(1),
   }),
   run(args, { recorder, rng }) {
     const target = getCombatant(recorder.state, args.targetId);
@@ -105,7 +105,7 @@ export const addConditionTool = defineTool({
   parameters: z.object({
     targetId: z.string().min(1),
     condition: Condition,
-    reason: z.string().min(1),
+    reason: z.string().trim().min(1),
   }),
   run(args, { recorder }) {
     const target = getCombatant(recorder.state, args.targetId);
@@ -120,7 +120,7 @@ export const removeConditionTool = defineTool({
   parameters: z.object({
     targetId: z.string().min(1),
     condition: Condition,
-    reason: z.string().min(1),
+    reason: z.string().trim().min(1),
   }),
   run(args, { recorder }) {
     const target = getCombatant(recorder.state, args.targetId);
@@ -137,7 +137,7 @@ export const giveItem = defineTool({
   description: "Add an item to a combatant's inventory.",
   parameters: z.object({
     targetId: z.string().min(1),
-    item: z.string().min(1),
+    item: z.string().trim().min(1),
     quantity: z.number().int().min(1).default(1),
   }),
   run(args, { recorder }) {
@@ -152,7 +152,7 @@ export const removeItemTool = defineTool({
   description: "Remove an item from a combatant's inventory (used, lost, or handed over).",
   parameters: z.object({
     targetId: z.string().min(1),
-    item: z.string().min(1),
+    item: z.string().trim().min(1),
     quantity: z.number().int().min(1).default(1),
   }),
   run(args, { recorder }) {

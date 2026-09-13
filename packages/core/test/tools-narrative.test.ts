@@ -33,6 +33,13 @@ describe('narrate', () => {
     expect(harness.recorder.events).toHaveLength(0);
   });
 
+  it('rejects whitespace-only text before running', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(narrate, { text: '   ' });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
   it('publishes a JSON schema where defaulted fields are optional', () => {
     expect(toToolSchema(narrate).parameters).toMatchObject({ required: ['text'] });
   });

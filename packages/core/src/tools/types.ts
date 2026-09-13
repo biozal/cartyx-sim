@@ -84,11 +84,17 @@ export async function runPreparedCall(
   args: unknown,
   context: ToolContext
 ): Promise<{ ok: true; outcome: ToolOutcome } | { ok: false; error: string }> {
+  const checkpoint = context.recorder.checkpoint();
   try {
     return { ok: true, outcome: await def.run(args, context) };
   } catch (error) {
     if (error instanceof ToolError || error instanceof RulesError) {
+      context.recorder.rollback(checkpoint);
       return { ok: false, error: error.message };
+    }
+    if (error instanceof z.ZodError) {
+      context.recorder.rollback(checkpoint);
+      return { ok: false, error: `Invalid resulting state: ${z.prettifyError(error)}` };
     }
     throw error;
   }

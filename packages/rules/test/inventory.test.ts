@@ -41,4 +41,9 @@ describe('inventory', () => {
     expect(() => removeItem(pc, 'Healing Potion', 0)).toThrow('positive integer');
     expect(() => removeItem(pc, 'Healing Potion', -1)).toThrow('positive integer');
   });
+
+  it('rejects a name that is empty after trimming', () => {
+    expect(() => addItem(pc, '   ')).toThrow('name');
+    expect(() => removeItem(pc, '   ')).toThrow('name');
+  });
 });

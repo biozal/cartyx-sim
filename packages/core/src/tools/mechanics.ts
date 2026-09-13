@@ -115,7 +115,7 @@ export const requestCheck = defineTool({
     skill: Skill.optional(),
     ability: Ability.optional(),
     dc: z.number().int().min(1).max(40),
-    reason: z.string().min(1),
+    reason: z.string().trim().min(1),
     mode: RollModeArg,
   }),
   run(args, { recorder, rng }) {
@@ -146,7 +146,7 @@ export const attack = defineTool({
   parameters: z.object({
     attackerId: z.string().min(1),
     targetId: z.string().min(1),
-    attackName: z.string().min(1),
+    attackName: z.string().trim().min(1),
     mode: RollModeArg,
   }),
   run(args, { recorder, rng }) {
@@ -175,18 +175,22 @@ export const castSpell = defineTool({
     'Resolve a spell. Spends a slot (slotLevel 0 for cantrips) and applies at most one effect: a spell attack, a saving throw, or healing.',
   parameters: z.object({
     casterId: z.string().min(1),
-    spell: z.string().min(1),
+    spell: z.string().trim().min(1),
     slotLevel: z.number().int().min(0).max(9),
     targetIds: z.array(z.string().min(1)).default([]),
     attack: z
-      .object({ bonus: z.number().int(), damage: z.string().min(1), damageType: z.string().min(1) })
+      .object({
+        bonus: z.number().int(),
+        damage: z.string().min(1),
+        damageType: z.string().trim().min(1),
+      })
       .optional(),
     save: z
       .object({
         ability: Ability,
         dc: z.number().int().min(1),
         damage: z.string().min(1).optional(),
-        damageType: z.string().min(1).default('force'),
+        damageType: z.string().trim().min(1).default('force'),
         halfOnSuccess: z.boolean().default(false),
       })
       .optional(),

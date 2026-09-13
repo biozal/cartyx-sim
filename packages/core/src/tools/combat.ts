@@ -11,7 +11,7 @@ import { slugify } from '../text';
 import { defineTool, ToolError } from './types';
 
 const MonsterSpec = z.object({
-  name: z.string().min(1),
+  name: z.string().trim().min(1),
   count: z.number().int().min(1).max(12).default(1),
   ac: z.number().int().min(1),
   maxHp: z.number().int().min(1),

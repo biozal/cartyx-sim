@@ -9,7 +9,7 @@ export const INTERJECTION_MAX_WORDS = 12;
 export const speak = defineTool({
   name: 'speak',
   description: 'Say something out loud, in character, as your own character.',
-  parameters: z.object({ text: z.string().min(1), emotion: Emotion.default('neutral') }),
+  parameters: z.object({ text: z.string().trim().min(1), emotion: Emotion.default('neutral') }),
   narrativeText: (args) => args.text,
   run(args, { recorder, actorId }) {
     recorder.emit({
@@ -27,7 +27,10 @@ export const act = defineTool({
   name: 'act',
   description:
     'Declare what your character attempts. Describe the attempt only; the DM decides what happens.',
-  parameters: z.object({ intent: z.string().min(1), targetId: z.string().min(1).optional() }),
+  parameters: z.object({
+    intent: z.string().trim().min(1),
+    targetId: z.string().min(1).optional(),
+  }),
   narrativeText: (args) => args.intent,
   run(args, { recorder, actorId }) {
     recorder.emit({ type: 'action', actor: actorId, intent: args.intent, target: args.targetId });
@@ -38,7 +41,7 @@ export const act = defineTool({
 export const interject = defineTool({
   name: 'interject',
   description: `A short reaction (at most ${INTERJECTION_MAX_WORDS} words) that overlaps the most recent line, like "Wait—!" or a laugh. Does not use up your turn.`,
-  parameters: z.object({ text: z.string().min(1), emotion: Emotion.default('surprised') }),
+  parameters: z.object({ text: z.string().trim().min(1), emotion: Emotion.default('surprised') }),
   narrativeText: (args) => args.text,
   run(args, { recorder, history, actorId }) {
     if (countWords(args.text) > INTERJECTION_MAX_WORDS) {
@@ -68,7 +71,7 @@ export const declareSpell = defineTool({
   description:
     'Declare that you cast a spell (slotLevel 0 for cantrips) at optional targets. The DM resolves the effect.',
   parameters: z.object({
-    spell: z.string().min(1),
+    spell: z.string().trim().min(1),
     slotLevel: z.number().int().min(0).max(9),
     targetIds: z.array(z.string().min(1)).default([]),
   }),

@@ -321,6 +321,14 @@ describe('damage, healing, conditions, and items', () => {
     ]);
     expect(harness.recorder.state.combatants.kira?.inventory).toEqual([]);
   });
+
+  it('rejects a blank item name before running, emitting nothing', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(giveItem, { targetId: 'tomas', item: '   ' });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+    expect(harness.recorder.state.combatants.tomas?.inventory).toEqual([]);
+  });
 });
 
 describe('start_combat and end_combat', () => {

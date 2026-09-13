@@ -10,6 +10,12 @@ export type EventInput = DistributiveOmit<
   'seq' | 'ts' | 'turnId' | 'visibility'
 > & { visibility?: Visibility };
 
+/** A point in the recorder's history that `rollback` can restore. Opaque to callers. */
+export interface RecorderCheckpoint {
+  readonly state: GameState;
+  readonly eventCount: number;
+}
+
 /**
  * Buffers one turn's events. Each emitted event is validated and applied to a working state, so
  * tools later in the same turn see earlier results. Nothing is persisted until the director commits.
@@ -45,5 +51,16 @@ export class TurnRecorder {
     this.working = applyEvent(this.working, event);
     this.emitted.push(event);
     return event;
+  }
+
+  /** Captures the current working state and event count, to `rollback` to later. */
+  checkpoint(): RecorderCheckpoint {
+    return { state: this.working, eventCount: this.emitted.length };
+  }
+
+  /** Restores the working state and truncates emitted events back to a prior checkpoint. */
+  rollback(checkpoint: RecorderCheckpoint): void {
+    this.working = checkpoint.state;
+    this.emitted.length = checkpoint.eventCount;
   }
 }

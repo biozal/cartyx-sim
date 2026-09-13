@@ -6,6 +6,9 @@ function sameItem(a: string, b: string): boolean {
 }
 
 export function addItem(combatant: Combatant, name: string, quantity = 1): Combatant {
+  if (name.trim().length === 0) {
+    throw new RulesError('Item name cannot be blank');
+  }
   if (!Number.isInteger(quantity) || quantity < 1) {
     throw new RulesError(`Quantity must be a positive integer, got ${quantity}`);
   }
@@ -19,6 +22,9 @@ export function addItem(combatant: Combatant, name: string, quantity = 1): Comba
 }
 
 export function removeItem(combatant: Combatant, name: string, quantity = 1): Combatant {
+  if (name.trim().length === 0) {
+    throw new RulesError('Item name cannot be blank');
+  }
   if (!Number.isInteger(quantity) || quantity < 1) {
     throw new RulesError(`Quantity must be a positive integer, got ${quantity}`);
   }
