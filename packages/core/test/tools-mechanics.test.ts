@@ -196,6 +196,27 @@ describe('cast_spell', () => {
     expect(harness.recorder.state.combatants.tomas?.hp).toBe(10);
   });
 
+  it('keeps the spent slot when the caster targets herself', async () => {
+    const { state, history } = startedState([{ ...kira, hp: 5 }, tomas]);
+    const harness = toolHarness({ state, history, rng: scriptedRng([5]) });
+    await harness.run(castSpell, {
+      casterId: 'kira',
+      spell: 'Cure Wounds',
+      slotLevel: 1,
+      targetIds: ['kira'],
+      healing: '1d8+3',
+    });
+    expect(harness.recorder.state.combatants.kira?.hp).toBe(10);
+    expect(harness.recorder.state.combatants.kira?.spellSlots).toEqual([
+      { level: 1, max: 2, used: 1 },
+    ]);
+    const slotEvents = harness.recorder.events.filter(
+      (e) => e.type === 'state_change' && e.field === 'spellSlots'
+    );
+    expect(slotEvents).toHaveLength(1);
+    expect(slotEvents[0]).toMatchObject({ before: [{ used: 0 }], after: [{ used: 1 }] });
+  });
+
   it('refuses a cast with no slot left, emitting nothing', async () => {
     const { state, history } = startedState([
       { ...kira, spellSlots: [{ level: 1, max: 2, used: 2 }] },

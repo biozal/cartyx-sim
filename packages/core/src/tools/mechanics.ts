@@ -211,7 +211,10 @@ export const castSpell = defineTool({
     // Resolve everything before emitting, so a rules error leaves no partial events.
     const label = `${caster.name} casts ${args.spell}`;
     const rolls: EventInput[] = [];
-    const updated = new Map<string, Combatant>();
+    // Seed with the post-slot caster so an effect that targets the caster diffs from the
+    // slot-spent state, not the pre-slot one — otherwise the caster's later diff would
+    // revert the slot's state_change.
+    const updated = new Map<string, Combatant>([[caster.id, casterAfterSlot]]);
     const summaries: string[] = [];
     const current = (target: Combatant) => updated.get(target.id) ?? target;
 
