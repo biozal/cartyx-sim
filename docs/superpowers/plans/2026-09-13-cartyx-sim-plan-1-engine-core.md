@@ -79,6 +79,7 @@ apps/cli/
 Create the npm workspace and the first `rules` modules: pluggable RNG and dice expressions.
 
 **Files:**
+
 - Create: `package.json`
 - Create: `tsconfig.json`
 - Create: `vitest.config.ts`
@@ -91,6 +92,7 @@ Create the npm workspace and the first `rules` modules: pluggable RNG and dice e
 - Test: `packages/rules/test/dice.test.ts`
 
 **Interfaces:**
+
 - Consumes: Nothing.
 - Produces:
   - `interface Rng { die(sides: number): number }`; `seededRng(seed)`, `secureRng()`, `scriptedRng(values)`
@@ -111,10 +113,7 @@ Create the npm workspace and the first `rules` modules: pluggable RNG and dice e
   "engines": {
     "node": ">=22.22.0"
   },
-  "workspaces": [
-    "packages/*",
-    "apps/*"
-  ],
+  "workspaces": ["packages/*", "apps/*"],
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
@@ -533,12 +532,14 @@ git commit -m "feat(rules): scaffold workspace with RNG and dice expressions"
 Define the combatant data model (the shape of every PC, NPC, and monster) and resolve checks and saves.
 
 **Files:**
+
 - Create: `packages/rules/src/schemas.ts`
 - Create: `packages/rules/src/checks.ts`
 - Create: `packages/rules/src/testing.ts`
 - Test: `packages/rules/test/checks.test.ts`
 
 **Interfaces:**
+
 - Consumes: `rollD20`, `RollMode`, `Rng` from Task 1.
 - Produces:
   - Zod schemas and types: `Ability`, `Skill`, `Condition`, `AbilityScores`, `Attack`, `SpellSlot`, `InventoryItem`, `Combatant` (+ `CombatantInput`), `InitiativeEntry`; constants `ABILITIES`, `SKILLS`, `CONDITIONS`, `ABILITY_NAMES`, `SKILL_ABILITY`
@@ -950,12 +951,14 @@ git commit -m "feat(rules): add combatant schema and ability checks"
 Apply damage and healing with 5e death rules, manage conditions, and resolve attack rolls with criticals.
 
 **Files:**
+
 - Create: `packages/rules/src/hp.ts`
 - Create: `packages/rules/src/combat.ts`
 - Test: `packages/rules/test/hp.test.ts`
 - Test: `packages/rules/test/combat.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Combatant`, `Attack`, `Condition` (Task 2); `rollD20`, `rollDice`, `RulesError` (Task 1).
 - Produces:
   - `applyDamage(c, amount)`, `applyHealing(c, amount)`, `addCondition(c, condition)`, `removeCondition(c, condition)` — all pure, returning a new `Combatant`
@@ -1248,6 +1251,7 @@ git commit -m "feat(rules): add hit points, conditions, and attack resolution"
 Finish the bookkeeping core and export the whole `rules` package for `core` to consume.
 
 **Files:**
+
 - Create: `packages/rules/src/slots.ts`
 - Create: `packages/rules/src/inventory.ts`
 - Create: `packages/rules/src/initiative.ts`
@@ -1257,6 +1261,7 @@ Finish the bookkeeping core and export the whole `rules` package for `core` to c
 - Test: `packages/rules/test/initiative.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Combatant`, `InitiativeEntry`, `abilityModifier` (Task 2); `RulesError`, `Rng` (Task 1).
 - Produces:
   - `spendSlot(c, level)`, `restoreSlots(c)`, `slotsRemaining(c, level)`, `describeSlots(c)` (e.g. `"L1 2/4, L2 0/2"`)
@@ -1526,6 +1531,7 @@ git commit -m "feat(rules): add spell slots, inventory, and initiative"
 Create the `core` package: the event contract every later subsystem reads, the pure state fold over it, per-turn buffering, and the spoken-runtime clock.
 
 **Files:**
+
 - Create: `packages/core/package.json`
 - Create: `packages/core/src/text.ts`
 - Create: `packages/core/src/events.ts`
@@ -1540,6 +1546,7 @@ Create the `core` package: the event contract every later subsystem reads, the p
 - Test: `packages/core/test/recorder.test.ts`
 
 **Interfaces:**
+
 - Consumes: `@cartyx-sim/rules`: `Combatant`, `InitiativeEntry`; `makeCombatant` from `@cartyx-sim/rules/testing`.
 - Produces:
   - `SimEvent` (Zod discriminated union on `type`; spec §4.2) with common fields `seq`, `ts`, `turnId`, `visibility`; also `Emotion`, `EMOTIONS`, `Visibility`, `StateField`, `HandOffTarget`
@@ -2549,6 +2556,7 @@ git commit -m "feat(core): add event log schema, state reducer, recorder, and se
 Define the seams real models and lore plug into later, render what each audience may see, and catch agents breaking table rules.
 
 **Files:**
+
 - Create: `packages/core/src/model.ts`
 - Create: `packages/core/src/transcript.ts`
 - Create: `packages/core/src/validators.ts`
@@ -2556,6 +2564,7 @@ Define the seams real models and lore plug into later, render what each audience
 - Test: `packages/core/test/validators.test.ts`
 
 **Interfaces:**
+
 - Consumes: `SimEvent`, `GameState`, `escapeRegExp` (Task 5).
 - Produces:
   - `interface ModelClient { complete(request: ModelRequest): Promise<ModelResponse> }`; `ModelRequest` (`{ seat, messages, tools }`), `ChatMessage`, `ToolSchema`; Zod `ToolCall` and `ModelResponse` (`{ text, toolCalls }`)
@@ -2976,6 +2985,7 @@ git commit -m "feat(core): add model and lore interfaces, transcripts, and valid
 Build the typed tool layer every model action goes through, plus the DM storytelling tools and in-memory test doubles.
 
 **Files:**
+
 - Create: `packages/core/src/tools/types.ts`
 - Create: `packages/core/src/tools/narrative.ts`
 - Create: `packages/core/src/testing.ts`
@@ -2983,6 +2993,7 @@ Build the typed tool layer every model action goes through, plus the DM storytel
 - Test: `packages/core/test/tools-narrative.test.ts`
 
 **Interfaces:**
+
 - Consumes: `TurnRecorder`, `GameState`, `selectResponders`, `slugify`, `Emotion`, `HandOffTarget` (Task 5); `LoreIndex`, `ToolCall`, `ToolSchema` (Task 6); `RulesError`, `Rng` (rules).
 - Produces:
   - `defineTool({ name, description, parameters, narrativeText?, run })`, `type ToolDef`, `type AnyToolDef`, `type ToolContext` (`{ recorder, history, rng, lore, loreThreshold, actorId }`), `type ToolOutcome` (`{ result, endsBeat? }`)
@@ -3583,12 +3594,14 @@ git commit -m "feat(core): add tool framework and narrative DM tools"
 Route every number through the rules package: checks, attacks, spells, damage, healing, conditions, items, and combat start/end.
 
 **Files:**
+
 - Create: `packages/core/src/tools/mechanics.ts`
 - Create: `packages/core/src/tools/state-tools.ts`
 - Create: `packages/core/src/tools/combat.ts`
 - Test: `packages/core/test/tools-mechanics.test.ts`
 
 **Interfaces:**
+
 - Consumes: `defineTool`, `getCombatant`, `ToolError` (Task 7); `EventInput`, `TurnRecorder`, `isUp`, `StateField`, `slugify` (Task 5); rules functions from Tasks 1–4.
 - Produces:
   - Tools: `requestCheck` (`request_check`), `attack`, `castSpell` (`cast_spell`), `applyDamageTool` (`apply_damage`), `healTool` (`heal`), `addConditionTool` (`add_condition`), `removeConditionTool` (`remove_condition`), `giveItem` (`give_item`), `removeItemTool` (`remove_item`), `startCombat` (`start_combat`), `endCombat` (`end_combat`)
@@ -4561,12 +4574,14 @@ git commit -m "feat(core): add mechanics, state, and combat DM tools"
 Give players their constrained tool set, assemble the tool lists the director offers each seat, and add replaceable default prompts.
 
 **Files:**
+
 - Create: `packages/core/src/tools/player.ts`
 - Create: `packages/core/src/tools/registry.ts`
 - Create: `packages/core/src/prompts.ts`
 - Test: `packages/core/test/tools-player.test.ts`
 
 **Interfaces:**
+
 - Consumes: All tools from Tasks 7–8; `Emotion`, `countWords` (Task 5); `ChatMessage` (Task 6); `slotsRemaining`, `describeSlots` (rules).
 - Produces:
   - Tools: `speak`, `act`, `interject` (≤ 12 words, sets `overlaps` to the latest spoken line by someone else), `declareSpell` (`declare_spell`), `pass`; `INTERJECTION_MAX_WORDS`
@@ -4948,7 +4963,6 @@ Run: `npm run typecheck && npm test`
 Expected: `tsc` reports no errors and every test passes.
 The registry and prompts have no direct tests here; the director tests in Task 10 exercise both end to end.
 
-
 - [ ] **Step 6: Commit** (only once the user has approved commits)
 
 ```bash
@@ -4964,11 +4978,13 @@ git commit -m "feat(core): add player tools, tool registry, and basic prompts"
 Run whole sessions: turn scheduling, DM beats and player turns over tool calls, validator retries, combat advancement, clock-driven endings, model retry and pause, and resume from the log.
 
 **Files:**
+
 - Create: `packages/core/src/director.ts`
 - Create: `packages/core/src/index.ts`
 - Test: `packages/core/test/director.test.ts`
 
 **Interfaces:**
+
 - Consumes: Everything in `core` from Tasks 5–9.
 - Produces:
   - `Director.create(config: DirectorConfig, deps: DirectorDeps): Promise<Director>` — reads the sink and resumes if events exist; throws if the session already ended or belongs to another session number
@@ -5929,6 +5945,7 @@ git commit -m "feat(core): add director turn loop with validators, clock, and re
 Play a scripted fixture from the command line and write `campaigns/<id>/sessions/<NNN>/events.jsonl`, with safe resume behavior.
 
 **Files:**
+
 - Create: `apps/cli/package.json`
 - Create: `apps/cli/src/jsonl-sink.ts`
 - Create: `apps/cli/src/paths.ts`
@@ -5940,6 +5957,7 @@ Play a scripted fixture from the command line and write `campaigns/<id>/sessions
 - Test: `apps/cli/test/run.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Director`, `SimEvent`, `EventSink`, `LoreHit`, `ModelResponse`, `basicPrompts`, `describeEvent`, `RunResult` from `@cartyx-sim/core`; `ScriptedModelClient`, `StaticLoreIndex` from `@cartyx-sim/core/testing`; `Combatant`, RNG factories from `@cartyx-sim/rules`.
 - Produces:
   - `class JsonlFileSink(path)` implementing `EventSink` plus `exists()`; each turn is one append followed by `fsync`

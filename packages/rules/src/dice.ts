@@ -58,11 +58,7 @@ export function parseDice(expr: string): DiceExpr {
 }
 
 /** Rolls a damage/healing expression. A critical doubles the dice, not the modifier. Never below 0. */
-export function rollDice(
-  expr: string,
-  rng: Rng,
-  options: { critical?: boolean } = {},
-): DiceResult {
+export function rollDice(expr: string, rng: Rng, options: { critical?: boolean } = {}): DiceResult {
   const { terms, modifier } = parseDice(expr);
   const multiplier = options.critical ? 2 : 1;
   const rolls = terms.flatMap((term) =>

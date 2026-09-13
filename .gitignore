@@ -146,6 +146,7 @@ coverage/
 .parcel-cache
 .turbo
 .vite/
+.vitest/
 .rpt2_cache/
 .rts2_cache_cjs/
 .rts2_cache_es/

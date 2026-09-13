@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json",
     "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "sim": "tsx apps/cli/src/main.ts"
   },
   "devDependencies": {

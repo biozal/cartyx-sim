@@ -34,14 +34,10 @@ describe('secureRng', () => {
     expect(Math.max(...rolls)).toBeLessThanOrEqual(20);
   });
 
-  it(
-    'rejects a sides value that would hang the loop instead of looping forever',
-    () => {
-      const rng = secureRng();
-      expect(() => rng.die(5_000_000_000)).toThrow();
-    },
-    2000
-  );
+  it('rejects a sides value that would hang the loop instead of looping forever', () => {
+    const rng = secureRng();
+    expect(() => rng.die(5_000_000_000)).toThrow();
+  }, 2000);
 
   it('rejects non-integer or out-of-range sides', () => {
     const rng = secureRng();

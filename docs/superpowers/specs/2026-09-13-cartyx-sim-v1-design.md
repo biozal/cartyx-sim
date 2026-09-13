@@ -16,34 +16,34 @@ Later phases (out of scope here): direct MP4 export, live streaming to YouTube/T
 
 ## 2. Locked Decisions
 
-| Area | Decision |
-|---|---|
-| Approach | Custom TypeScript "director" engine. Not LangGraph/Mastra; not SillyTavern. |
-| Run mode | Generate-then-produce: the session is simulated first; art, voices, and playback are produced afterward. |
-| Session length | Configurable target in minutes of spoken runtime; first experiment = 60. |
-| Campaign | New party and new adventure; never writes back into the real table campaign or `cartyx-lore`. |
-| Story | Party are students of **Avalon Artificers Academy** (Alpharetta), rival school to Axe-Ford Park Adventurer Academy (Brookhaven). |
-| Rules | Engine owns bookkeeping; the DM adjudicates everything else; no grid. |
-| Characters | AI drafts from lore; user approves editable files. |
-| Lore test output | Per-session lore audit report. |
-| Language | TypeScript (Node ≥ 22). TTS and image generation run as external Python services reached over HTTP. |
-| Playback | Local web page; bottom 20% player tiles, top 80% speaker stage. |
-| Recording (v1) | OBS screen capture of the playback page in real time. |
-| Hardware | Art on the Ampere server; avoid the Alienware laptop unless required. |
+| Area             | Decision                                                                                                                         |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Approach         | Custom TypeScript "director" engine. Not LangGraph/Mastra; not SillyTavern.                                                      |
+| Run mode         | Generate-then-produce: the session is simulated first; art, voices, and playback are produced afterward.                         |
+| Session length   | Configurable target in minutes of spoken runtime; first experiment = 60.                                                         |
+| Campaign         | New party and new adventure; never writes back into the real table campaign or `cartyx-lore`.                                    |
+| Story            | Party are students of **Avalon Artificers Academy** (Alpharetta), rival school to Axe-Ford Park Adventurer Academy (Brookhaven). |
+| Rules            | Engine owns bookkeeping; the DM adjudicates everything else; no grid.                                                            |
+| Characters       | AI drafts from lore; user approves editable files.                                                                               |
+| Lore test output | Per-session lore audit report.                                                                                                   |
+| Language         | TypeScript (Node ≥ 22). TTS and image generation run as external Python services reached over HTTP.                              |
+| Playback         | Local web page; bottom 20% player tiles, top 80% speaker stage.                                                                  |
+| Recording (v1)   | OBS screen capture of the playback page in real time.                                                                            |
+| Hardware         | Art on the Ampere server; avoid the Alienware laptop unless required.                                                            |
 
 ## 3. Architecture
 
 ### 3.1 Repository layout (npm workspaces)
 
-| Unit | Responsibility | Depends on |
-|---|---|---|
-| `packages/core` | Turn loop, seat scheduler, session clock, event types, validators. Pure logic behind interfaces: `ModelClient`, `LoreIndex`, `StateStore`, `EventSink`, `Rng`. No direct network or filesystem access, so it can later be embedded in `cartyx-app`. | `rules` |
-| `packages/rules` | 5e bookkeeping: dice, ability checks, saves, attacks, damage, healing, HP, spell slots, conditions, initiative, inventory, milestone level-up validation. | SRD data |
-| `packages/lore` | Ingest `cartyx-lore` markdown, chunk by heading with entity/location/Kanka-ID metadata, embed, store in LanceDB, answer queries, record lookups. | embedding endpoint |
-| `packages/models` | Seat → OpenAI-compatible endpoint mapping via the Vercel AI SDK; retries, health checks, per-turn idempotency keys, fallback endpoints. | seat config |
-| `packages/media` | Clients for ComfyUI (images) and the TTS service; content-hash caching; cast sheet generation. | ComfyUI, TTS endpoints |
-| `apps/cli` | The `sim` command; SQLite state projection; filesystem event sink. | all packages |
-| `apps/playback` | Local web app (React + Vite) that plays a session timeline. | session files |
+| Unit              | Responsibility                                                                                                                                                                                                                                      | Depends on             |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `packages/core`   | Turn loop, seat scheduler, session clock, event types, validators. Pure logic behind interfaces: `ModelClient`, `LoreIndex`, `StateStore`, `EventSink`, `Rng`. No direct network or filesystem access, so it can later be embedded in `cartyx-app`. | `rules`                |
+| `packages/rules`  | 5e bookkeeping: dice, ability checks, saves, attacks, damage, healing, HP, spell slots, conditions, initiative, inventory, milestone level-up validation.                                                                                           | SRD data               |
+| `packages/lore`   | Ingest `cartyx-lore` markdown, chunk by heading with entity/location/Kanka-ID metadata, embed, store in LanceDB, answer queries, record lookups.                                                                                                    | embedding endpoint     |
+| `packages/models` | Seat → OpenAI-compatible endpoint mapping via the Vercel AI SDK; retries, health checks, per-turn idempotency keys, fallback endpoints.                                                                                                             | seat config            |
+| `packages/media`  | Clients for ComfyUI (images) and the TTS service; content-hash caching; cast sheet generation.                                                                                                                                                      | ComfyUI, TTS endpoints |
+| `apps/cli`        | The `sim` command; SQLite state projection; filesystem event sink.                                                                                                                                                                                  | all packages           |
+| `apps/playback`   | Local web app (React + Vite) that plays a session timeline.                                                                                                                                                                                         | session files          |
 
 ### 3.2 SRD data
 
@@ -53,14 +53,14 @@ Later phases (out of scope here): direct MP4 export, live streaming to YouTube/T
 
 ### 3.3 Machine assignment (initial; every seat is just an endpoint in config)
 
-| Machine | During `sim run` | After the run |
-|---|---|---|
-| MacBook Pro M5 Max, 128 GB | Engine, lore index + embeddings, **DM** | Cast sheet, audit, playback page, OBS |
-| Mac Studio M2 Ultra, 64 GB | **Players 1 and 2** (different models if they fit) | — |
-| Ampere ARM64, RTX 3090 | **Player 3** (llama.cpp server) | **ComfyUI art** (portraits, scenes) |
-| Ampere ARM64, RTX 4070 | **Scribe / checker / validator** model | **TTS** (voices) |
-| Windows PC, RTX 5070 Ti | **Player 4** (LM Studio) | Art fallback |
-| Alienware, RTX 5080M | Not used | Not used unless required |
+| Machine                    | During `sim run`                                   | After the run                         |
+| -------------------------- | -------------------------------------------------- | ------------------------------------- |
+| MacBook Pro M5 Max, 128 GB | Engine, lore index + embeddings, **DM**            | Cast sheet, audit, playback page, OBS |
+| Mac Studio M2 Ultra, 64 GB | **Players 1 and 2** (different models if they fit) | —                                     |
+| Ampere ARM64, RTX 3090     | **Player 3** (llama.cpp server)                    | **ComfyUI art** (portraits, scenes)   |
+| Ampere ARM64, RTX 4070     | **Scribe / checker / validator** model             | **TTS** (voices)                      |
+| Windows PC, RTX 5070 Ti    | **Player 4** (LM Studio)                           | Art fallback                          |
+| Alienware, RTX 5080M       | Not used                                           | Not used unless required              |
 
 Model choices are validated by `sim bench` on real hardware before being fixed in config. Different model families per player are preferred so personalities diverge.
 
@@ -74,21 +74,21 @@ Each session writes `campaigns/<id>/sessions/<NNN>/events.jsonl`. It is the sing
 
 ### 4.2 Event types
 
-| Type | Key fields |
-|---|---|
-| `session_start` / `session_end` | session number, lore commit hash, target minutes, reason for ending |
-| `narration` | speaker `dm`, text, emotion |
-| `dialogue` | speaker (PC id or NPC id), text, emotion, optional `overlaps: <seq>` |
-| `action` | actor, intent, target |
-| `roll` | actor, kind (check/save/attack/damage/initiative), dice, modifiers, total, DC/AC, outcome |
-| `state_change` | entity, field (hp, slots, conditions, inventory, level), before, after, cause seq |
-| `lore_lookup` | query, hits (chunk id, source path, score), used chunk ids |
-| `lore_invention` | fact, reason, related query |
-| `npc_introduced` | npc id, name, lore entity id (if any), invented flag, public description |
-| `scene_change` | location, lore entity id, art prompt |
-| `combat_start` / `combat_end` | combatants, initiative order |
-| `validator_flag` | seat, rule violated, retries, resolution |
-| `ooc_note` | engine notices (pauses, resumes, fallbacks) |
+| Type                            | Key fields                                                                                |
+| ------------------------------- | ----------------------------------------------------------------------------------------- |
+| `session_start` / `session_end` | session number, lore commit hash, target minutes, reason for ending                       |
+| `narration`                     | speaker `dm`, text, emotion                                                               |
+| `dialogue`                      | speaker (PC id or NPC id), text, emotion, optional `overlaps: <seq>`                      |
+| `action`                        | actor, intent, target                                                                     |
+| `roll`                          | actor, kind (check/save/attack/damage/initiative), dice, modifiers, total, DC/AC, outcome |
+| `state_change`                  | entity, field (hp, slots, conditions, inventory, level), before, after, cause seq         |
+| `lore_lookup`                   | query, hits (chunk id, source path, score), used chunk ids                                |
+| `lore_invention`                | fact, reason, related query                                                               |
+| `npc_introduced`                | npc id, name, lore entity id (if any), invented flag, public description                  |
+| `scene_change`                  | location, lore entity id, art prompt                                                      |
+| `combat_start` / `combat_end`   | combatants, initiative order                                                              |
+| `validator_flag`                | seat, rule violated, retries, resolution                                                  |
+| `ooc_note`                      | engine notices (pauses, resumes, fallbacks)                                               |
 
 Spoken events (`narration`, `dialogue`) are the only events that produce audio.
 
@@ -114,21 +114,21 @@ Before each session the DM model uses lore retrieval to write a DM-only outline 
 
 **DM tools**
 
-| Tool | Effect |
-|---|---|
-| `lookup_lore(query)` | Retrieval; emits `lore_lookup` |
-| `record_invention(fact, reason)` | Emits `lore_invention` |
-| `introduce_npc(name, lore_entity?, description)` | Emits `npc_introduced` |
-| `npc_say(npc, text, emotion)` | Emits `dialogue` from the NPC |
-| `request_check(pc, skill\|ability\|save, dc, reason)` | Engine rolls; result returned before narration |
-| `attack(attacker, target, weapon\|attack)` | Engine rolls hit and damage |
-| `cast_spell(caster, spell, level, targets)` | Engine validates and spends slots; rolls if needed |
-| `apply_damage` / `heal` / `add_condition` / `remove_condition` | State changes |
-| `give_item` / `remove_item` | Inventory |
-| `start_combat(monsters)` / `end_combat()` | Combat mode |
-| `scene_change(location, art_prompt)` | Emits `scene_change` |
-| `award_milestone()` | Level-up at session end |
-| `hand_off(to)` | Ends the DM beat |
+| Tool                                                           | Effect                                             |
+| -------------------------------------------------------------- | -------------------------------------------------- |
+| `lookup_lore(query)`                                           | Retrieval; emits `lore_lookup`                     |
+| `record_invention(fact, reason)`                               | Emits `lore_invention`                             |
+| `introduce_npc(name, lore_entity?, description)`               | Emits `npc_introduced`                             |
+| `npc_say(npc, text, emotion)`                                  | Emits `dialogue` from the NPC                      |
+| `request_check(pc, skill\|ability\|save, dc, reason)`          | Engine rolls; result returned before narration     |
+| `attack(attacker, target, weapon\|attack)`                     | Engine rolls hit and damage                        |
+| `cast_spell(caster, spell, level, targets)`                    | Engine validates and spends slots; rolls if needed |
+| `apply_damage` / `heal` / `add_condition` / `remove_condition` | State changes                                      |
+| `give_item` / `remove_item`                                    | Inventory                                          |
+| `start_combat(monsters)` / `end_combat()`                      | Combat mode                                        |
+| `scene_change(location, art_prompt)`                           | Emits `scene_change`                               |
+| `award_milestone()`                                            | Level-up at session end                            |
+| `hand_off(to)`                                                 | Ends the DM beat                                   |
 
 **Player tools:** `speak`, `act`, `interject`, `pass`, `cast_spell` (declaration only; the DM resolves).
 
@@ -245,18 +245,18 @@ Built from `lore_lookup`, `lore_invention`, `npc_introduced`, and `scene_change`
 
 ## 11. CLI Summary
 
-| Command | Purpose |
-|---|---|
-| `sim bench` | Health, tokens/sec, and tool-call reliability per endpoint |
-| `sim index` | Build or refresh the lore index |
-| `sim chargen` | Draft PCs, portraits, voices for approval |
-| `sim prep` | DM session outline |
-| `sim run [--target-minutes N] [--resume]` | Simulate a session |
-| `sim cast` | NPC cast sheet |
-| `sim art` | Generate images |
-| `sim voice` | Generate audio and timeline |
-| `sim audit` | Lore audit report |
-| `sim play` | Serve the playback page |
+| Command                                   | Purpose                                                    |
+| ----------------------------------------- | ---------------------------------------------------------- |
+| `sim bench`                               | Health, tokens/sec, and tool-call reliability per endpoint |
+| `sim index`                               | Build or refresh the lore index                            |
+| `sim chargen`                             | Draft PCs, portraits, voices for approval                  |
+| `sim prep`                                | DM session outline                                         |
+| `sim run [--target-minutes N] [--resume]` | Simulate a session                                         |
+| `sim cast`                                | NPC cast sheet                                             |
+| `sim art`                                 | Generate images                                            |
+| `sim voice`                               | Generate audio and timeline                                |
+| `sim audit`                               | Lore audit report                                          |
+| `sim play`                                | Serve the playback page                                    |
 
 ## 12. Error Handling
 
