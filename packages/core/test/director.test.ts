@@ -197,6 +197,7 @@ describe('Director', () => {
       'dialogue',
       'action',
       'turn_end',
+      'validator_flag',
       'dialogue',
       'pass',
       'turn_end',
@@ -273,13 +274,15 @@ describe('Director', () => {
     await director.step();
 
     expect(sink.events.slice(1).map((e) => e.type)).toEqual([
+      'validator_flag',
       'narration',
       'validator_flag',
       'hand_off',
       'turn_end',
     ]);
-    expect(sink.events[1]).toMatchObject({ text: 'The door creaks.' });
-    expect(sink.events[2]).toMatchObject({ rule: 'dm_step_limit', resolution: 'forced_hand_off' });
+    expect(sink.events[1]).toMatchObject({ rule: 'dm_controls_pc', resolution: 're_prompted' });
+    expect(sink.events[2]).toMatchObject({ text: 'The door creaks.' });
+    expect(sink.events[3]).toMatchObject({ rule: 'dm_step_limit', resolution: 'forced_hand_off' });
     expect(model.requests[1]!.messages.at(-1)).toMatchObject({
       role: 'tool',
       content: expect.stringContaining('Rejected (dm_controls_pc)'),
@@ -902,7 +905,9 @@ describe('Director', () => {
     await director.run(3);
 
     expect(sink.events.filter((e) => e.type === 'dialogue')).toHaveLength(1);
-    expect(sink.events.filter((e) => e.type === 'validator_flag')).toHaveLength(0);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'tool_error', retries: 1, resolution: 're_prompted' },
+    ]);
     expect(sink.events.some((e) => e.type === 'action')).toBe(false);
     const kiraRequests = model.requests.filter((r) => r.seat === 'player-kira');
     expect(kiraRequests).toHaveLength(2);
@@ -934,7 +939,7 @@ describe('Director', () => {
     ]);
   });
 
-  it('G5.6: emits an accepted-with-flag validator flag before the narration once DM rejections are exhausted', async () => {
+  it('G5.6: flags each DM rejection, then accepted-with-flag after the narration once retries are exhausted', async () => {
     const violatingText = 'Kira decides to open the door.';
     const { deps: built, sink } = deps({
       dm: [
@@ -950,18 +955,24 @@ describe('Director', () => {
 
     expect(sink.events.slice(1).map((e) => e.type)).toEqual([
       'validator_flag',
+      'validator_flag',
       'narration',
+      'validator_flag',
       'hand_off',
       'turn_end',
     ]);
-    expect(sink.events[1]).toMatchObject({
-      type: 'validator_flag',
-      visibility: 'dm',
-      rule: 'dm_controls_pc',
-      retries: 2,
-      resolution: 'accepted_with_flag',
-    });
-    expect(sink.events[2]).toMatchObject({ type: 'narration', text: violatingText });
+    expect(sink.events.slice(1, 5)).toMatchObject([
+      { type: 'validator_flag', rule: 'dm_controls_pc', retries: 1, resolution: 're_prompted' },
+      { type: 'validator_flag', rule: 'dm_controls_pc', retries: 2, resolution: 're_prompted' },
+      { type: 'narration', text: violatingText },
+      {
+        type: 'validator_flag',
+        visibility: 'dm',
+        rule: 'dm_controls_pc',
+        retries: 2,
+        resolution: 'accepted_with_flag',
+      },
+    ]);
   });
 
   it('G5.8: skips remaining calls in a response after a rejection, without ending the beat', async () => {
@@ -1208,6 +1219,12 @@ describe('Director', () => {
     await director.run(2);
 
     expect(sink.events[1]).toMatchObject({
+      type: 'validator_flag',
+      rule: 'dm_controls_pc',
+      retries: 1,
+      resolution: 're_prompted',
+    });
+    expect(sink.events[3]).toMatchObject({
       type: 'validator_flag',
       rule: 'dm_controls_pc',
       retries: 1,

@@ -49,6 +49,12 @@ export interface DirectorConfig {
   transcriptWindow?: number;
   /** Consecutive silent turns before the DM is nudged to narrate. Default 6. */
   silentTurnLimit?: number;
+  /** Consecutive silent turns, in or out of combat, before the session pauses. Default 12. */
+  silentTurnPauseLimit?: number;
+  /** Consecutive hand-offs that no player character can answer before the session pauses. Default 3. */
+  idleHandOffLimit?: number;
+  /** Tool calls the DM may make in one beat before hand_off is forced. Default 24. */
+  maxDmToolCallsPerBeat?: number;
   /** Waits between retries of a failing model call; the session pauses after the last. */
   retryDelaysMs?: number[];
 }
@@ -76,6 +82,11 @@ function toolMessage(call: ToolCall, content: string): ChatMessage {
   return { role: 'tool', toolCallId: call.id, toolName: call.name, content };
 }
 
+/** The distinct rule names of a set of problems, for one validator_flag. */
+function ruleList(problems: readonly { rule: string }[]): string {
+  return [...new Set(problems.map((problem) => problem.rule))].join(',');
+}
+
 /** The same ids, ignoring order. */
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
@@ -96,6 +107,9 @@ export class Director {
   private readonly maxValidatorRetries: number;
   private readonly transcriptWindow: number;
   private readonly silentTurnLimit: number;
+  private readonly silentTurnPauseLimit: number;
+  private readonly idleHandOffLimit: number;
+  private readonly maxDmToolCallsPerBeat: number;
   private readonly retryDelaysMs: number[];
   private readonly now: () => Date;
   private readonly newTurnId: () => string;
@@ -113,6 +127,9 @@ export class Director {
     this.maxValidatorRetries = config.maxValidatorRetries ?? 2;
     this.transcriptWindow = config.transcriptWindow ?? 30;
     this.silentTurnLimit = config.silentTurnLimit ?? 6;
+    this.silentTurnPauseLimit = config.silentTurnPauseLimit ?? 12;
+    this.idleHandOffLimit = config.idleHandOffLimit ?? 3;
+    this.maxDmToolCallsPerBeat = config.maxDmToolCallsPerBeat ?? 24;
     this.retryDelaysMs = config.retryDelaysMs ?? [1000, 4000, 15000];
     this.now = deps.now ?? (() => new Date());
     this.newTurnId = deps.newTurnId ?? (() => crypto.randomUUID());
@@ -222,6 +239,7 @@ export class Director {
       await this.commit(recorder);
       return 'ended';
     }
+    this.pauseIfStuck();
     const next = nextActor(this.state);
     if (next.kind === 'ended') return 'ended';
 
@@ -245,6 +263,29 @@ export class Director {
       await this.commit(recorder);
     }
     return this.state.ended ? 'ended' : 'continue';
+  }
+
+  /**
+   * The runaway-loop backstop (spec §12): the watchdog only nudges, so a table that stays silent
+   * or a DM who keeps handing off to a party that cannot act would otherwise loop forever. Pausing
+   * is resumable, and the state that tripped it is derived from the log.
+   */
+  private pauseIfStuck(): void {
+    const seat = this.config.seats.dm;
+    if (this.state.silentTurns >= this.silentTurnPauseLimit) {
+      throw new SessionPausedError(
+        seat,
+        `No one has spoken for ${this.state.silentTurns} turns in a row. Check the seats' model ` +
+          'output, then resume.'
+      );
+    }
+    if (this.state.idleHandOffs >= this.idleHandOffLimit) {
+      throw new SessionPausedError(
+        seat,
+        `The DM handed off ${this.state.idleHandOffs} times in a row with no player character able ` +
+          'to respond. Resolve the downed party (or raise idleHandOffLimit), then resume.'
+      );
+    }
   }
 
   private async startSession(): Promise<void> {
@@ -282,8 +323,10 @@ export class Director {
     let mechanicsCalled = false;
     let rejections = 0;
     let ended = false;
+    let toolCalls = 0;
+    let callLimitHit = false;
 
-    for (let step = 0; step < this.maxDmStepsPerBeat && !ended; step++) {
+    for (let step = 0; step < this.maxDmStepsPerBeat && !ended && !callLimitHit; step++) {
       const response = await this.callModel(seat, recorder.turnId, messages, DM_TOOL_SCHEMAS);
       const calls = callsFromResponse(response, 'narrate', `auto-narrate-${step}`);
       messages.push({
@@ -301,16 +344,21 @@ export class Director {
 
       let skipRest = false;
       for (const call of calls) {
-        if (ended || skipRest) {
+        if (!ended && !skipRest && toolCalls >= this.maxDmToolCallsPerBeat) callLimitHit = true;
+        if (ended || skipRest || callLimitHit) {
           const why = ended
             ? 'your turn already ended with hand_off'
-            : 'an earlier call was rejected';
+            : callLimitHit
+              ? 'you reached the tool call limit for this turn'
+              : 'an earlier call was rejected';
           messages.push(toolMessage(call, `Not executed: ${why}.`));
           continue;
         }
+        toolCalls++;
         const prepared = prepareToolCall(call, DM_TOOLS);
         if (!prepared.ok) {
           messages.push(toolMessage(call, prepared.error));
+          this.flag(recorder, seat, 'invalid_tool_call', rejections, 're_prompted');
           skipRest = true;
           continue;
         }
@@ -318,33 +366,27 @@ export class Director {
         const violation = text
           ? validateDmText(text, { pcNames, mechanicsToolCalled: mechanicsCalled })
           : null;
-        if (violation) {
-          if (rejections < this.maxValidatorRetries) {
-            rejections++;
-            messages.push(
-              toolMessage(
-                call,
-                `Rejected (${violation.rule}): ${violation.message} Call the tool again with corrected text.`
-              )
-            );
-            skipRest = true;
-            continue;
-          }
-          recorder.emit({
-            type: 'validator_flag',
-            visibility: 'dm',
-            seat,
-            rule: violation.rule,
-            retries: rejections,
-            resolution: 'accepted_with_flag',
-          });
+        if (violation && rejections < this.maxValidatorRetries) {
+          rejections++;
+          messages.push(
+            toolMessage(
+              call,
+              `Rejected (${violation.rule}): ${violation.message} Call the tool again with corrected text.`
+            )
+          );
+          this.flag(recorder, seat, violation.rule, rejections, 're_prompted');
+          skipRest = true;
+          continue;
         }
         const execution = await runPreparedCall(prepared.def, prepared.args, context);
         if (!execution.ok) {
           messages.push(toolMessage(call, `Error: ${execution.error}`));
+          this.flag(recorder, seat, 'tool_error', rejections, 're_prompted');
           skipRest = true;
           continue;
         }
+        // Retries are exhausted: the output stands, flagged only once it actually took effect.
+        if (violation) this.flag(recorder, seat, violation.rule, rejections, 'accepted_with_flag');
         if (MECHANICS_TOOL_NAMES.has(call.name)) mechanicsCalled = true;
         if (execution.outcome.endsBeat) ended = true;
         messages.push(toolMessage(call, execution.outcome.result));
@@ -352,14 +394,8 @@ export class Director {
     }
 
     if (!ended) {
-      recorder.emit({
-        type: 'validator_flag',
-        visibility: 'dm',
-        seat,
-        rule: 'dm_step_limit',
-        retries: rejections,
-        resolution: 'forced_hand_off',
-      });
+      const rule = callLimitHit ? 'dm_tool_call_limit' : 'dm_step_limit';
+      this.flag(recorder, seat, rule, rejections, 'forced_hand_off');
       const forced = prepareToolCall(
         { id: 'forced-hand-off', name: 'hand_off', args: { target: { kind: 'party' } } },
         DM_TOOLS
@@ -453,6 +489,7 @@ export class Director {
         for (const call of calls) messages.push(toolMessage(call, `Not executed. ${summary}`));
         if (calls.length === 0)
           messages.push({ role: 'user', content: `Your response was rejected. ${summary}` });
+        this.flag(recorder, seat, ruleList(problems), attempt + 1, 're_prompted');
         continue;
       }
 
@@ -476,18 +513,18 @@ export class Director {
         recorder.rollback(checkpoint);
         const summary = problems.map((problem) => `${problem.rule}: ${problem.message}`).join(' ');
         for (const call of calls) messages.push(toolMessage(call, `Not executed. ${summary}`));
+        this.flag(recorder, seat, ruleList(problems), attempt + 1, 're_prompted');
         continue;
       }
 
       if (problems.length > 0) {
-        recorder.emit({
-          type: 'validator_flag',
-          visibility: 'dm',
+        this.flag(
+          recorder,
           seat,
-          rule: problems.map((problem) => problem.rule).join(','),
-          retries: attempt,
-          resolution: tookTurn ? 'accepted_with_flag' : 'forced_pass',
-        });
+          ruleList(problems),
+          attempt,
+          tookTurn ? 'accepted_with_flag' : 'forced_pass'
+        );
       }
       if (!tookTurn) recorder.emit({ type: 'pass', actor: pcId });
       break;
@@ -495,6 +532,17 @@ export class Director {
 
     recorder.emit({ type: 'turn_end', actor: pcId });
     await this.commit(recorder);
+  }
+
+  /** Records a validator outcome for the lore audit and review (spec §5.6: every case is flagged). */
+  private flag(
+    recorder: TurnRecorder,
+    seat: string,
+    rule: string,
+    retries: number,
+    resolution: 're_prompted' | 'accepted_with_flag' | 'forced_pass' | 'forced_hand_off'
+  ): void {
+    recorder.emit({ type: 'validator_flag', visibility: 'dm', seat, rule, retries, resolution });
   }
 
   private dmInstruction(
