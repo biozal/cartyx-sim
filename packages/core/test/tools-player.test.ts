@@ -116,4 +116,11 @@ describe('argument length limits', () => {
     expect(result.ok).toBe(false);
     expect(harness.recorder.events).toHaveLength(0);
   });
+
+  it('rejects an interjection with a single 4001-character token, emitting nothing', async () => {
+    const harness = kiraHarness({ spoken: true });
+    const result = await harness.run(interject, { text: 'a'.repeat(4001) });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
 });

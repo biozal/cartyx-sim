@@ -44,7 +44,10 @@ export const act = defineTool({
 export const interject = defineTool({
   name: 'interject',
   description: `A short reaction (at most ${INTERJECTION_MAX_WORDS} words) that overlaps the most recent line, like "Wait—!" or a laugh. Does not use up your turn.`,
-  parameters: z.object({ text: z.string().trim().min(1), emotion: Emotion.default('surprised') }),
+  parameters: z.object({
+    text: z.string().trim().min(1).max(4000),
+    emotion: Emotion.default('surprised'),
+  }),
   narrativeText: (args) => args.text,
   run(args, { recorder, history, actorId }) {
     if (countWords(args.text) > INTERJECTION_MAX_WORDS) {
