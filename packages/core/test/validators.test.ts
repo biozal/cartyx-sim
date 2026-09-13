@@ -56,19 +56,43 @@ describe('validatePlayerText', () => {
     ).toBe('player_controls_other');
   });
 
-  it.each([
-    'I successfully pick the lock.',
-    'I convince the guard to let us pass.',
-    'I roll a 20!',
-  ])('flags a player narrating outcomes: "%s"', (text) => {
-    expect(validatePlayerText(text, { otherPcNames })?.rule).toBe('player_narrates_outcome');
-  });
+  it.each(['I successfully pick the lock.', 'I roll a 20!'])(
+    'flags a player narrating outcomes: "%s"',
+    (text) => {
+      expect(validatePlayerText(text, { otherPcNames })?.rule).toBe('player_narrates_outcome');
+    }
+  );
 
   it.each([
     'I try to convince the guard to let us pass.',
+    'I convince the guard to let us pass.',
     'Careful, Kira.',
     'I swing my longsword at the sentry.',
   ])('accepts declared attempts: "%s"', (text) => {
     expect(validatePlayerText(text, { otherPcNames })).toBeNull();
+  });
+
+  describe('G4.1: only flags completed-outcome phrasing', () => {
+    it.each([
+      'I hit the orc with my warhammer.',
+      'Can we convince them to stand down?',
+      'I hope we succeed.',
+      'I attack the goblin.',
+      'We try to persuade the guard.',
+    ])('accepts: "%s"', (text) => {
+      expect(validatePlayerText(text, { otherPcNames })).toBeNull();
+    });
+
+    it.each([
+      'I successfully pick the lock.',
+      'I killed the orc.',
+      'The guard is convinced and lets us pass.',
+      'I roll a 20!',
+      'It works perfectly.',
+      'The goblin falls dead.',
+      'I convinced the guard.',
+    ])('flags: "%s"', (text) => {
+      expect(validatePlayerText(text, { otherPcNames })?.rule).toBe('player_narrates_outcome');
+    });
   });
 });

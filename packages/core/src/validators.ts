@@ -17,8 +17,11 @@ const CONTROL_VERBS =
 const MECHANICS =
   /\b\d+\s+(?:points?\s+of\s+)?(?:\w+\s+)?damage\b|\b(?:takes?|deals?|loses?|heals?|regains?)\s+\d+\b|\brolls?\s+(?:a\s+)?\d+\b|\b(?:hp|hit points)\b[^.\d]{0,30}\d/i;
 
+// Only completed-outcome phrasing: past-tense results, not present-tense declarations, questions,
+// or attempts ("I hit the orc" and "I try to convince" are declarations; "I killed the orc" and
+// "I convinced the guard" claim a result the DM has not decided).
 const OUTCOME =
-  /\b(?:successfully|succeeds?|it works|falls? dead|is (?:dead|defeated|convinced)|natural (?:20|1)|rolls? (?:a )?\d+|(?:i|we) (?:hit|kill|defeat|convince|persuade|succeed))\b/i;
+  /\b(?:successfully|it works|falls? dead|is (?:dead|defeated|convinced)|natural (?:20|1)|rolls?(?:ed)?\s+(?:a\s+)?\d+|killed|defeated|convinced|persuaded|succeeded)\b/i;
 
 /** Full names plus first names, so "Kira attacks" matches "Kira Vale". */
 function nameVariants(names: readonly string[]): string[] {
