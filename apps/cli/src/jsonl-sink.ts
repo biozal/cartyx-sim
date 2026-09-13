@@ -37,7 +37,7 @@ export interface JsonlFileSinkFs {
   open: (path: string, flags: string) => Promise<FileHandle>;
   mkdir: (path: string, options: { recursive: true }) => Promise<string | undefined>;
   readFile: (path: string, encoding: BufferEncoding) => Promise<string>;
-  stat: (path: string) => Promise<{ isFile(): boolean }>;
+  stat: (path: string) => Promise<unknown>;
   unlink: (path: string) => Promise<void>;
 }
 
@@ -95,19 +95,27 @@ export class JsonlFileSink implements EventSink {
       }
       throw error;
     }
-    const events = content
-      .split('\n')
-      .map((line, index) => ({ line, number: index + 1 }))
-      .filter(({ line }) => line.trim() !== '')
-      .map(({ line, number }) => {
-        try {
-          return SimEvent.parse(JSON.parse(line));
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
-          throw new Error(`${this.path}:${number}: invalid event (${reason})`);
-        }
-      });
-    this.lastSeq = events.at(-1)?.seq ?? -1;
+    const events: SimEvent[] = [];
+    for (const [index, line] of content.split('\n').entries()) {
+      if (line.trim() === '') continue;
+      const number = index + 1;
+      let event: SimEvent;
+      try {
+        event = SimEvent.parse(JSON.parse(line));
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`${this.path}:${number}: invalid event (${reason})`);
+      }
+      // The same rule `append` enforces: seqs count up from 0 with no gap or overlap.
+      if (event.seq !== events.length) {
+        throw new Error(
+          `${this.path}:${number}: expected seq ${events.length} but got ${event.seq}. The log ` +
+            'has a gap or overlap.'
+        );
+      }
+      events.push(event);
+    }
+    this.lastSeq = events.length - 1;
     return events;
   }
 

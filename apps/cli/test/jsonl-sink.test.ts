@@ -111,6 +111,23 @@ describe('JsonlFileSink', () => {
       expect(await sink.readAll()).toEqual([event(0)]);
     });
 
+    it('M2: readAll rejects a log whose seqs skip a number, naming the file and line', async () => {
+      const path = join(dir, 'events.jsonl');
+      const lines = [event(0), event(1), event(3)].map((e) => JSON.stringify(e));
+      await writeFile(path, `${lines.join('\n')}\n`);
+      await expect(new JsonlFileSink(path).readAll()).rejects.toThrow(
+        `${path}:3: expected seq 2 but got 3`
+      );
+    });
+
+    it('M2: readAll rejects a log that does not start at seq 0', async () => {
+      const path = join(dir, 'events.jsonl');
+      await writeFile(path, `\n${JSON.stringify(event(1))}\n`);
+      await expect(new JsonlFileSink(path).readAll()).rejects.toThrow(
+        `${path}:2: expected seq 0 but got 1`
+      );
+    });
+
     it('checks continuity against what is on disk even for a sink that never called readAll', async () => {
       const path = join(dir, 'events.jsonl');
       await new JsonlFileSink(path).append([event(0), event(1)]);
