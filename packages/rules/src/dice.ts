@@ -49,7 +49,7 @@ export function parseDice(expr: string): DiceExpr {
     }
     const count = dice[1] === '' ? 1 : Number(dice[1]);
     const sides = Number(dice[2]);
-    if (count < 1 || count > 100 || sides < 2) {
+    if (count < 1 || count > 100 || sides < 2 || sides > 1000) {
       throw new RulesError(`Invalid dice term "${body}" in "${expr}"`);
     }
     terms.push({ count, sides });

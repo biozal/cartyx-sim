@@ -29,6 +29,18 @@ describe('parseDice', () => {
   it.each(['', '2x6', 'd1', '-1d4', '1d4-1d6', '1d', '0d6'])('rejects "%s"', (expr) => {
     expect(() => parseDice(expr)).toThrow(RulesError);
   });
+
+  it('rejects a die size over 1000', () => {
+    expect(() => parseDice('1d1001')).toThrow(RulesError);
+  });
+
+  it('rejects a huge die size that would hang the engine', () => {
+    expect(() => parseDice('1d5000000000')).toThrow(RulesError);
+  });
+
+  it('accepts a die size of exactly 1000', () => {
+    expect(parseDice('1d1000')).toEqual({ terms: [{ count: 1, sides: 1000 }], modifier: 0 });
+  });
 });
 
 describe('rollDice', () => {

@@ -24,6 +24,9 @@ export function secureRng(): Rng {
   const buffer = new Uint32Array(1);
   return {
     die(sides) {
+      if (!Number.isInteger(sides) || sides < 2 || sides > 0x100000000) {
+        throw new Error(`secureRng: sides must be an integer in [2, 2^32], got ${sides}`);
+      }
       const limit = Math.floor(0x100000000 / sides) * sides;
       let value: number;
       do {
