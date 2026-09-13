@@ -797,6 +797,356 @@ describe('Director', () => {
     ]);
   });
 
+  it('G5.6: emits an accepted-with-flag validator flag before the narration once DM rejections are exhausted', async () => {
+    const violatingText = 'Kira decides to open the door.';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(toolCall('narrate', { text: violatingText })),
+        respond(toolCall('narrate', { text: violatingText })),
+        respond(toolCall('narrate', { text: violatingText })),
+        respond(toolCall('hand_off', { target: { kind: 'party' } })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+
+    await director.run(2);
+
+    expect(sink.events.slice(1).map((e) => e.type)).toEqual([
+      'validator_flag',
+      'narration',
+      'hand_off',
+      'turn_end',
+    ]);
+    expect(sink.events[1]).toMatchObject({
+      type: 'validator_flag',
+      visibility: 'dm',
+      rule: 'dm_controls_pc',
+      retries: 2,
+      resolution: 'accepted_with_flag',
+    });
+    expect(sink.events[2]).toMatchObject({ type: 'narration', text: violatingText });
+  });
+
+  it('G5.8: skips remaining calls in a response after a rejection, without ending the beat', async () => {
+    const {
+      deps: built,
+      sink,
+      model,
+    } = deps({
+      dm: [
+        respond(
+          toolCall('narrate', { text: 'Kira decides to open the door.' }),
+          toolCall('hand_off', { target: { kind: 'party' } })
+        ),
+        respond(toolCall('hand_off', { target: { kind: 'party' } })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+
+    await director.run(2);
+
+    expect(sink.events.filter((e) => e.type === 'hand_off')).toHaveLength(1);
+    expect(model.requests.filter((r) => r.seat === 'dm')).toHaveLength(2);
+  });
+
+  it('G5.11: the watchdog nudges the DM with a Watchdog: note when players keep passing', async () => {
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(
+          toolCall('narrate', { text: 'A hush falls.' }),
+          toolCall('hand_off', { target: { kind: 'party' } })
+        ),
+        // Silent (no narration): a re-hand-off with no narration, once both players have
+        // already passed, is what pushes silentTurns past the limit.
+        respond(toolCall('hand_off', { target: { kind: 'party' } })),
+        respond(
+          toolCall('narrate', { text: 'The room stirs.' }),
+          toolCall('hand_off', { target: { kind: 'party' } })
+        ),
+      ],
+      'player-kira': [respond(toolCall('pass'))],
+      'player-tomas': [respond(toolCall('pass'))],
+    });
+    const director = await Director.create(config({ silentTurnLimit: 2 }), built);
+
+    await director.run(6);
+
+    const watchdogIndex = sink.events.findIndex(
+      (e) => e.type === 'ooc_note' && e.text.startsWith('Watchdog:')
+    );
+    expect(watchdogIndex).toBeGreaterThan(-1);
+    expect(sink.events[watchdogIndex]).toMatchObject({ visibility: 'dm' });
+    expect(sink.events[watchdogIndex + 1]).toMatchObject({
+      type: 'narration',
+      text: 'The room stirs.',
+    });
+  });
+
+  it('G5.11: the watchdog never fires during combat even once the silent-turn threshold is met', async () => {
+    const soloConfig = config({
+      party: [kira],
+      seats: { dm: 'dm', players: { kira: 'player-kira' } },
+      silentTurnLimit: 1,
+    });
+    const { deps: built, sink } = deps(
+      {
+        dm: [
+          // Narrated, so this beat does not itself count as a silent turn.
+          respond(
+            toolCall('narrate', { text: 'The corridor is still.' }),
+            toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })
+          ),
+          // Silent: starting combat with no narration pushes silentTurns to (and past) the
+          // limit, but this is a DM beat, not a PC turn, so it cannot itself be preempted.
+          respond(
+            toolCall('start_combat', { monsters: [monsterSpec('Goblin')] }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+        'player-kira': [respond(toolCall('pass')), respond(toolCall('pass'))],
+      },
+      // initiative: kira 20+2=22, goblin 1+0=1 -> kira acts first in combat.
+      { rolls: [20, 1] }
+    );
+    const director = await Director.create(soloConfig, built);
+
+    await director.run(5);
+
+    expect(sink.events.some((e) => e.type === 'ooc_note' && e.text.startsWith('Watchdog:'))).toBe(
+      false
+    );
+  });
+
+  it('G5.12: the DM prompt transcript includes lore lines from earlier in the session', async () => {
+    const { deps: built, model } = deps({
+      dm: [
+        respond(
+          toolCall('lookup_lore', { query: 'Sella Vaunt' }),
+          toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })
+        ),
+        respond(toolCall('hand_off', { target: { kind: 'party' } })),
+      ],
+      'player-kira': [respond(toolCall('pass'))],
+    });
+    const director = await Director.create(config(), built);
+
+    await director.run(4);
+
+    const dmRequests = model.requests.filter((r) => r.seat === 'dm');
+    expect(lastUserMessage(dmRequests[1]!)).toContain('[lore]');
+  });
+
+  it('G5.12: combat_turn events are public', async () => {
+    const { deps: built, sink } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('start_combat', { monsters: [monsterSpec('Goblin')] }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+          respond(
+            toolCall('narrate', { text: 'Kira swings.' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+        'player-kira': [respond(toolCall('act', { intent: 'swing wildly' }))],
+      },
+      // initiative: kira 20+2=22, tomas 15+1=16, goblin 1+0=1 -> kira, tomas, goblin.
+      { rolls: [20, 15, 1] }
+    );
+    const director = await Director.create(config(), built);
+
+    await director.run(4);
+
+    const combatTurn = sink.events.find((e) => e.type === 'combat_turn');
+    expect(combatTurn).toMatchObject({ visibility: 'public' });
+  });
+
+  it('G5.12: a player validator_flag event is DM-only', async () => {
+    const outcome = respond(toolCall('speak', { text: 'I successfully pick the lock.' }));
+    const { deps: built, sink } = deps({
+      dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } }))],
+      'player-tomas': [outcome, outcome, outcome],
+    });
+    const director = await Director.create(config(), built);
+
+    await director.run(3);
+
+    const flag = sink.events.find((e) => e.type === 'validator_flag' && e.seat === 'player-tomas');
+    expect(flag).toMatchObject({ visibility: 'dm' });
+  });
+
+  it('G5.10: emits combat_end when a monster beat leaves nobody able to act', async () => {
+    const soloConfig = config({
+      party: [kira],
+      seats: { dm: 'dm', players: { kira: 'player-kira' } },
+    });
+    const { deps: built, sink } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('start_combat', {
+              monsters: [
+                {
+                  name: 'Goblin',
+                  ac: 10,
+                  maxHp: 5,
+                  attacks: [
+                    { name: 'Scimitar', bonus: 4, damage: '1d6+2', damageType: 'slashing' },
+                  ],
+                },
+              ],
+            }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+          respond(
+            toolCall('apply_damage', {
+              targetId: 'kira',
+              amount: 10,
+              damageType: 'fire',
+              reason: 'a shared blast',
+            }),
+            toolCall('apply_damage', {
+              targetId: 'goblin-1',
+              amount: 10,
+              damageType: 'fire',
+              reason: 'a shared blast',
+            }),
+            toolCall('narrate', { text: 'A shared blast levels everyone.' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      // initiative: kira 1+2=3, goblin 20+0=20 -> goblin acts first (a monster beat).
+      { rolls: [1, 20] }
+    );
+    const director = await Director.create(soloConfig, built);
+
+    await director.run(3);
+
+    expect(sink.events.some((e) => e.type === 'combat_end')).toBe(true);
+    expect(director.currentState.combat).toBeNull();
+  });
+
+  it('G5.9: does not reject mechanics narration after a mechanics tool ran earlier in the same beat', async () => {
+    const { deps: built, sink } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('request_check', {
+              combatantId: 'kira',
+              checkType: 'ability',
+              ability: 'str',
+              dc: 10,
+              reason: 'shove',
+            }),
+            toolCall('narrate', { text: 'The blow lands for 7 damage.' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      { rolls: [10] }
+    );
+    const director = await Director.create(config(), built);
+
+    await director.run(2);
+
+    expect(sink.events.some((e) => e.type === 'validator_flag')).toBe(false);
+    expect(sink.events.some((e) => e.type === 'narration' && e.text.includes('7 damage'))).toBe(
+      true
+    );
+  });
+
+  it('G5.6: the DM rejection counter tracks a configured maxValidatorRetries', async () => {
+    const violatingText = 'Kira decides to open the door.';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(toolCall('narrate', { text: violatingText })),
+        respond(toolCall('narrate', { text: violatingText })),
+        respond(toolCall('hand_off', { target: { kind: 'party' } })),
+      ],
+    });
+    const director = await Director.create(config({ maxValidatorRetries: 1 }), built);
+
+    await director.run(2);
+
+    expect(sink.events[1]).toMatchObject({
+      type: 'validator_flag',
+      rule: 'dm_controls_pc',
+      retries: 1,
+      resolution: 'accepted_with_flag',
+    });
+  });
+
+  it('G5.7: keeps a dialogue and flags accepted-with-flag when a valid call and an invalid call share the final attempt', async () => {
+    const attempt = respond(
+      toolCall('speak', { text: 'I hold the line.' }),
+      toolCall('unknown_tool', {})
+    );
+    const { deps: built, sink } = deps({
+      dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } }))],
+      'player-tomas': [attempt, attempt, attempt],
+    });
+    const director = await Director.create(config(), built);
+
+    await director.run(3);
+
+    expect(sink.events.slice(-3)).toMatchObject([
+      { type: 'dialogue', text: 'I hold the line.' },
+      {
+        type: 'validator_flag',
+        rule: 'invalid_tool_call',
+        retries: 2,
+        resolution: 'accepted_with_flag',
+      },
+      { type: 'turn_end', actor: 'tomas' },
+    ]);
+  });
+
+  it('G5.7: a text-only player reply becomes a dialogue event', async () => {
+    const { deps: built, sink } = deps({
+      dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } }))],
+      'player-kira': [{ text: 'Steady, everyone.', toolCalls: [] }],
+    });
+    const director = await Director.create(config(), built);
+
+    await director.run(3);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([
+      { speaker: 'kira', text: 'Steady, everyone.' },
+    ]);
+    expect(sink.events.some((e) => e.type === 'validator_flag')).toBe(false);
+  });
+
+  it('G5.2: commit waits for the sink and never advances state after a failed append', async () => {
+    const sink = new MemorySink();
+    const realAppend = sink.append.bind(sink);
+    let calls = 0;
+    sink.append = async (events) => {
+      calls++;
+      if (calls === 2) throw new Error('disk full');
+      return realAppend(events);
+    };
+    const { deps: built } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('narrate', { text: 'The engines hum.' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      { sink }
+    );
+    const director = await Director.create(config(), built);
+
+    await expect(director.run(2)).rejects.toThrow('disk full');
+
+    expect(director.currentState.session).toBe(1);
+    expect(director.events).toHaveLength(1);
+    expect(director.events[0]).toMatchObject({ type: 'session_start' });
+  });
+
   it('G2.4: ends at the hard stop on resume before choosing an actor, granting no extra turn', async () => {
     const recorder = new TurnRecorder(initialState(), 'setup', now);
     recorder.emit({
