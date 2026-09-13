@@ -32,29 +32,34 @@ export async function runSession(options: RunOptions): Promise<RunSessionResult>
   }
   const log = options.log ?? (() => {});
 
-  const director = await Director.create(
-    {
-      session: options.session,
-      targetMinutes: options.targetMinutes ?? fixture.targetMinutes,
-      loreCommit: fixture.loreCommit,
-      party: fixture.party,
-      seats: fixture.seats,
-    },
-    {
-      model: new ScriptedModelClient(fixture.script),
-      lore: new StaticLoreIndex(fixture.lore),
-      rng: pickRng(fixture, options.seed),
-      sink,
-      prompts: basicPrompts,
-      onCommit: (events, state) => {
-        for (const event of events) {
-          if (event.visibility !== 'public') continue;
-          const line = describeEvent(event, state);
-          if (line) log(line);
-        }
+  await sink.acquireLock();
+  try {
+    const director = await Director.create(
+      {
+        session: options.session,
+        targetMinutes: options.targetMinutes ?? fixture.targetMinutes,
+        loreCommit: fixture.loreCommit,
+        party: fixture.party,
+        seats: fixture.seats,
       },
-    }
-  );
-  const result = await director.run();
-  return { ...result, eventsPath };
+      {
+        model: new ScriptedModelClient(fixture.script),
+        lore: new StaticLoreIndex(fixture.lore),
+        rng: pickRng(fixture, options.seed),
+        sink,
+        prompts: basicPrompts,
+        onCommit: (events, state) => {
+          for (const event of events) {
+            if (event.visibility !== 'public') continue;
+            const line = describeEvent(event, state);
+            if (line) log(line);
+          }
+        },
+      }
+    );
+    const result = await director.run();
+    return { ...result, eventsPath };
+  } finally {
+    await sink.releaseLock();
+  }
 }
