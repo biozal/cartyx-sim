@@ -1,10 +1,10 @@
 import type { SimEvent } from './events';
-import type { GameState } from './state';
+import { ownEntry, type GameState } from './state';
 
 export type Audience = 'dm' | 'player';
 
 function nameOf(id: string, state: GameState): string {
-  return state.combatants[id]?.name ?? state.npcs[id]?.name ?? id;
+  return ownEntry(state.combatants, id)?.name ?? ownEntry(state.npcs, id)?.name ?? id;
 }
 
 /** One human-readable transcript line for an event, or null if the event is not shown. */

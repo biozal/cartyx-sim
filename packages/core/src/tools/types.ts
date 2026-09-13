@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { SimEvent } from '../events';
 import type { LoreIndex, ToolCall, ToolSchema } from '../model';
 import type { TurnRecorder } from '../recorder';
-import type { GameState } from '../state';
+import { ownEntry, type GameState } from '../state';
 
 /** A tool misuse the model can correct, e.g. an unknown id. Returned to the model as an error result. */
 export class ToolError extends Error {
@@ -101,7 +101,7 @@ export async function runPreparedCall(
 }
 
 export function getCombatant(state: GameState, id: string): Combatant {
-  const combatant = state.combatants[id];
+  const combatant = ownEntry(state.combatants, id);
   if (!combatant) {
     const known = Object.keys(state.combatants).join(', ') || 'none';
     throw new ToolError(`Unknown combatant id "${id}". Known ids: ${known}`);

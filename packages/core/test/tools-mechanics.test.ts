@@ -34,6 +34,97 @@ function withGoblin(rolls: number[]) {
   });
 }
 
+const POISON_IDS = ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf'];
+
+describe('id lookups reject built-in property names', () => {
+  it.each(POISON_IDS)('request_check rejects combatantId "%s"', async (id) => {
+    const harness = toolHarness();
+    const result = await harness.run(requestCheck, {
+      combatantId: id,
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain(`Unknown combatant id "${id}"`);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it.each(POISON_IDS)('attack rejects attackerId "%s"', async (id) => {
+    const harness = toolHarness();
+    const result = await harness.run(attack, {
+      attackerId: id,
+      targetId: 'tomas',
+      attackName: 'Longsword',
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it.each(POISON_IDS)('cast_spell rejects casterId "%s"', async (id) => {
+    const harness = toolHarness();
+    const result = await harness.run(castSpell, { casterId: id, spell: 'Shield', slotLevel: 0 });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it.each(POISON_IDS)('apply_damage rejects targetId "%s"', async (id) => {
+    const harness = toolHarness();
+    const result = await harness.run(applyDamageTool, {
+      targetId: id,
+      amount: 1,
+      damageType: 'fire',
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it.each(POISON_IDS)('heal rejects targetId "%s"', async (id) => {
+    const harness = toolHarness();
+    const result = await harness.run(healTool, { targetId: id, amount: 1, reason: 'x' });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it.each(POISON_IDS)('add_condition rejects targetId "%s"', async (id) => {
+    const harness = toolHarness();
+    const result = await harness.run(addConditionTool, {
+      targetId: id,
+      condition: 'poisoned',
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it.each(POISON_IDS)('remove_condition rejects targetId "%s"', async (id) => {
+    const harness = toolHarness();
+    const result = await harness.run(removeConditionTool, {
+      targetId: id,
+      condition: 'poisoned',
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it.each(POISON_IDS)('give_item rejects targetId "%s"', async (id) => {
+    const harness = toolHarness();
+    const result = await harness.run(giveItem, { targetId: id, item: 'Key' });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it.each(POISON_IDS)('remove_item rejects targetId "%s"', async (id) => {
+    const harness = toolHarness();
+    const result = await harness.run(removeItemTool, { targetId: id, item: 'Key' });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+});
+
 describe('request_check', () => {
   it('rolls a skill check and logs the roll', async () => {
     const harness = toolHarness({ rng: scriptedRng([8]) });

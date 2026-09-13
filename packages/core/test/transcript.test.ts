@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { SimEvent } from '../src/events';
 import { TurnRecorder } from '../src/recorder';
 import { describeEvent, renderTranscript } from '../src/transcript';
 import { now, startedState } from './helpers';
@@ -88,5 +89,18 @@ describe('describeEvent', () => {
   it('skips bookkeeping events', () => {
     const { history, state } = startedState();
     expect(describeEvent(history[0]!, state)).toBeNull();
+  });
+
+  it('falls back to the raw id for a built-in property name instead of a prototype value', () => {
+    const { state } = startedState();
+    const event = SimEvent.parse({
+      seq: 1,
+      ts: '2026-09-13T00:00:00.000Z',
+      turnId: 'turn',
+      visibility: 'public',
+      type: 'pass',
+      actor: 'constructor',
+    });
+    expect(describeEvent(event, state)).toBe('constructor holds back.');
   });
 });

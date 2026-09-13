@@ -381,6 +381,30 @@ describe('Director', () => {
     expect(foldEvents(sink.events)).toEqual(resumed.currentState);
   });
 
+  it('does not crash when the DM targets a built-in property name as an id', async () => {
+    const {
+      deps: built,
+      model,
+      sink,
+    } = deps({
+      dm: [
+        respond(
+          toolCall('add_condition', {
+            targetId: 'constructor',
+            condition: 'poisoned',
+            reason: 'test',
+          })
+        ),
+        respond(toolCall('hand_off', { target: { kind: 'party' } })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await expect(director.step()).resolves.toBe('continue');
+    expect(sink.events.some((e) => e.type === 'state_change')).toBe(false);
+    expect(model.remaining('dm')).toBe(0);
+  });
+
   it('refuses to resume a finished session or a different session number', async () => {
     const { deps: built, sink } = deps({
       dm: [

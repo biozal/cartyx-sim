@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Emotion, HandOffTarget } from '../events';
-import { selectResponders } from '../state';
+import { ownEntry, selectResponders } from '../state';
 import { slugify } from '../text';
 import { defineTool, ToolError } from './types';
 
@@ -31,7 +31,7 @@ export const introduceNpc = defineTool({
   run(args, { recorder }) {
     const npcId = slugify(args.name);
     if (!npcId) throw new ToolError(`Cannot build an id from NPC name "${args.name}"`);
-    if (recorder.state.npcs[npcId]) {
+    if (ownEntry(recorder.state.npcs, npcId)) {
       return { result: `${args.name} is already introduced; use npcId "${npcId}".` };
     }
     recorder.emit({
@@ -56,7 +56,7 @@ export const npcSay = defineTool({
   }),
   narrativeText: (args) => args.text,
   run(args, { recorder }) {
-    const npc = recorder.state.npcs[args.npcId];
+    const npc = ownEntry(recorder.state.npcs, args.npcId);
     if (!npc) {
       const known = Object.keys(recorder.state.npcs).join(', ') || 'none';
       throw new ToolError(

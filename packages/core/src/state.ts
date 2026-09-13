@@ -38,6 +38,14 @@ export interface GameState {
 
 export const OPEN_FLOOR_RESPONDERS = 2;
 
+/**
+ * Looks up an own property only, so ids like "constructor" or "__proto__" — which resolve on the
+ * prototype chain with plain bracket access — correctly miss instead of returning a built-in.
+ */
+export function ownEntry<T>(record: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
 export function initialState(): GameState {
   return {
     session: null,
@@ -85,7 +93,7 @@ export function applyEvent(state: GameState, event: SimEvent): GameState {
       break;
     }
     case 'state_change': {
-      const combatant = next.combatants[event.entity];
+      const combatant = ownEntry(next.combatants, event.entity);
       if (!combatant) throw new Error(`state_change for unknown combatant "${event.entity}"`);
       next.combatants[event.entity] = Combatant.parse({ ...combatant, [event.field]: event.after });
       break;

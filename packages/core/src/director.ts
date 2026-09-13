@@ -12,7 +12,7 @@ import type {
 import type { PromptBuilder } from './prompts';
 import { TurnRecorder } from './recorder';
 import type { EventSink } from './sink';
-import { advanceCombat, foldEvents, nextActor, type GameState } from './state';
+import { advanceCombat, foldEvents, nextActor, ownEntry, type GameState } from './state';
 import {
   DM_TOOLS,
   MECHANICS_TOOL_NAMES,
@@ -226,7 +226,9 @@ export class Director {
       instruction: this.dmInstruction(reason, combatantId, nudge),
     });
     const context = this.toolContext(recorder, 'dm');
-    const pcNames = this.state.partyIds.map((id) => this.state.combatants[id]?.name ?? id);
+    const pcNames = this.state.partyIds.map(
+      (id) => ownEntry(this.state.combatants, id)?.name ?? id
+    );
     let mechanicsCalled = false;
     let rejections = 0;
     let ended = false;
@@ -332,7 +334,7 @@ export class Director {
 
   private async playerTurn(pcId: string, reason: 'response' | 'combat_turn'): Promise<void> {
     const recorder = this.newRecorder();
-    const pc = this.state.combatants[pcId];
+    const pc = ownEntry(this.state.combatants, pcId);
     const seat = this.config.seats.players[pcId];
     if (!pc || !seat) throw new Error(`No player seat configured for "${pcId}"`);
 
@@ -348,7 +350,7 @@ export class Director {
     });
     const otherPcNames = this.state.partyIds
       .filter((id) => id !== pcId)
-      .map((id) => this.state.combatants[id]?.name ?? id);
+      .map((id) => ownEntry(this.state.combatants, id)?.name ?? id);
     const context = this.toolContext(recorder, pcId);
 
     for (let attempt = 0; ; attempt++) {
@@ -426,7 +428,9 @@ export class Director {
     combatantId: string | undefined,
     nudge: string | undefined
   ): string {
-    const name = combatantId ? (this.state.combatants[combatantId]?.name ?? combatantId) : '';
+    const name = combatantId
+      ? (ownEntry(this.state.combatants, combatantId)?.name ?? combatantId)
+      : '';
     const base =
       reason === 'resolve'
         ? `${name} has declared their combat action (see recent events). Resolve it with tools, narrate the result, then call hand_off.`

@@ -125,6 +125,38 @@ describe('record_invention', () => {
   });
 });
 
+describe('id lookups reject built-in property names', () => {
+  const POISON_IDS = ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf'];
+
+  it.each(POISON_IDS)('npc_say rejects npcId "%s"', async (id) => {
+    const harness = toolHarness();
+    expect(await harness.run(npcSay, { npcId: id, text: 'Boo.' })).toEqual({
+      ok: false,
+      error: `Unknown npcId "${id}". Call introduce_npc first. Known NPCs: none`,
+    });
+  });
+
+  it.each(POISON_IDS)('hand_off rejects pc id "%s"', async (id) => {
+    const harness = toolHarness();
+    const result = await harness.run(handOff, { target: { kind: 'pcs', ids: [id] } });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('introduces an NPC named after a built-in property normally', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(introduceNpc, {
+      name: 'Constructor',
+      description: 'A strange golem',
+      invented: true,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      outcome: { result: 'Introduced Constructor with npcId "constructor".' },
+    });
+  });
+});
+
 describe('hand_off', () => {
   it('ends the beat and queues the party quietest first', async () => {
     const harness = toolHarness();
