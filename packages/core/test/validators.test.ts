@@ -45,6 +45,39 @@ describe('validateDmText', () => {
     validateDmText(text, { pcNames, mechanicsToolCalled: false });
     expect(performance.now() - start).toBeLessThan(100);
   });
+
+  describe('G4.2: catches past-tense, adverb, vocative, and Unicode PC control', () => {
+    const elodieParty = [...pcNames, 'Élodie Marsh'];
+
+    it.each([
+      'Kira drew her hammer and attacked the goblin.',
+      'Kira decided to follow the shadow.',
+      'Kira quickly draws her hammer.',
+      'Kira, you draw your hammer and charge.',
+    ])('flags: "%s"', (text) => {
+      expect(validateDmText(text, { pcNames, mechanicsToolCalled: false })?.rule).toBe(
+        'dm_controls_pc'
+      );
+    });
+
+    it('flags a Unicode PC name: "Élodie draws her bow."', () => {
+      expect(
+        validateDmText('Élodie draws her bow.', {
+          pcNames: elodieParty,
+          mechanicsToolCalled: false,
+        })?.rule
+      ).toBe('dm_controls_pc');
+    });
+
+    it.each([
+      'Kira, the lock clicks open under your fingers.',
+      'The sentry slams Tomas into the workbench.',
+      'Kira, you notice fresh scratches on the housing.',
+      'Kira hears a click.',
+    ])('still accepts: "%s"', (text) => {
+      expect(validateDmText(text, { pcNames, mechanicsToolCalled: false })).toBeNull();
+    });
+  });
 });
 
 describe('validatePlayerText', () => {

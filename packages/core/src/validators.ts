@@ -8,8 +8,11 @@ export interface Violation {
   message: string;
 }
 
+// Present and past tense, so "Kira draws" and "Kira drew" both count.
 const CONTROL_VERBS =
-  'decides?|chooses?|agrees?|attacks?|casts?|says?|shouts?|grabs?|runs?|draws?|shoots?|moves?|nods?|follows?|refuses?';
+  'decides?|decided|chooses?|chose|agrees?|agreed|attacks?|attacked|casts?|cast|says?|said|' +
+  'shouts?|shouted|grabs?|grabbed|runs?|ran|draws?|drew|shoots?|shot|moves?|moved|nods?|nodded|' +
+  'follows?|followed|refuses?|refused|charges?|charged';
 
 // The hp/hit-points branch bounds its gap to the digit (excluding periods and digits from it,
 // and capping its width) so a long run of text with neither never forces linear backtracking at
@@ -29,10 +32,24 @@ function nameVariants(names: readonly string[]): string[] {
   return [...new Set(variants)].filter((name) => name.length > 1);
 }
 
+/**
+ * Checks whether `name` controls a PC in `text`: an action verb right after the name (with up to
+ * two intervening words, e.g. an adverb), or a vocative "Name, you <verb>". Boundaries are
+ * Unicode-aware (`\p{L}`/`\p{N}` lookarounds with the `u` flag) so names like "Élodie" match,
+ * since `\b` only recognizes ASCII word characters.
+ */
+function nameControlsSomeone(text: string, name: string): boolean {
+  const escaped = escapeRegExp(name);
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])${escaped}(?:,\\s*you\\s+(?:${CONTROL_VERBS})|\\s+(?:\\S+\\s+){0,2}(?:${CONTROL_VERBS}))(?![\\p{L}\\p{N}])`,
+    'iu'
+  );
+  return pattern.test(text);
+}
+
 function controlledCharacter(text: string, names: readonly string[]): string | null {
   for (const name of nameVariants(names)) {
-    const pattern = new RegExp(`\\b${escapeRegExp(name)}\\s+(?:${CONTROL_VERBS})\\b`, 'i');
-    if (pattern.test(text)) return name;
+    if (nameControlsSomeone(text, name)) return name;
   }
   return null;
 }
