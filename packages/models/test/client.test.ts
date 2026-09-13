@@ -170,10 +170,42 @@ describe('OpenAICompatibleModelClient', () => {
       },
     });
     await expect(client.complete(request())).rejects.toThrow(
-      new RegExp(
-        `Seat "dm" failed on every endpoint: big at ${primary.baseURL}.*; small at ${backup.baseURL}`
-      )
+      new RegExp(`Every endpoint failed: big at ${primary.baseURL}.*; small at ${backup.baseURL}`)
     );
+  });
+
+  it('names the seat exactly once when a Director run pauses after every endpoint fails', async () => {
+    const primary = await server(() => ({ status: 500 }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: primary.baseURL }, model: 'big' },
+    });
+    const kira = makeCombatant({ id: 'kira', name: 'Kira Vale' });
+    const sink = new MemorySink();
+    const director = await Director.create(
+      {
+        session: 1,
+        targetMinutes: 60,
+        loreCommit: 'test',
+        party: [kira],
+        seats: { dm: 'dm', players: { kira: 'player-kira' } },
+        retryDelaysMs: [],
+      },
+      {
+        model: client,
+        lore: new StaticLoreIndex([]),
+        rng: scriptedRng([]),
+        sink,
+        prompts: basicPrompts,
+      }
+    );
+
+    const result = await director.run();
+
+    expect(result).toMatchObject({ status: 'paused', seat: 'dm' });
+    const paused = sink.events.at(-1) as { reason: string };
+    // Before the fix, the client's own "Seat ... failed on every endpoint" combined with the
+    // director's SessionPausedError wrapper repeated the seat name.
+    expect(paused.reason.match(/"dm"/g)).toHaveLength(1);
   });
 
   it('times out a slow endpoint', async () => {
@@ -181,7 +213,7 @@ describe('OpenAICompatibleModelClient', () => {
     const client = new OpenAICompatibleModelClient({
       dm: { endpoint: { baseURL: fake.baseURL }, model: 'm', timeoutMs: 50 },
     });
-    await expect(client.complete(request())).rejects.toThrow('Seat "dm" failed on every endpoint');
+    await expect(client.complete(request())).rejects.toThrow('Every endpoint failed');
   });
 
   it('does not fall back after a deliberate abort', async () => {

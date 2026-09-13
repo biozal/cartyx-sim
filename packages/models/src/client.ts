@@ -33,7 +33,9 @@ export class OpenAICompatibleModelClient implements ModelClient {
         failures.push(`${target.model} at ${target.endpoint.baseURL}: ${errorMessage(error)}`);
       }
     }
-    throw new Error(`Seat "${request.seat}" failed on every endpoint: ${failures.join('; ')}`);
+    // No seat prefix here: the director adds one (`Seat "<seat>" failed: ...`) when it wraps this
+    // in a SessionPausedError, so naming the seat at both layers would repeat it in the message.
+    throw new Error(`Every endpoint failed: ${failures.join('; ')}`);
   }
 
   private async generate(
