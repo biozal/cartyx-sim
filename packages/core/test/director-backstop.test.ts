@@ -175,6 +175,58 @@ describe('runaway-loop backstop', () => {
     expect(foldEvents(sink.events)).toEqual(run.currentState);
   });
 
+  it('pauses a combat where the DM only hands off, even though the PC keeps declaring actions', async () => {
+    // A PC's own declared action is not progress until the DM resolves it: a DM that only calls
+    // hand_off (or is broken and force-hands-off every beat) must still trip the backstop.
+    const goblin = makeCombatant({
+      id: 'goblin-1',
+      name: 'Goblin',
+      kind: 'monster',
+      hp: 7,
+      maxHp: 7,
+    });
+    const sink = new MemorySink();
+    const { state, history } = startedState([kira]);
+    const recorder = new TurnRecorder(state, 'setup-combat', now);
+    recorder.emit({ type: 'combatant_added', combatant: goblin });
+    recorder.emit({
+      type: 'combat_start',
+      order: [
+        { combatantId: 'kira', roll: 20, dexMod: 2, total: 22 },
+        { combatantId: 'goblin-1', roll: 10, dexMod: 0, total: 10 },
+      ],
+    });
+    await sink.append([...history, ...recorder.events]);
+
+    const run = await Director.create(
+      config({
+        party: [kira],
+        seats: { dm: 'dm', players: { kira: 'player-kira' } },
+        silentTurnLimit: 99,
+        silentTurnPauseLimit: 5,
+      }),
+      {
+        model: new ScriptedModelClient({
+          dm: Array.from({ length: 20 }, () => respond(handOffParty)),
+          'player-kira': Array.from({ length: 20 }, () =>
+            respond(toolCall('act', { intent: 'attacks the goblin', targetId: 'goblin-1' }))
+          ),
+        }),
+        lore: new StaticLoreIndex([]),
+        rng: scriptedRng([]),
+        sink,
+        prompts: basicPrompts,
+        now,
+      }
+    );
+
+    const result = await run.run(50);
+
+    expect(result).toMatchObject({ status: 'paused', seat: 'dm' });
+    expect(sink.events.at(-1)).toMatchObject({ type: 'session_paused', kind: 'backstop' });
+    expect(foldEvents(sink.events)).toEqual(run.currentState);
+  });
+
   it('pauses when the DM keeps handing off to a party that cannot act', async () => {
     const downed = [
       { ...kira, hp: 0, conditions: ['unconscious' as const] },

@@ -5,12 +5,13 @@ import { countWords } from './text';
 /**
  * Event types that count as real progress for the runaway-loop backstop: they change the story or
  * the game state, not just bookkeeping (`hand_off`, `pass`, `combat_turn`, `validator_flag`,
- * `ooc_note`, lore events).
+ * `ooc_note`, lore events). `action` is deliberately excluded: a PC's declared action is not
+ * progress until the DM resolves it (with a `roll`/`state_change`/narration), so a DM that only
+ * hands off in combat still stalls even while the PC keeps declaring actions every turn.
  */
 const PROGRESS_EVENT_TYPES: ReadonlySet<SimEventType> = new Set([
   'narration',
   'dialogue',
-  'action',
   'roll',
   'state_change',
   'combatant_added',
