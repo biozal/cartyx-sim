@@ -9,6 +9,7 @@ import {
   recordInvention,
   sceneChange,
 } from '../src/tools/narrative';
+import type { LoreIndex } from '../src/model';
 import { toToolSchema } from '../src/tools/types';
 import { startedState } from './helpers';
 import { toolHarness } from './tool-harness';
@@ -81,6 +82,20 @@ describe('introduce_npc and npc_say', () => {
     });
   });
 
+  it('G5.15: records a loreEntityId on the event and in state.npcs', async () => {
+    const harness = toolHarness();
+    await harness.run(introduceNpc, {
+      name: 'Professor Sella Vaunt',
+      description: 'Crystal engine professor',
+      invented: false,
+      loreEntityId: '2418574',
+    });
+    expect(harness.recorder.events[0]).toMatchObject({ loreEntityId: '2418574' });
+    expect(harness.recorder.state.npcs['npc-professor-sella-vaunt']).toMatchObject({
+      loreEntityId: '2418574',
+    });
+  });
+
   it('refuses dialogue from an NPC who was never introduced', async () => {
     const harness = toolHarness();
     expect(await harness.run(npcSay, { npcId: 'ghost', text: 'Boo.' })).toEqual({
@@ -145,6 +160,17 @@ describe('scene_change', () => {
     await harness.run(sceneChange, { location: "Dean's Office", artPrompt: 'A polished office' });
     expect(harness.recorder.state.scene?.location).toBe("Dean's Office");
   });
+
+  it('G5.15: records a loreEntityId on the event and in state.scene', async () => {
+    const harness = toolHarness();
+    await harness.run(sceneChange, {
+      location: "Dean's Office",
+      artPrompt: 'A polished office',
+      loreEntityId: 'place-42',
+    });
+    expect(harness.recorder.events[0]).toMatchObject({ loreEntityId: 'place-42' });
+    expect(harness.recorder.state.scene).toMatchObject({ loreEntityId: 'place-42' });
+  });
 });
 
 describe('lookup_lore', () => {
@@ -172,6 +198,28 @@ describe('lookup_lore', () => {
       outcome: { result: expect.stringContaining('record_invention') },
     });
     expect(harness.recorder.events[0]).toMatchObject({ type: 'lore_lookup', used: [] });
+  });
+
+  it('G5.14: a hit exactly at the relevance threshold counts as used', async () => {
+    const lore: LoreIndex = {
+      async search() {
+        return [
+          {
+            chunkId: 'avalon#threshold',
+            source: 'test',
+            title: 'Threshold Hit',
+            text: 'Right at the line.',
+            score: 0.35,
+          },
+        ];
+      },
+    };
+    const harness = toolHarness({ lore });
+    await harness.run(lookupLore, { query: 'threshold' });
+    expect(harness.recorder.events[0]).toMatchObject({
+      type: 'lore_lookup',
+      used: ['avalon#threshold'],
+    });
   });
 });
 

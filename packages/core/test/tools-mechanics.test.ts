@@ -303,6 +303,47 @@ describe('cast_spell', () => {
     expect(harness.recorder.state.combatants['goblin-1']?.hp).toBe(1);
   });
 
+  it('G5.3: a failed save takes the full rolled damage, not zero', async () => {
+    const { state, history } = startedState([kira, tomas]);
+    const harness = toolHarness({ state, history, rng: scriptedRng([10]) });
+    await harness.run(castSpell, {
+      casterId: 'kira',
+      spell: 'Poison Spray',
+      slotLevel: 0,
+      targetIds: ['tomas'],
+      save: { ability: 'con', dc: 30, damage: '4', damageType: 'poison', halfOnSuccess: false },
+    });
+    expect(harness.recorder.state.combatants.tomas?.hp).toBe(8);
+  });
+
+  it('G5.3: a successful half-damage save with an odd total rounds down', async () => {
+    const { state, history } = startedState([kira, tomas]);
+    const harness = toolHarness({ state, history, rng: scriptedRng([10]) });
+    await harness.run(castSpell, {
+      casterId: 'kira',
+      spell: 'Thunderwave',
+      slotLevel: 1,
+      targetIds: ['tomas'],
+      save: { ability: 'con', dc: 1, damage: '7', damageType: 'thunder', halfOnSuccess: true },
+    });
+    // dc 1 always succeeds; half of 7 rounds down to 3.
+    expect(harness.recorder.state.combatants.tomas?.hp).toBe(9);
+  });
+
+  it("G5.3: the save roll event's actor is the target, not the caster", async () => {
+    const { state, history } = startedState([kira, tomas]);
+    const harness = toolHarness({ state, history, rng: scriptedRng([10]) });
+    await harness.run(castSpell, {
+      casterId: 'kira',
+      spell: 'Poison Spray',
+      slotLevel: 0,
+      targetIds: ['tomas'],
+      save: { ability: 'con', dc: 30, damage: '4', damageType: 'poison', halfOnSuccess: false },
+    });
+    const saveRoll = harness.recorder.events.find((e) => e.type === 'roll' && e.kind === 'save');
+    expect(saveRoll).toMatchObject({ actor: 'tomas' });
+  });
+
   it('heals targets', async () => {
     const { state, history } = startedState([kira, { ...tomas, hp: 2 }]);
     const harness = toolHarness({ state, history, rng: scriptedRng([5]) });
@@ -352,6 +393,24 @@ describe('cast_spell', () => {
       ok: false,
       error: 'Kira Vale has no level 1 spell slots left (slots: L1 0/2)',
     });
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('G5.5: refuses a cast targeting a combatant that was already dead before the cast, emitting nothing', async () => {
+    const { state, history } = startedState([kira, tomas]);
+    const deadGoblin = { ...goblin, dead: true, hp: 0 };
+    const harness = toolHarness({
+      state: { ...state, combatants: { ...state.combatants, [deadGoblin.id]: deadGoblin } },
+      history,
+    });
+    const result = await harness.run(castSpell, {
+      casterId: 'kira',
+      spell: 'Chromatic Orb',
+      slotLevel: 1,
+      targetIds: ['goblin-1'],
+      attack: { bonus: 5, damage: '3d8', damageType: 'fire' },
+    });
+    expect(result).toEqual({ ok: false, error: 'Goblin is dead.' });
     expect(harness.recorder.events).toHaveLength(0);
   });
 

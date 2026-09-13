@@ -56,6 +56,30 @@ describe('player tools', () => {
     });
   });
 
+  it("G5.13: interject skips the actor's own most recent line and overlaps an earlier line by someone else", async () => {
+    const started = startedState([kira, tomas]);
+    const recorder = new TurnRecorder(started.state, 'dm-turn', now);
+    recorder.emit({
+      type: 'narration',
+      speaker: 'dm',
+      text: 'The door bursts open.',
+      emotion: 'excited',
+    });
+    recorder.emit({
+      type: 'dialogue',
+      speaker: 'kira',
+      speakerKind: 'pc',
+      text: 'Finally!',
+      emotion: 'excited',
+    });
+    const history = [...started.history, ...recorder.events];
+    const harness = toolHarness({ state: recorder.state, history, actorId: 'kira' });
+
+    await harness.run(interject, { text: 'Wait—!' });
+
+    expect(harness.recorder.events[0]).toMatchObject({ type: 'dialogue', overlaps: 1 });
+  });
+
   it('interject needs a line to overlap and stays short', async () => {
     expect(await kiraHarness().run(interject, { text: 'Wait!' })).toEqual({
       ok: false,
