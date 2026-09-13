@@ -1,9 +1,51 @@
+import type { FileHandle } from 'node:fs/promises';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SimEvent } from '@cartyx-sim/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { JsonlFileSink, type JsonlFileSinkFs } from '../src/jsonl-sink';
+
+function notFound(): Error {
+  return Object.assign(new Error('not found'), { code: 'ENOENT' });
+}
+
+/** A fake filesystem that records call order/counts and lets one test script the file handle. */
+function fakeFs(handle: {
+  appendFile: (content: string) => Promise<void>;
+  sync: () => Promise<void>;
+  close: () => Promise<void>;
+}): { fs: JsonlFileSinkFs; calls: string[] } {
+  const calls: string[] = [];
+  const fs: JsonlFileSinkFs = {
+    open: async () => {
+      calls.push('open');
+      return {
+        appendFile: async (content: string) => {
+          calls.push('appendFile');
+          await handle.appendFile(content);
+        },
+        sync: async () => {
+          calls.push('sync');
+          await handle.sync();
+        },
+        close: async () => {
+          calls.push('close');
+          await handle.close();
+        },
+      } as unknown as FileHandle;
+    },
+    mkdir: async () => undefined,
+    readFile: async () => {
+      throw notFound();
+    },
+    stat: async () => {
+      throw notFound();
+    },
+    unlink: async () => {},
+  };
+  return { fs, calls };
+}
 
 const event = (seq: number): SimEvent =>
   SimEvent.parse({
@@ -139,6 +181,50 @@ describe('JsonlFileSink', () => {
       await sink.acquireLock();
       await sink.releaseLock();
       expect(calls).toEqual(expect.arrayContaining(['mkdir', 'open', 'stat', 'unlink']));
+    });
+  });
+
+  describe('G5.1: append durability', () => {
+    it('opens the file once, appends every event in one call, syncs once, and closes the handle', async () => {
+      let written = '';
+      const { fs, calls } = fakeFs({
+        appendFile: async (content) => {
+          written = content;
+        },
+        sync: async () => {},
+        close: async () => {},
+      });
+      const sink = new JsonlFileSink(join(dir, 'events.jsonl'), fs);
+
+      await sink.append([event(0), event(1), event(2)]);
+
+      expect(calls.filter((c) => c === 'open')).toHaveLength(1);
+      expect(calls.filter((c) => c === 'appendFile')).toHaveLength(1);
+      expect(calls.filter((c) => c === 'sync')).toHaveLength(1);
+      expect(calls.filter((c) => c === 'close')).toHaveLength(1);
+      expect(
+        written
+          .trimEnd()
+          .split('\n')
+          .map((line) => JSON.parse(line).seq)
+      ).toEqual([0, 1, 2]);
+    });
+
+    it('still closes the handle and propagates the error when appendFile rejects', async () => {
+      const { fs, calls } = fakeFs({
+        appendFile: async () => {
+          throw new Error('disk full');
+        },
+        sync: async () => {},
+        close: async () => {},
+      });
+      const sink = new JsonlFileSink(join(dir, 'events.jsonl'), fs);
+
+      await expect(sink.append([event(0)])).rejects.toThrow('disk full');
+
+      expect(calls.filter((c) => c === 'appendFile')).toHaveLength(1);
+      expect(calls).not.toContain('sync');
+      expect(calls.filter((c) => c === 'close')).toHaveLength(1);
     });
   });
 });
