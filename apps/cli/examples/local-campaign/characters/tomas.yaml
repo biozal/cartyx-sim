@@ -1,0 +1,14 @@
+# Placeholder party member until `sim chargen` (Plan 2C) drafts real characters from the lore.
+id: tomas
+name: Tomas Reed
+kind: pc
+level: 3
+abilities: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 12 }
+proficiencyBonus: 2
+saveProficiencies: [str, con]
+skillProficiencies: [athletics, intimidation]
+ac: 16
+maxHp: 28
+hp: 28
+attacks:
+  - { name: Longsword, bonus: 5, damage: 1d8+3, damageType: slashing }

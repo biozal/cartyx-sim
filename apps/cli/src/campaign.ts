@@ -1,0 +1,175 @@
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { Endpoint, type SeatConfigInput } from '@cartyx-sim/models';
+import { Combatant } from '@cartyx-sim/rules';
+import YAML from 'yaml';
+import { z } from 'zod';
+import { campaignDir } from './paths';
+
+const SeatRef = z.object({
+  /** Name of an entry under `endpoints`. */
+  endpoint: z.string().min(1),
+  model: z.string().min(1),
+  temperature: z.number().min(0).max(2).optional(),
+  maxOutputTokens: z.number().int().positive().optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  toolChoice: z.enum(['auto', 'required']).optional(),
+  fallbacks: z
+    .array(z.object({ endpoint: z.string().min(1), model: z.string().min(1) }))
+    .default([]),
+});
+type SeatRef = z.output<typeof SeatRef>;
+
+/** `campaigns/<id>/campaign.yaml`. */
+export const CampaignFile = z.object({
+  name: z.string().min(1),
+  targetMinutes: z.number().positive(),
+  /** The lore version the campaign plays against. Plan 2B sets this from the lore repository. */
+  loreCommit: z.string().min(1).default('unversioned'),
+  endpoints: z.record(z.string(), Endpoint),
+  seats: z.object({
+    dm: SeatRef,
+    /** Keyed by party member id. */
+    players: z.record(z.string(), SeatRef),
+  }),
+});
+
+export const DM_SEAT = 'dm';
+
+export function playerSeat(pcId: string): string {
+  return `player-${pcId}`;
+}
+
+export interface Campaign {
+  id: string;
+  dir: string;
+  name: string;
+  targetMinutes: number;
+  loreCommit: string;
+  party: Combatant[];
+  /** Seat ids for the director. */
+  seats: { dm: string; players: Record<string, string> };
+  /** Model configuration per seat id, for the model client and `sim bench`. */
+  models: Record<string, SeatConfigInput>;
+}
+
+function isNotFound(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+async function readYaml(path: string, missing: string): Promise<unknown> {
+  let text: string;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch (error) {
+    if (isNotFound(error)) throw new Error(missing);
+    throw error;
+  }
+  try {
+    return YAML.parse(text);
+  } catch (error) {
+    throw new Error(`${path}: invalid YAML (${error instanceof Error ? error.message : error})`);
+  }
+}
+
+async function loadParty(dir: string): Promise<Combatant[]> {
+  const charactersDir = join(dir, 'characters');
+  let files: string[];
+  try {
+    files = (await readdir(charactersDir)).filter((file) => /\.ya?ml$/.test(file)).sort();
+  } catch (error) {
+    if (isNotFound(error)) files = [];
+    else throw error;
+  }
+  if (files.length === 0) {
+    throw new Error(`${charactersDir}: no character files. Add one <id>.yaml per party member.`);
+  }
+  const party: Combatant[] = [];
+  for (const file of files) {
+    const path = join(charactersDir, file);
+    const parsed = Combatant.safeParse(await readYaml(path, `${path} is missing`));
+    if (!parsed.success) {
+      throw new Error(`${path}: invalid character\n${z.prettifyError(parsed.error)}`);
+    }
+    if (parsed.data.kind !== 'pc') {
+      throw new Error(`${path}: party members must have kind "pc", not "${parsed.data.kind}"`);
+    }
+    if (party.some((pc) => pc.id === parsed.data.id)) {
+      throw new Error(`${path}: duplicate party member id "${parsed.data.id}"`);
+    }
+    party.push(parsed.data);
+  }
+  return party;
+}
+
+/** Loads and validates a campaign folder: its config, its party, and every seat's endpoints. */
+export async function loadCampaign(campaignsDir: string, campaignId: string): Promise<Campaign> {
+  const dir = campaignDir(campaignsDir, campaignId);
+  const configPath = join(dir, 'campaign.yaml');
+  const raw = await readYaml(
+    configPath,
+    `${configPath} not found. Create it (see apps/cli/examples/local-campaign).`
+  );
+  const parsed = CampaignFile.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(`${configPath}: invalid campaign\n${z.prettifyError(parsed.error)}`);
+  }
+  const file = parsed.data;
+  const party = await loadParty(dir);
+
+  const endpoint = (name: string, where: string) => {
+    if (!Object.hasOwn(file.endpoints, name)) {
+      const known = Object.keys(file.endpoints).join(', ') || 'none';
+      throw new Error(
+        `${configPath}: ${where} uses unknown endpoint "${name}". Defined endpoints: ${known}`
+      );
+    }
+    return file.endpoints[name]!;
+  };
+  const resolve = (ref: SeatRef, where: string): SeatConfigInput => ({
+    endpoint: endpoint(ref.endpoint, where),
+    model: ref.model,
+    temperature: ref.temperature,
+    maxOutputTokens: ref.maxOutputTokens,
+    timeoutMs: ref.timeoutMs,
+    toolChoice: ref.toolChoice,
+    fallbacks: ref.fallbacks.map((fallback, index) => ({
+      endpoint: endpoint(fallback.endpoint, `${where} fallback ${index + 1}`),
+      model: fallback.model,
+    })),
+  });
+
+  const partyIds = party.map((pc) => pc.id);
+  const seatedIds = Object.keys(file.seats.players);
+  const unseated = partyIds.filter((id) => !seatedIds.includes(id));
+  if (unseated.length > 0) {
+    throw new Error(`${configPath}: no seat under seats.players for ${unseated.join(', ')}`);
+  }
+  const strangers = seatedIds.filter((id) => !partyIds.includes(id));
+  if (strangers.length > 0) {
+    throw new Error(
+      `${configPath}: seats.players lists ${strangers.join(', ')}, who ` +
+        `${strangers.length === 1 ? 'is' : 'are'} not in characters/. Party: ${partyIds.join(', ')}`
+    );
+  }
+
+  const models: Record<string, SeatConfigInput> = {
+    [DM_SEAT]: resolve(file.seats.dm, 'seats.dm'),
+  };
+  const players: Record<string, string> = {};
+  for (const pc of party) {
+    const seat = playerSeat(pc.id);
+    players[pc.id] = seat;
+    models[seat] = resolve(file.seats.players[pc.id]!, `seats.players.${pc.id}`);
+  }
+  return {
+    id: campaignId,
+    dir,
+    name: file.name,
+    targetMinutes: file.targetMinutes,
+    loreCommit: file.loreCommit,
+    party,
+    seats: { dm: DM_SEAT, players },
+    models,
+  };
+}
