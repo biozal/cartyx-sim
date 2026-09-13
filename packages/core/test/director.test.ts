@@ -4,8 +4,9 @@ import { Director, type DirectorConfig, type DirectorDeps } from '../src/directo
 import type { SimEvent } from '../src/events';
 import type { LoreHit, LoreIndex } from '../src/model';
 import { basicPrompts } from '../src/prompts';
+import { TurnRecorder } from '../src/recorder';
 import { MemorySink } from '../src/sink';
-import { foldEvents, nextActor } from '../src/state';
+import { foldEvents, initialState, nextActor } from '../src/state';
 import {
   respond,
   ScriptedModelClient,
@@ -745,5 +746,36 @@ describe('Director', () => {
     await expect(
       Director.create(config({ loreCommit: 'a-different-commit' }), { ...built, sink })
     ).rejects.toThrow(/lore commit/i);
+  });
+
+  it('G2.4: ends at the hard stop on resume before choosing an actor, granting no extra turn', async () => {
+    const recorder = new TurnRecorder(initialState(), 'setup', now);
+    recorder.emit({
+      type: 'session_start',
+      session: 1,
+      loreCommit: 'abc123',
+      targetMinutes: 0.02,
+      party: [kira, tomas],
+    });
+    recorder.emit({
+      type: 'narration',
+      speaker: 'dm',
+      text: 'The engines roar to life all around you now.',
+      emotion: 'neutral',
+    });
+    recorder.emit({ type: 'hand_off', target: { kind: 'party' }, responders: ['kira', 'tomas'] });
+    recorder.emit({ type: 'turn_end', actor: 'dm' });
+    const sink = new MemorySink();
+    await sink.append(recorder.events);
+
+    const { deps: built, model } = deps({}, { sink });
+    const director = await Director.create(config({ targetMinutes: 0.02 }), built);
+
+    const result = await director.run();
+
+    expect(result.status).toBe('ended');
+    expect(model.requests.length).toBe(0);
+    expect(sink.events.at(-1)).toMatchObject({ type: 'session_end', reason: 'hard_stop' });
+    expect(foldEvents(sink.events)).toEqual(director.currentState);
   });
 });

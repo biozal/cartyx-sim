@@ -192,6 +192,12 @@ export class Director {
       await this.startSession();
       return 'continue';
     }
+    if (!this.state.ended && clockPhase(this.state, this.targetMinutes) === 'hard_stop') {
+      const recorder = this.newRecorder();
+      recorder.emit({ type: 'session_end', reason: 'hard_stop' });
+      await this.commit(recorder);
+      return 'ended';
+    }
     const next = nextActor(this.state);
     if (next.kind === 'ended') return 'ended';
 
