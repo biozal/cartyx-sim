@@ -20,4 +20,12 @@ describe('rollInitiative', () => {
     ]);
     expect(order[1]).toEqual({ combatantId: 'quick', roll: 10, dexMod: 3, total: 13 });
   });
+
+  it('G5.4: breaks an equal total by Dex modifier even when the lower-Dex combatant is first in input order', () => {
+    const clumsy = makeCombatant({ id: 'clumsy', abilities: abilities(6) }); // dexMod -2
+    const nimble = makeCombatant({ id: 'nimble', abilities: abilities(16) }); // dexMod +3
+    // clumsy: 16 - 2 = 14; nimble: 11 + 3 = 14 (equal totals).
+    const order = rollInitiative([clumsy, nimble], scriptedRng([16, 11]));
+    expect(order.map((e) => e.combatantId)).toEqual(['nimble', 'clumsy']);
+  });
 });

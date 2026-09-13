@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { scriptedRng, secureRng, seededRng } from '../src/rng';
 
 function rollMany(die: (sides: number) => number, sides: number, count: number): number[] {
@@ -44,6 +44,29 @@ describe('secureRng', () => {
     expect(() => rng.die(1)).toThrow();
     expect(() => rng.die(2.5)).toThrow();
     expect(() => rng.die(2 ** 32 + 1)).toThrow();
+  });
+
+  it('G5.16: draws again instead of using a raw value in the rejection region, so the die stays unbiased', () => {
+    const sides = 6;
+    const limit = Math.floor(0x100000000 / sides) * sides;
+    let calls = 0;
+    const spy = vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(((
+      array: Uint32Array
+    ) => {
+      calls++;
+      // First draw lands exactly on the rejection boundary; second draw is a clean 0.
+      array[0] = calls === 1 ? limit : 0;
+      return array;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }) as any);
+    try {
+      const rng = secureRng();
+      const result = rng.die(sides);
+      expect(calls).toBe(2);
+      expect(result).toBe(1); // 1 + (0 % 6)
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
