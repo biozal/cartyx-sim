@@ -19,6 +19,10 @@ export interface CombatState {
 
 export interface GameState {
   session: number | null;
+  /** Set from `session_start`; authoritative for every clock decision once a session has begun. */
+  targetMinutes: number | null;
+  /** Set from `session_start`; a resume with a different configured lore commit is rejected. */
+  loreCommit: string | null;
   lastSeq: number;
   ended: boolean;
   partyIds: string[];
@@ -49,6 +53,8 @@ export function ownEntry<T>(record: Record<string, T>, key: string): T | undefin
 export function initialState(): GameState {
   return {
     session: null,
+    targetMinutes: null,
+    loreCommit: null,
     lastSeq: -1,
     ended: false,
     partyIds: [],
@@ -75,6 +81,8 @@ export function applyEvent(state: GameState, event: SimEvent): GameState {
   switch (event.type) {
     case 'session_start':
       next.session = event.session;
+      next.targetMinutes = event.targetMinutes;
+      next.loreCommit = event.loreCommit;
       next.ended = false;
       next.partyIds = event.party.map((pc) => pc.id);
       for (const pc of event.party) next.combatants[pc.id] = pc;

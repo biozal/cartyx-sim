@@ -130,9 +130,25 @@ export class Director {
         `Event log belongs to session ${state.session}, not session ${config.session}`
       );
     }
+    if (state.loreCommit !== null && state.loreCommit !== config.loreCommit) {
+      throw new Error(
+        `Session ${state.session} started with lore commit "${state.loreCommit}", but the ` +
+          `configured lore commit is "${config.loreCommit}". The lore has changed since the ` +
+          'session started; resume with the original lore commit.'
+      );
+    }
     if (prior.length > 0) {
       const recorder = director.newRecorder();
       recorder.emit({ type: 'ooc_note', visibility: 'dm', text: 'Session resumed.' });
+      if (state.targetMinutes !== null && state.targetMinutes !== config.targetMinutes) {
+        recorder.emit({
+          type: 'ooc_note',
+          visibility: 'dm',
+          text:
+            `Ignoring the configured targetMinutes override (${config.targetMinutes}); the ` +
+            `session already logged targetMinutes ${state.targetMinutes}, which stays in effect.`,
+        });
+      }
       await director.commit(recorder);
     }
     return director;
@@ -144,6 +160,11 @@ export class Director {
 
   get events(): readonly SimEvent[] {
     return this.history;
+  }
+
+  /** The target minutes governing the clock: the logged value once a session has started, else config. */
+  private get targetMinutes(): number {
+    return this.state.targetMinutes ?? this.config.targetMinutes;
   }
 
   async run(maxTurns = Number.POSITIVE_INFINITY): Promise<RunResult> {
@@ -188,7 +209,7 @@ export class Director {
       await this.dmBeat(next.reason, next.combatantId);
     }
 
-    if (!this.state.ended && clockPhase(this.state, this.config.targetMinutes) === 'hard_stop') {
+    if (!this.state.ended && clockPhase(this.state, this.targetMinutes) === 'hard_stop') {
       const recorder = this.newRecorder();
       recorder.emit({ type: 'session_end', reason: 'hard_stop' });
       await this.commit(recorder);
@@ -333,7 +354,7 @@ export class Director {
     }
     recorder.emit({ type: 'turn_end', actor: 'dm' });
 
-    const phase = clockPhase(recorder.state, this.config.targetMinutes);
+    const phase = clockPhase(recorder.state, this.targetMinutes);
     const sceneBreak = recorder.events.some((event) => event.type === 'scene_change');
     if (sceneBreak && (phase === 'end_at_scene_break' || phase === 'hard_stop')) {
       recorder.emit({ type: 'session_end', reason: 'target_reached' });
@@ -446,7 +467,7 @@ export class Director {
         : reason === 'monster'
           ? `It is ${name}'s turn (id: ${combatantId}). Act for it with tools, narrate, then call hand_off.`
           : 'Continue the story: narrate what happens next, resolve any declared actions with tools, then call hand_off.';
-    const clock = clockInstruction(clockPhase(this.state, this.config.targetMinutes));
+    const clock = clockInstruction(clockPhase(this.state, this.targetMinutes));
     return [nudge, base, clock].filter(Boolean).join(' ');
   }
 

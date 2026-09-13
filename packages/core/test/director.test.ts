@@ -671,4 +671,79 @@ describe('Director', () => {
     expect(nextActor(state)).not.toMatchObject({ reason: 'monster', combatantId: 'goblin-1' });
     expect(foldEvents(sink.events)).toEqual(state);
   });
+
+  it('G2.3: resume uses the logged targetMinutes and flags a configured override as ignored', async () => {
+    const sink = new MemorySink();
+    const first = deps(
+      {
+        dm: [
+          respond(
+            toolCall('narrate', { text: 'The engines roar to life all around you.' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      { sink }
+    );
+    await (await Director.create(config({ targetMinutes: 60 }), first.deps)).run(2);
+
+    const second = deps(
+      { 'player-kira': [respond(toolCall('speak', { text: 'Steady, everyone.' }))] },
+      { sink, turnPrefix: 'resumed' }
+    );
+    const director = await Director.create(config({ targetMinutes: 0.01 }), second.deps);
+    const result = await director.run(1);
+
+    expect(result.status).not.toBe('ended');
+    expect(director.currentState.targetMinutes).toBe(60);
+    const override = sink.events.find(
+      (e) => e.type === 'ooc_note' && e.text.includes('targetMinutes')
+    );
+    expect(override).toMatchObject({
+      type: 'ooc_note',
+      visibility: 'dm',
+      text: expect.stringContaining('0.01'),
+    });
+    expect(override).toMatchObject({ text: expect.stringContaining('60') });
+  });
+
+  it('G2.3: does not flag anything when the configured targetMinutes matches the log', async () => {
+    const sink = new MemorySink();
+    const first = deps({
+      dm: [
+        respond(
+          toolCall('narrate', { text: 'The engines roar to life all around you.' }),
+          toolCall('hand_off', { target: { kind: 'party' } })
+        ),
+      ],
+    });
+    await (await Director.create(config(), { ...first.deps, sink })).run(2);
+    const second = deps({}, { sink, turnPrefix: 'resumed' });
+    await Director.create(config(), { ...second.deps, sink });
+    expect(sink.events.filter((e) => e.type === 'ooc_note')).toEqual([
+      {
+        seq: 4,
+        ts: expect.any(String),
+        turnId: 'resumed-1',
+        visibility: 'dm',
+        type: 'ooc_note',
+        text: 'Session resumed.',
+      },
+    ]);
+  });
+
+  it('G2.3: rejects resuming with a different lore commit', async () => {
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(
+          toolCall('narrate', { text: 'The engines roar to life all around you.' }),
+          toolCall('hand_off', { target: { kind: 'party' } })
+        ),
+      ],
+    });
+    await (await Director.create(config(), built)).run(1);
+    await expect(
+      Director.create(config({ loreCommit: 'a-different-commit' }), { ...built, sink })
+    ).rejects.toThrow(/lore commit/i);
+  });
 });
