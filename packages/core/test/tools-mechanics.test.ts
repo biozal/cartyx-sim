@@ -439,7 +439,14 @@ describe('cast_spell', () => {
   });
 
   it('G3.3: de-duplicates repeated targetIds for a save spell so only one save and one damage apply', async () => {
-    const harness = withGoblin([10]);
+    // Enough HP that a second application would show up instead of clamping at 0.
+    const { state, history } = startedState([kira, tomas]);
+    const tough = { ...goblin, hp: 30, maxHp: 30 };
+    const harness = toolHarness({
+      state: { ...state, combatants: { ...state.combatants, [tough.id]: tough } },
+      history,
+      rng: scriptedRng([10]),
+    });
     await harness.run(castSpell, {
       casterId: 'kira',
       spell: 'Thunderwave',
@@ -449,8 +456,13 @@ describe('cast_spell', () => {
     });
     const saveRolls = harness.recorder.events.filter((e) => e.type === 'roll' && e.kind === 'save');
     expect(saveRolls).toHaveLength(1);
-    // Fails the save (roll 10 + no bonus < DC 13): takes the full 10 damage, once.
-    expect(harness.recorder.state.combatants['goblin-1']?.hp).toBe(0);
+    // Fails the save (roll 10 + no bonus < DC 13): takes the full 10 damage, exactly once.
+    const hpChanges = harness.recorder.events.filter(
+      (e) => e.type === 'state_change' && e.entity === 'goblin-1' && e.field === 'hp'
+    );
+    expect(hpChanges).toHaveLength(1);
+    expect(hpChanges[0]).toMatchObject({ before: 30, after: 20 });
+    expect(harness.recorder.state.combatants['goblin-1']?.hp).toBe(20);
   });
 
   it("F3: a single-target save spell's damage roll names the target as subject", async () => {

@@ -11,6 +11,7 @@ import {
 } from '../src/tools/narrative';
 import type { LoreIndex } from '../src/model';
 import { toToolSchema } from '../src/tools/types';
+import { renderTranscript } from '../src/transcript';
 import { startedState } from './helpers';
 import { toolHarness } from './tool-harness';
 
@@ -122,6 +123,14 @@ describe('introduce_npc and npc_say', () => {
     });
     expect(harness.recorder.state.wordsBySpeaker['npc-kira']).toBe(3);
     expect(harness.recorder.state.wordsBySpeaker['kira']).toBeUndefined();
+    const transcript = renderTranscript(
+      harness.recorder.events,
+      harness.recorder.state,
+      'player',
+      10
+    );
+    expect(transcript).toContain('Kira: "Impostor among us."');
+    expect(transcript).not.toContain('Kira Vale');
   });
 
   it.each(['Kira Vale', '  kira vale  ', 'TOMAS REED'])(
