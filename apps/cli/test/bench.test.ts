@@ -6,16 +6,29 @@ import { startFakeOpenAIServer, type FakeOpenAIServer } from '@cartyx-sim/models
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { benchPassed, formatBenchTable, runBench } from '../src/bench';
 
-const KIRA = `id: kira
-name: Kira Vale
-kind: pc
-level: 3
-abilities: { str: 10, dex: 14, con: 12, int: 16, wis: 12, cha: 10 }
-proficiencyBonus: 2
-ac: 15
-maxHp: 24
-hp: 24
-`;
+const KIRA = JSON.stringify({
+  id: 'kira',
+  name: 'Kira Vale',
+  kind: 'pc',
+  level: 3,
+  abilities: { str: 10, dex: 14, con: 12, int: 16, wis: 12, cha: 10 },
+  proficiencyBonus: 2,
+  ac: 15,
+  maxHp: 24,
+  hp: 24,
+});
+
+function campaignJson(name: string, baseURL: string, player: Record<string, string>): string {
+  return JSON.stringify({
+    name,
+    targetMinutes: 30,
+    endpoints: { local: { baseURL } },
+    seats: {
+      dm: { endpoint: 'local', model: 'dm-model' },
+      players: { kira: { endpoint: 'local', model: 'player-model', ...player } },
+    },
+  });
+}
 
 describe('runBench', () => {
   let campaignsDir: string;
@@ -34,19 +47,8 @@ describe('runBench', () => {
     );
     const dir = join(campaignsDir, 'live');
     await mkdir(join(dir, 'characters'), { recursive: true });
-    await writeFile(
-      join(dir, 'campaign.yaml'),
-      `name: Bench
-targetMinutes: 30
-endpoints:
-  local: { baseURL: ${fake.baseURL} }
-seats:
-  dm: { endpoint: local, model: dm-model }
-  players:
-    kira: { endpoint: local, model: player-model }
-`
-    );
-    await writeFile(join(dir, 'characters', 'kira.yaml'), KIRA);
+    await writeFile(join(dir, 'campaign.json'), campaignJson('Bench', fake.baseURL, {}));
+    await writeFile(join(dir, 'characters', 'kira.json'), KIRA);
   });
 
   afterEach(async () => {
@@ -102,18 +104,10 @@ seats:
     const dir = join(campaignsDir, 'auto');
     await mkdir(join(dir, 'characters'), { recursive: true });
     await writeFile(
-      join(dir, 'campaign.yaml'),
-      `name: Bench auto
-targetMinutes: 30
-endpoints:
-  local: { baseURL: ${autoFake.baseURL} }
-seats:
-  dm: { endpoint: local, model: dm-model }
-  players:
-    kira: { endpoint: local, model: player-model, toolChoice: auto }
-`
+      join(dir, 'campaign.json'),
+      campaignJson('Bench auto', autoFake.baseURL, { toolChoice: 'auto' })
     );
-    await writeFile(join(dir, 'characters', 'kira.yaml'), KIRA);
+    await writeFile(join(dir, 'characters', 'kira.json'), KIRA);
 
     try {
       const report = await runBench({ campaignsDir, campaign: 'auto', trials: 2 });

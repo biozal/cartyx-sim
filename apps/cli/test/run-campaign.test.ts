@@ -9,27 +9,28 @@ import { JsonlFileSink } from '../src/jsonl-sink';
 import { sessionEventsPath } from '../src/paths';
 import { runSession } from '../src/run';
 
-const KIRA = `id: kira
-name: Kira Vale
-kind: pc
-level: 3
-abilities: { str: 10, dex: 14, con: 12, int: 16, wis: 12, cha: 10 }
-proficiencyBonus: 2
-ac: 15
-maxHp: 24
-hp: 24
-`;
+const KIRA = {
+  id: 'kira',
+  name: 'Kira Vale',
+  kind: 'pc',
+  level: 3,
+  abilities: { str: 10, dex: 14, con: 12, int: 16, wis: 12, cha: 10 },
+  proficiencyBonus: 2,
+  ac: 15,
+  maxHp: 24,
+  hp: 24,
+};
 
-function campaignYaml(baseURL: string): string {
-  return `name: Live test
-targetMinutes: 0.12
-endpoints:
-  local: { baseURL: ${baseURL} }
-seats:
-  dm: { endpoint: local, model: dm-model, temperature: 0.7 }
-  players:
-    kira: { endpoint: local, model: player-model }
-`;
+function campaignJson(baseURL: string): string {
+  return JSON.stringify({
+    name: 'Live test',
+    targetMinutes: 0.12,
+    endpoints: { local: { baseURL } },
+    seats: {
+      dm: { endpoint: 'local', model: 'dm-model', temperature: 0.7 },
+      players: { kira: { endpoint: 'local', model: 'player-model' } },
+    },
+  });
 }
 
 describe('runSession with campaign model seats', () => {
@@ -72,8 +73,8 @@ describe('runSession with campaign model seats', () => {
     });
     const dir = join(campaignsDir, 'live');
     await mkdir(join(dir, 'characters'), { recursive: true });
-    await writeFile(join(dir, 'campaign.yaml'), campaignYaml(fake.baseURL));
-    await writeFile(join(dir, 'characters', 'kira.yaml'), KIRA);
+    await writeFile(join(dir, 'campaign.json'), campaignJson(fake.baseURL));
+    await writeFile(join(dir, 'characters', 'kira.json'), JSON.stringify(KIRA));
   });
 
   afterEach(async () => {
@@ -118,7 +119,7 @@ describe('runSession with campaign model seats', () => {
   });
 
   it('rejects an invalid campaign before creating a lock or log', async () => {
-    await writeFile(join(campaignsDir, 'live', 'campaign.yaml'), 'name: Broken\n');
+    await writeFile(join(campaignsDir, 'live', 'campaign.json'), '{ "name": "Broken" }');
     await expect(
       runSession({ campaignsDir, campaign: 'live', session: 1, resume: false })
     ).rejects.toThrow('invalid campaign');
@@ -161,26 +162,28 @@ describe('runSession --resume against a campaign', () => {
     await new JsonlFileSink(sessionEventsPath(campaignsDir, campaign, 1)).append(recorder.events);
   }
 
-  async function writeCampaignYaml(campaign: string, playersYaml: string): Promise<void> {
+  const PLAYER_SEAT = { endpoint: 'local', model: 'player-model' };
+
+  async function writeCampaignJson(
+    campaign: string,
+    players: Record<string, typeof PLAYER_SEAT>
+  ): Promise<void> {
     await writeFile(
-      join(campaignsDir, campaign, 'campaign.yaml'),
-      `name: Resume test
-targetMinutes: 0.02
-endpoints:
-  local: { baseURL: ${fake.baseURL} }
-seats:
-  dm: { endpoint: local, model: dm-model }
-  players:
-${playersYaml}
-`
+      join(campaignsDir, campaign, 'campaign.json'),
+      JSON.stringify({
+        name: 'Resume test',
+        targetMinutes: 0.02,
+        endpoints: { local: { baseURL: fake.baseURL } },
+        seats: { dm: { endpoint: 'local', model: 'dm-model' }, players },
+      })
     );
   }
 
   async function writeCharacter(campaign: string, id: string, name: string): Promise<void> {
     await mkdir(join(campaignsDir, campaign, 'characters'), { recursive: true });
     await writeFile(
-      join(campaignsDir, campaign, 'characters', `${id}.yaml`),
-      KIRA.replace('id: kira', `id: ${id}`).replace('name: Kira Vale', `name: ${name}`)
+      join(campaignsDir, campaign, 'characters', `${id}.json`),
+      JSON.stringify({ ...KIRA, id, name })
     );
   }
 
@@ -204,7 +207,7 @@ ${playersYaml}
 
   it('continues from the log with the same campaign', async () => {
     await writeCharacter('resume-a', 'kira', 'Kira Vale');
-    await writeCampaignYaml('resume-a', '    kira: { endpoint: local, model: player-model }');
+    await writeCampaignJson('resume-a', { kira: PLAYER_SEAT });
     await seedShortSession('resume-a', 0.02);
 
     const result = await runSession({
@@ -241,7 +244,7 @@ ${playersYaml}
 
   it('keeps the logged targetMinutes on --resume with a changed value, and notes the override', async () => {
     await writeCharacter('resume-b', 'kira', 'Kira Vale');
-    await writeCampaignYaml('resume-b', '    kira: { endpoint: local, model: player-model }');
+    await writeCampaignJson('resume-b', { kira: PLAYER_SEAT });
     await seedShortSession('resume-b', 0.02);
 
     const result = await runSession({
@@ -271,11 +274,7 @@ ${playersYaml}
   it('refuses to resume with a changed party', async () => {
     await writeCharacter('resume-c', 'kira', 'Kira Vale');
     await writeCharacter('resume-c', 'tomas', 'Tomas Reed');
-    await writeCampaignYaml(
-      'resume-c',
-      '    kira: { endpoint: local, model: player-model }\n' +
-        '    tomas: { endpoint: local, model: player-model }'
-    );
+    await writeCampaignJson('resume-c', { kira: PLAYER_SEAT, tomas: PLAYER_SEAT });
     await seedShortSession('resume-c', 0.02);
 
     await expect(

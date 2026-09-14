@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import { ownEntry } from '@cartyx-sim/core';
 import { Endpoint, type SeatConfigInput } from '@cartyx-sim/models';
 import { Combatant } from '@cartyx-sim/rules';
-import YAML from 'yaml';
 import { z } from 'zod';
 import { campaignDir } from './paths';
 
@@ -21,7 +20,7 @@ const SeatRef = z.object({
 });
 type SeatRef = z.output<typeof SeatRef>;
 
-/** `campaigns/<id>/campaign.yaml`. */
+/** `campaigns/<id>/campaign.json`. */
 export const CampaignFile = z.object({
   name: z.string().min(1),
   targetMinutes: z.number().positive(),
@@ -58,7 +57,7 @@ function isNotFound(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
-async function readYaml(path: string, missing: string): Promise<unknown> {
+async function readJson(path: string, missing: string): Promise<unknown> {
   let text: string;
   try {
     text = await readFile(path, 'utf8');
@@ -67,9 +66,9 @@ async function readYaml(path: string, missing: string): Promise<unknown> {
     throw error;
   }
   try {
-    return YAML.parse(text);
+    return JSON.parse(text);
   } catch (error) {
-    throw new Error(`${path}: invalid YAML (${error instanceof Error ? error.message : error})`);
+    throw new Error(`${path}: invalid JSON (${error instanceof Error ? error.message : error})`);
   }
 }
 
@@ -77,18 +76,18 @@ async function loadParty(dir: string): Promise<Combatant[]> {
   const charactersDir = join(dir, 'characters');
   let files: string[];
   try {
-    files = (await readdir(charactersDir)).filter((file) => /\.ya?ml$/.test(file)).sort();
+    files = (await readdir(charactersDir)).filter((file) => file.endsWith('.json')).sort();
   } catch (error) {
     if (isNotFound(error)) files = [];
     else throw error;
   }
   if (files.length === 0) {
-    throw new Error(`${charactersDir}: no character files. Add one <id>.yaml per party member.`);
+    throw new Error(`${charactersDir}: no character files. Add one <id>.json per party member.`);
   }
   const party: Combatant[] = [];
   for (const file of files) {
     const path = join(charactersDir, file);
-    const parsed = Combatant.safeParse(await readYaml(path, `${path} is missing`));
+    const parsed = Combatant.safeParse(await readJson(path, `${path} is missing`));
     if (!parsed.success) {
       throw new Error(`${path}: invalid character\n${z.prettifyError(parsed.error)}`);
     }
@@ -106,8 +105,8 @@ async function loadParty(dir: string): Promise<Combatant[]> {
 /** Loads and validates a campaign folder: its config, its party, and every seat's endpoints. */
 export async function loadCampaign(campaignsDir: string, campaignId: string): Promise<Campaign> {
   const dir = campaignDir(campaignsDir, campaignId);
-  const configPath = join(dir, 'campaign.yaml');
-  const raw = await readYaml(
+  const configPath = join(dir, 'campaign.json');
+  const raw = await readJson(
     configPath,
     `${configPath} not found. Create it (see apps/cli/examples/local-campaign).`
   );

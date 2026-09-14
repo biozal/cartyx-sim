@@ -49,7 +49,7 @@ To play against real models, follow [`docs/running-a-session.md`](docs/running-a
 
 ```bash
 mkdir -p campaigns && cp -R apps/cli/examples/local-campaign campaigns/avalon
-# edit campaigns/avalon/campaign.yaml: endpoints, model ids, one seat per character
+# edit campaigns/avalon/campaign.json: endpoints, model ids, one seat per character
 npm run sim -- bench --campaign avalon
 npm run sim -- run --campaign avalon --target-minutes 10
 ```
@@ -88,13 +88,13 @@ Checks every seat: whether the endpoint answers, whether it lists the configured
 
 ```text
 campaigns/<id>/
-  campaign.yaml          name, targetMinutes, endpoints, seats (dm + one per player)
-  characters/<pc>.yaml   one file per party member; each needs a seat under seats.players
+  campaign.json          name, targetMinutes, endpoints, seats (dm + one per player)
+  characters/<pc>.json   one file per party member; each needs a seat under seats.players
   sessions/NNN/events.jsonl
   bench/<timestamp>.json
 ```
 
-Campaign ids are lowercase letters, digits, and dashes. Any OpenAI-compatible `/v1` server works for a seat: LM Studio, llama.cpp (`llama-server --jinja`), or `mlx_lm.server`. Seat options are `temperature`, `maxOutputTokens`, `timeoutMs`, `toolChoice` (`required` or `auto`), and `fallbacks`. The operator guide covers each one.
+Campaign files are plain JSON. Campaign ids are lowercase letters, digits, and dashes. Any OpenAI-compatible `/v1` server works for a seat: LM Studio, llama.cpp (`llama-server --jinja`), or `mlx_lm.server`. Seat options are `temperature`, `maxOutputTokens`, `timeoutMs`, `toolChoice` (`required` or `auto`), and `fallbacks`. The operator guide covers each one.
 
 ## Development
 

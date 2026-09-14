@@ -26,7 +26,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 - **`sim run --campaign <id>`**: plays a session against real OpenAI-compatible endpoints (LM Studio, llama.cpp, mlx_lm), with per-seat model, temperature, timeout, tool choice, and fallback endpoints. Every event is appended to `campaigns/<id>/sessions/NNN/events.jsonl`.
 - **`sim bench --campaign <id>`**: checks each seat's reachability, whether the server lists the model, tokens per second, and tool-call reliability; saves a report under `campaigns/<id>/bench/` and exits 1 on failure.
 - **Pause and resume**: seat failures and the runaway-loop backstop pause the session (exit code 2) with a logged `session_paused` event; `--resume` continues from the log with a fresh backstop budget.
-- **Campaign config**: `campaign.yaml` (endpoints, seats) plus `characters/*.yaml`; an example lives in `apps/cli/examples/local-campaign/`.
+- **Campaign config**: `campaign.json` (endpoints, seats) plus `characters/*.json`; an example lives in `apps/cli/examples/local-campaign/`.
 
 Operator guide: `docs/running-a-session.md`.
 
@@ -51,7 +51,7 @@ Three batch reviews and a whole-branch review with fake-server probes, then two 
 
 - **No run on the real hardware yet.** All model tests use a fake OpenAI-compatible server. The first real step is:
   1. `mkdir -p campaigns && cp -R apps/cli/examples/local-campaign campaigns/avalon`
-  2. Fill in real model ids and machine addresses in `campaigns/avalon/campaign.yaml`.
+  2. Fill in real model ids and machine addresses in `campaigns/avalon/campaign.json`.
   3. `npm run sim -- bench --campaign avalon`
   4. `npm run sim -- run --campaign avalon --target-minutes 10`
 - Lore lookups always report a gap until Plan 2B, so the DM invents and records details.
@@ -85,7 +85,7 @@ The full list is in the roadmap's Backlog section. Highlights:
   - player target-id validation;
   - a sticky fallback for a timed-out primary;
   - `sim bench` checks fallback targets;
-  - backstop limits exposed in `campaign.yaml`.
+  - backstop limits exposed in `campaign.json`.
 - **Unscheduled:**
   - director-side response validation retries the primary, not the fallbacks;
   - `ModelRequest.signal` is never set;

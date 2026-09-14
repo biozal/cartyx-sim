@@ -162,9 +162,9 @@ Spoken runtime = spoken words in the log ÷ 150 words per minute. At 80% of the 
 
 ```
 campaigns/<id>/
-  campaign.yaml            seats, endpoints, models, target minutes, tone, lore repo path, art style prompt
-  characters/<pc>.yaml     sheet, backstory, personality, private goals, portrait, voice
-  cast/npcs/<npc>.yaml     portrait prompt, voice description, voice reference, lore entity id
+  campaign.json            seats, endpoints, models, target minutes, tone, lore repo path, art style prompt
+  characters/<pc>.json     sheet, backstory, personality, private goals, portrait, voice
+  cast/npcs/<npc>.json     portrait prompt, voice description, voice reference, lore entity id
   prep/session-NNN.md
   assets/                  portraits, scene art, voice references (content-hash named)
   sessions/NNN/

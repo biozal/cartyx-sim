@@ -18,7 +18,7 @@ Every seat (the DM and each player) talks to an OpenAI-compatible `/v1` endpoint
 - **llama.cpp:** `llama-server -m <model>.gguf --host 0.0.0.0 --port 8080 --jinja`. The `--jinja` flag enables tool calling. The base URL is `http://<machine>:8080/v1`.
 - **mlx_lm:** `mlx_lm.server --model <model> --host 0.0.0.0 --port 8080`.
 
-The engine asks every call to use a tool. If a server ignores that and replies with plain text, set `toolChoice: auto` on that seat (see below) so a text reply is used as narration or speech instead of counting as a failure.
+The engine asks every call to use a tool. If a server ignores that and replies with plain text, set `"toolChoice": "auto"` on that seat (see below) so a text reply is used as narration or speech instead of counting as a failure.
 
 ## 3. Create a campaign
 
@@ -28,30 +28,37 @@ Copy the example into your campaigns directory (`./campaigns` by default; it is 
 mkdir -p campaigns && cp -R apps/cli/examples/local-campaign campaigns/avalon
 ```
 
-Then edit `campaigns/avalon/campaign.yaml`:
+Then edit `campaigns/avalon/campaign.json`:
 
-```yaml
-name: Avalon
-targetMinutes: 60
-endpoints:
-  macbook: { baseURL: http://127.0.0.1:1234/v1 }
-  studio: { baseURL: http://192.168.1.20:1234/v1 }
-  ampere: { baseURL: http://192.168.1.30:8080/v1 }
-seats:
-  dm:
-    endpoint: macbook
-    model: <model id as the server lists it>
-    temperature: 0.8
-    fallbacks:
-      - { endpoint: ampere, model: <backup model id> }
-  players:
-    kira: { endpoint: studio, model: <model id>, temperature: 0.9 }
-    tomas: { endpoint: ampere, model: <model id>, toolChoice: auto }
+```json
+{
+  "name": "Avalon",
+  "targetMinutes": 60,
+  "endpoints": {
+    "macbook": { "baseURL": "http://127.0.0.1:1234/v1" },
+    "studio": { "baseURL": "http://192.168.1.20:1234/v1" },
+    "ampere": { "baseURL": "http://192.168.1.30:8080/v1" }
+  },
+  "seats": {
+    "dm": {
+      "endpoint": "macbook",
+      "model": "<model id as the server lists it>",
+      "temperature": 0.8,
+      "fallbacks": [{ "endpoint": "ampere", "model": "<backup model id>" }]
+    },
+    "players": {
+      "kira": { "endpoint": "studio", "model": "<model id>", "temperature": 0.9 },
+      "tomas": { "endpoint": "ampere", "model": "<model id>", "toolChoice": "auto" }
+    }
+  }
+}
 ```
+
+The files are plain JSON: no comments and no trailing commas. A malformed file is reported with its path.
 
 Seat options: `temperature`, `maxOutputTokens`, `timeoutMs` (default 120000), `toolChoice` (`auto` or `required`), and `fallbacks` (tried in order when a call fails). A hung primary costs up to its `timeoutMs` on every call before its fallback is tried, since there is no sticky memory of a target that recently timed out.
 
-Each party member is a file in `characters/` (for example `characters/kira.yaml`). Every party member needs a seat under `seats.players`, and every seat there needs a matching character. The example characters are placeholders until `sim chargen` arrives in Plan 2C.
+Each party member is a file in `characters/` (for example `characters/kira.json`). Every party member needs a seat under `seats.players`, and every seat there needs a matching character. The example characters are placeholders until `sim chargen` arrives in Plan 2C.
 
 ## 4. Check the seats
 

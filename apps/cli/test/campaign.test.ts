@@ -7,27 +7,43 @@ import { loadCampaign } from '../src/campaign';
 
 const EXAMPLE = fileURLToPath(new URL('../examples/local-campaign', import.meta.url));
 
-const KIRA = `id: kira
-name: Kira Vale
-kind: pc
-level: 3
-abilities: { str: 10, dex: 14, con: 12, int: 16, wis: 12, cha: 10 }
-proficiencyBonus: 2
-ac: 15
-maxHp: 24
-hp: 24
-`;
+const KIRA = {
+  id: 'kira',
+  name: 'Kira Vale',
+  kind: 'pc',
+  level: 3,
+  abilities: { str: 10, dex: 14, con: 12, int: 16, wis: 12, cha: 10 },
+  proficiencyBonus: 2,
+  ac: 15,
+  maxHp: 24,
+  hp: 24,
+};
 
-const CONFIG = `name: Test
-targetMinutes: 30
-endpoints:
-  studio: { baseURL: http://10.0.0.2:1234/v1 }
-  ampere: { baseURL: http://10.0.0.3:8080/v1, apiKey: secret }
-seats:
-  dm: { endpoint: studio, model: big-dm, fallbacks: [{ endpoint: ampere, model: backup-dm }] }
-  players:
-    kira: { endpoint: ampere, model: player-model, toolChoice: auto }
-`;
+function character(overrides: Record<string, unknown>) {
+  return { ...KIRA, ...overrides };
+}
+
+/** A fresh config each call, so a test can change it without affecting the others. */
+function config() {
+  return {
+    name: 'Test',
+    targetMinutes: 30,
+    endpoints: {
+      studio: { baseURL: 'http://10.0.0.2:1234/v1' },
+      ampere: { baseURL: 'http://10.0.0.3:8080/v1', apiKey: 'secret' },
+    },
+    seats: {
+      dm: {
+        endpoint: 'studio',
+        model: 'big-dm',
+        fallbacks: [{ endpoint: 'ampere', model: 'backup-dm' }],
+      },
+      players: {
+        kira: { endpoint: 'ampere', model: 'player-model', toolChoice: 'auto' },
+      } as Record<string, unknown>,
+    },
+  };
+}
 
 describe('loadCampaign', () => {
   let campaignsDir: string;
@@ -40,12 +56,15 @@ describe('loadCampaign', () => {
     await rm(campaignsDir, { recursive: true, force: true });
   });
 
-  async function writeCampaign(config: string, characters: Record<string, string>) {
+  /** Writes objects as JSON; a string is written as-is, for malformed files. */
+  async function writeCampaign(campaign: unknown, characters: Record<string, unknown>) {
+    const json = (value: unknown) =>
+      typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     const dir = join(campaignsDir, 'test');
     await mkdir(join(dir, 'characters'), { recursive: true });
-    await writeFile(join(dir, 'campaign.yaml'), config);
-    for (const [file, text] of Object.entries(characters)) {
-      await writeFile(join(dir, 'characters', file), text);
+    await writeFile(join(dir, 'campaign.json'), json(campaign));
+    for (const [file, value] of Object.entries(characters)) {
+      await writeFile(join(dir, 'characters', file), json(value));
     }
   }
 
@@ -64,7 +83,7 @@ describe('loadCampaign', () => {
   });
 
   it('resolves endpoints, fallbacks, and seat options', async () => {
-    await writeCampaign(CONFIG, { 'kira.yaml': KIRA });
+    await writeCampaign(config(), { 'kira.json': KIRA });
     const campaign = await loadCampaign(campaignsDir, 'test');
     expect(campaign).toMatchObject({ name: 'Test', targetMinutes: 30 });
     expect(campaign.models).toEqual({
@@ -88,45 +107,39 @@ describe('loadCampaign', () => {
   });
 
   it('names an unknown endpoint and where it is used', async () => {
-    await writeCampaign(
-      CONFIG.replace('fallbacks: [{ endpoint: ampere', 'fallbacks: [{ endpoint: nowhere'),
-      {
-        'kira.yaml': KIRA,
-      }
-    );
+    const campaign = config();
+    campaign.seats.dm.fallbacks[0]!.endpoint = 'nowhere';
+    await writeCampaign(campaign, { 'kira.json': KIRA });
     await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
       'seats.dm fallback 1 uses unknown endpoint "nowhere". Defined endpoints: studio, ampere'
     );
   });
 
   it('requires a seat for every party member and no extra seats', async () => {
-    await writeCampaign(CONFIG, {
-      'kira.yaml': KIRA,
-      'tomas.yaml': KIRA.replace('id: kira', 'id: tomas'),
+    await writeCampaign(config(), {
+      'kira.json': KIRA,
+      'tomas.json': character({ id: 'tomas' }),
     });
     await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
       'no seat under seats.players for tomas'
     );
 
-    await writeCampaign(
-      CONFIG.replace('    kira:', '    kira2: { endpoint: studio, model: m }\n    kira:'),
-      {
-        'kira.yaml': KIRA,
-      }
-    );
-    await rm(join(campaignsDir, 'test', 'characters', 'tomas.yaml'));
+    const extraSeat = config();
+    extraSeat.seats.players.kira2 = { endpoint: 'studio', model: 'm' };
+    await writeCampaign(extraSeat, { 'kira.json': KIRA });
+    await rm(join(campaignsDir, 'test', 'characters', 'tomas.json'));
     await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
       'seats.players lists kira2, who is not in characters/'
     );
   });
 
   it('handles a character id of "constructor" like any other id, not a prototype property', async () => {
-    const withConstructorSeat = CONFIG.replace(
-      '    kira: { endpoint: ampere, model: player-model, toolChoice: auto }',
-      '    constructor: { endpoint: ampere, model: player-model, toolChoice: auto }'
-    );
+    const withConstructorSeat = config();
+    withConstructorSeat.seats.players = {
+      constructor: { endpoint: 'ampere', model: 'player-model', toolChoice: 'auto' },
+    };
     await writeCampaign(withConstructorSeat, {
-      'constructor.yaml': KIRA.replace('id: kira', 'id: constructor'),
+      'constructor.json': character({ id: 'constructor' }),
     });
     const campaign = await loadCampaign(campaignsDir, 'test');
     expect(campaign.party.map((pc) => pc.id)).toEqual(['constructor']);
@@ -135,8 +148,8 @@ describe('loadCampaign', () => {
 
     // A "constructor"-named character with no matching seat fails with the normal message,
     // rather than a plain bracket lookup silently resolving to a built-in property.
-    await writeCampaign(CONFIG, {
-      'constructor.yaml': KIRA.replace('id: kira', 'id: constructor'),
+    await writeCampaign(config(), {
+      'constructor.json': character({ id: 'constructor' }),
     });
     await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
       'no seat under seats.players for constructor'
@@ -144,22 +157,29 @@ describe('loadCampaign', () => {
   });
 
   it('reports an invalid character file by path', async () => {
-    await writeCampaign(CONFIG, { 'kira.yaml': KIRA.replace('ac: 15', 'ac: nope') });
+    await writeCampaign(config(), { 'kira.json': character({ ac: 'nope' }) });
     await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
-      `${join(campaignsDir, 'test', 'characters', 'kira.yaml')}: invalid character`
+      `${join(campaignsDir, 'test', 'characters', 'kira.json')}: invalid character`
+    );
+  });
+
+  it('reports malformed JSON by path', async () => {
+    await writeCampaign('{ "name": "Test", }', { 'kira.json': KIRA });
+    await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
+      `${join(campaignsDir, 'test', 'campaign.json')}: invalid JSON`
     );
   });
 
   it('only accepts player characters in the party', async () => {
-    await writeCampaign(CONFIG, { 'kira.yaml': KIRA.replace('kind: pc', 'kind: npc') });
+    await writeCampaign(config(), { 'kira.json': character({ kind: 'npc' }) });
     await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
       'party members must have kind "pc", not "npc"'
     );
   });
 
-  it('explains a missing campaign.yaml', async () => {
+  it('explains a missing campaign.json', async () => {
     await expect(loadCampaign(campaignsDir, 'absent')).rejects.toThrow(
-      'campaign.yaml not found. Create it (see apps/cli/examples/local-campaign).'
+      'campaign.json not found. Create it (see apps/cli/examples/local-campaign).'
     );
   });
 
