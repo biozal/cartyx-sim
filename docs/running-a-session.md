@@ -17,6 +17,7 @@ Every seat (the DM and each player) talks to an OpenAI-compatible `/v1` endpoint
 - **LM Studio:** load the model, open the Developer tab, start the server, and enable "Serve on Local Network" so other machines can reach it. The default base URL is `http://<machine>:1234/v1`.
 - **llama.cpp:** `llama-server -m <model>.gguf --host 0.0.0.0 --port 8080 --jinja`. The `--jinja` flag enables tool calling. The base URL is `http://<machine>:8080/v1`.
 - **mlx_lm:** `mlx_lm.server --model <model> --host 0.0.0.0 --port 8080`.
+- **Ollama:** listens on port 11434, so the base URL is `http://<machine>:11434/v1`. Its default context is 8192 tokens, which long sessions outgrow; set `OLLAMA_CONTEXT_LENGTH` (for example 16384) for the Ollama service.
 
 The engine asks every call to use a tool. If a server ignores that and replies with plain text, set `"toolChoice": "auto"` on that seat (see below) so a text reply is used as narration or speech instead of counting as a failure.
 
@@ -57,6 +58,8 @@ Then edit `campaigns/avalon/campaign.json`:
 The files are plain JSON: no comments and no trailing commas. A malformed file is reported with its path.
 
 Seat options: `temperature`, `maxOutputTokens`, `timeoutMs` (default 120000), `toolChoice` (`auto` or `required`), and `fallbacks` (tried in order when a call fails). A hung primary costs up to its `timeoutMs` on every call before its fallback is tried, since there is no sticky memory of a target that recently timed out.
+
+**Thinking models need room.** `maxOutputTokens` counts the model's thinking as well as its reply, and current Qwen, Gemma, and GLM models think for hundreds of tokens before calling a tool. A seat whose limit is too small stops mid-thought with no tool call, and the session pauses on that seat. Starting points that work: `2000` for players and `4000` for the DM. LM Studio does not enforce required tool calls, and Qwen often narrates in plain text after a tool result, so give a DM seat on LM Studio `"toolChoice": "auto"`. Keep players on `required`, so a garbled tool call is retried rather than spoken. `sim bench` uses a simple dice-roll trial, which does not show this; a short `sim run` does.
 
 Each party member is a file in `characters/` (for example `characters/kira.json`). Every party member needs a seat under `seats.players`, and every seat there needs a matching character. The example characters are placeholders until `sim chargen` arrives in Plan 2C.
 
