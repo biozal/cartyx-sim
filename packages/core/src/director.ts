@@ -408,7 +408,11 @@ export class Director {
 
       let skipRest = false;
       for (const call of calls) {
-        if (!ended && !skipRest && toolCalls >= this.maxDmToolCallsPerBeat) callLimitHit = true;
+        // The engine's prose call does not count toward the cap, so it never crowds out a real call.
+        const counted = call.id !== proseCallId;
+        if (counted && !ended && !skipRest && toolCalls >= this.maxDmToolCallsPerBeat) {
+          callLimitHit = true;
+        }
         if (ended || skipRest || callLimitHit) {
           const why = ended
             ? 'your turn already ended with hand_off'
@@ -418,7 +422,7 @@ export class Director {
           messages.push(toolMessage(call, `Not executed: ${why}.`));
           continue;
         }
-        toolCalls++;
+        if (counted) toolCalls++;
         const prepared = prepareToolCall(call, DM_TOOLS);
         if (!prepared.ok) {
           messages.push(toolMessage(call, prepared.error));
@@ -442,10 +446,15 @@ export class Director {
           : null;
         if (violation && call.id === proseCallId) {
           // Prose the engine turned into narration is dropped on a violation, without costing a
-          // retry or blocking the calls the model actually made.
+          // retry or blocking the calls the model actually made. A DM-only note keeps a record.
           messages.push(
             toolMessage(call, `Not narrated (${violation.rule}): ${violation.message}`)
           );
+          recorder.emit({
+            type: 'ooc_note',
+            visibility: 'dm',
+            text: `Dropped DM prose (${violation.rule}): ${text}`,
+          });
           continue;
         }
         if (violation && rejections < this.maxValidatorRetries) {

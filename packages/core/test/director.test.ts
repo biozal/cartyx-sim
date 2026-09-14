@@ -354,10 +354,39 @@ describe('Director', () => {
     await director.step();
     expect(sink.events.slice(1).map((e) => e.type)).toEqual([
       'scene_change',
+      'ooc_note',
       'hand_off',
       'turn_end',
     ]);
+    expect(sink.events[2]).toMatchObject({
+      visibility: 'dm',
+      text: 'Dropped DM prose (dm_controls_pc): Kira decides to open the door.',
+    });
     expect(model.requests).toHaveLength(1);
+  });
+
+  it('does not count DM prose toward the tool call cap', async () => {
+    const { deps: built, sink } = deps({
+      dm: [
+        {
+          text: 'The door groans open onto a frosted corridor.',
+          toolCalls: [
+            toolCall('scene_change', { location: 'East Corridor', artPrompt: 'A corridor' }),
+            toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } }),
+          ],
+        },
+      ],
+    });
+    const director = await Director.create(config({ maxDmToolCallsPerBeat: 2 }), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.slice(1).map((e) => e.type)).toEqual([
+      'scene_change',
+      'narration',
+      'hand_off',
+      'turn_end',
+    ]);
+    expect(sink.events[3]).toMatchObject({ type: 'hand_off', responders: ['tomas'] });
   });
 
   it.each(['Let me hand off to the players now.', 'Setting the scene with scene_change first.'])(
