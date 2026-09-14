@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { Emotion, HandOffTarget } from '../events';
 import { ownEntry, selectResponders } from '../state';
 import { slugify } from '../text';
-import { defineTool, ToolError } from './types';
+import { defineTool, SpokenText, ToolError } from './types';
 
 export const LORE_RESULT_LIMIT = 8;
 
@@ -70,7 +70,7 @@ export const npcSay = defineTool({
   description: 'Speak a line of dialogue as an introduced NPC, using their npcId.',
   parameters: z.object({
     npcId: z.string().trim().min(1).max(200),
-    text: z.string().trim().min(1).max(4000),
+    text: SpokenText,
     emotion: Emotion.default('neutral'),
   }),
   narrativeText: (args) => args.text,

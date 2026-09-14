@@ -102,6 +102,54 @@ function callsFromResponse(response: ModelResponse, fallbackTool: string, id: st
   return text ? [{ id, name: fallbackTool, args: { text } }] : [];
 }
 
+/** Multi-word DM tool names, which only turn up in prose when the model talks about its calls. */
+const DM_TOOL_NAMES_IN_PROSE = DM_TOOLS.map((tool) => tool.name).filter((name) =>
+  name.includes('_')
+);
+
+/** Prose like "Let me hand off to the players." is commentary on the calls, not the story. */
+function isCommentary(text: string): boolean {
+  return /^let me\b/i.test(text) || DM_TOOL_NAMES_IN_PROSE.some((name) => text.includes(name));
+}
+
+/**
+ * The DM's calls for one response, and the id of the call made from its prose, if any. Unlike a
+ * player's, the DM's prose is narration even when it arrives alongside tool calls, so it is narrated
+ * instead of dropped: after the calls it may describe (so their mechanics back its numbers) and
+ * before any hand_off. It is left out when the response already narrates or it is commentary.
+ */
+function dmCallsFromResponse(
+  response: ModelResponse,
+  id: string
+): { calls: ToolCall[]; proseCallId?: string } {
+  const calls = callsFromResponse(response, 'narrate', id);
+  const text = response.text.trim();
+  if (
+    response.toolCalls.length === 0 ||
+    !text ||
+    isCommentary(text) ||
+    calls.some((call) => call.name === 'narrate')
+  ) {
+    return { calls };
+  }
+  const handOff = calls.findIndex((call) => call.name === 'hand_off');
+  const at = handOff === -1 ? calls.length : handOff;
+  const prose: ToolCall = { id, name: 'narrate', args: { text } };
+  return { calls: [...calls.slice(0, at), prose, ...calls.slice(at)], proseCallId: id };
+}
+
+function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/** True when this beat already narrated the same words: some models repeat a line verbatim. */
+function narratedThisBeat(recorder: TurnRecorder, text: string): boolean {
+  const words = collapseWhitespace(text);
+  return recorder.events.some(
+    (event) => event.type === 'narration' && collapseWhitespace(event.text) === words
+  );
+}
+
 export class Director {
   private state: GameState;
   private readonly history: SimEvent[];
@@ -343,10 +391,11 @@ export class Director {
 
     for (let step = 0; step < this.maxDmStepsPerBeat && !ended && !callLimitHit; step++) {
       const response = await this.callModel(seat, recorder.turnId, messages, DM_TOOL_SCHEMAS);
-      const calls = callsFromResponse(response, 'narrate', `auto-narrate-${step}`);
+      const { calls, proseCallId } = dmCallsFromResponse(response, `auto-narrate-${step}`);
+      // Prose that became a narrate call is not also kept as the assistant's text.
       messages.push({
         role: 'assistant',
-        content: response.toolCalls.length > 0 ? response.text : '',
+        content: proseCallId || response.toolCalls.length === 0 ? '' : response.text,
         toolCalls: calls,
       });
       if (calls.length === 0) {
@@ -378,9 +427,27 @@ export class Director {
           continue;
         }
         const text = prepared.def.narrativeText?.(prepared.args);
+        if (call.name === 'narrate' && text && narratedThisBeat(recorder, text)) {
+          messages.push(
+            toolMessage(
+              call,
+              'Not narrated again: you already narrated that this turn. Continue with other tools, or call hand_off.'
+            )
+          );
+          this.flag(recorder, seat, 'duplicate_narration', rejections, 're_prompted');
+          continue;
+        }
         const violation = text
           ? validateDmText(text, { pcNames, mechanicsToolCalled: mechanicsCalled })
           : null;
+        if (violation && call.id === proseCallId) {
+          // Prose the engine turned into narration is dropped on a violation, without costing a
+          // retry or blocking the calls the model actually made.
+          messages.push(
+            toolMessage(call, `Not narrated (${violation.rule}): ${violation.message}`)
+          );
+          continue;
+        }
         if (violation && rejections < this.maxValidatorRetries) {
           rejections++;
           messages.push(

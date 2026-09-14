@@ -36,6 +36,34 @@ describe('player tools', () => {
     });
   });
 
+  it('speak removes quote marks wrapped around the whole line', async () => {
+    const harness = kiraHarness();
+    await harness.run(speak, { text: '"Keep an eye on that old man, Tomas."' });
+    expect(harness.recorder.events[0]).toMatchObject({
+      type: 'dialogue',
+      text: 'Keep an eye on that old man, Tomas.',
+    });
+  });
+
+  it('speak keeps quote marks that are only part of the line', async () => {
+    const harness = kiraHarness();
+    const line = '"One word, then." (I wait a beat.) "...Which?"';
+    await harness.run(speak, { text: line });
+    expect(harness.recorder.events[0]).toMatchObject({ type: 'dialogue', text: line });
+  });
+
+  it('speak rejects a line with nothing inside its quotes', async () => {
+    const harness = kiraHarness();
+    expect(await harness.run(speak, { text: '"   "' })).toMatchObject({ ok: false });
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('interject removes quote marks wrapped around the whole line', async () => {
+    const harness = kiraHarness({ spoken: true });
+    await harness.run(interject, { text: '“Wait—!”' });
+    expect(harness.recorder.events[0]).toMatchObject({ type: 'dialogue', text: 'Wait—!' });
+  });
+
   it('act declares an attempt', async () => {
     const harness = kiraHarness();
     await harness.run(act, { intent: 'check the door for traps', targetId: 'door' });

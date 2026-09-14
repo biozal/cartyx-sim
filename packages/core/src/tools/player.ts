@@ -2,7 +2,7 @@ import { describeSlots, slotsRemaining } from '@cartyx-sim/rules';
 import { z } from 'zod';
 import { Emotion } from '../events';
 import { countWords } from '../text';
-import { defineTool, getCombatant, ToolError } from './types';
+import { defineTool, getCombatant, SpokenText, ToolError } from './types';
 
 export const INTERJECTION_MAX_WORDS = 12;
 
@@ -10,7 +10,7 @@ export const speak = defineTool({
   name: 'speak',
   description: 'Say something out loud, in character, as your own character.',
   parameters: z.object({
-    text: z.string().trim().min(1).max(4000),
+    text: SpokenText,
     emotion: Emotion.default('neutral'),
   }),
   narrativeText: (args) => args.text,
@@ -45,7 +45,7 @@ export const interject = defineTool({
   name: 'interject',
   description: `A short reaction (at most ${INTERJECTION_MAX_WORDS} words) that overlaps the most recent line, like "Wait—!" or a laugh. Does not use up your turn.`,
   parameters: z.object({
-    text: z.string().trim().min(1).max(4000),
+    text: SpokenText,
     emotion: Emotion.default('surprised'),
   }),
   narrativeText: (args) => args.text,

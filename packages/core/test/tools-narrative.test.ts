@@ -83,6 +83,17 @@ describe('introduce_npc and npc_say', () => {
     });
   });
 
+  it('removes quote marks wrapped around a whole NPC line', async () => {
+    const harness = toolHarness();
+    await harness.run(introduceNpc, {
+      name: 'Professor Sella Vaunt',
+      description: 'Crystal engine professor',
+      invented: false,
+    });
+    await harness.run(npcSay, { npcId: 'npc-professor-sella-vaunt', text: '"Find out who."' });
+    expect(harness.recorder.events[1]).toMatchObject({ type: 'dialogue', text: 'Find out who.' });
+  });
+
   it('G5.15: records a loreEntityId on the event and in state.npcs', async () => {
     const harness = toolHarness();
     await harness.run(introduceNpc, {

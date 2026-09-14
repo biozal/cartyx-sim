@@ -305,6 +305,166 @@ describe('Director', () => {
     ]);
   });
 
+  it('narrates DM prose that arrives alongside tool calls, after them and before hand_off', async () => {
+    const { deps: built, sink } = deps({
+      dm: [
+        {
+          text: 'The door groans open onto a frosted corridor.',
+          toolCalls: [
+            toolCall('scene_change', {
+              location: 'East Corridor',
+              artPrompt: 'A frosted corridor',
+            }),
+            toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } }),
+          ],
+        },
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.slice(1, 4)).toMatchObject([
+      { type: 'scene_change', location: 'East Corridor' },
+      { type: 'narration', text: 'The door groans open onto a frosted corridor.' },
+      { type: 'hand_off', responders: ['tomas'] },
+    ]);
+  });
+
+  it('drops DM prose that breaks a table rule without blocking the calls beside it', async () => {
+    const {
+      deps: built,
+      model,
+      sink,
+    } = deps({
+      dm: [
+        {
+          text: 'Kira decides to open the door.',
+          toolCalls: [
+            toolCall('scene_change', {
+              location: 'East Corridor',
+              artPrompt: 'A frosted corridor',
+            }),
+            toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } }),
+          ],
+        },
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.slice(1).map((e) => e.type)).toEqual([
+      'scene_change',
+      'hand_off',
+      'turn_end',
+    ]);
+    expect(model.requests).toHaveLength(1);
+  });
+
+  it.each(['Let me hand off to the players now.', 'Setting the scene with scene_change first.'])(
+    'does not narrate DM prose that comments on its tool calls: %s',
+    async (text) => {
+      const { deps: built, sink } = deps({
+        dm: [
+          {
+            text,
+            toolCalls: [
+              toolCall('scene_change', { location: 'East Corridor', artPrompt: 'A corridor' }),
+              toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } }),
+            ],
+          },
+        ],
+      });
+      const director = await Director.create(config(), built);
+      await director.step();
+      await director.step();
+      expect(sink.events.some((e) => e.type === 'narration')).toBe(false);
+    }
+  );
+
+  it('narrates a line the validator rejected once it is accepted on the last retry', async () => {
+    const line = 'Kira decides to open the door.';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(toolCall('narrate', { text: line })),
+        respond(toolCall('narrate', { text: line })),
+        respond(
+          toolCall('narrate', { text: line }),
+          toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })
+        ),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration')).toMatchObject([{ text: line }]);
+    expect(
+      sink.events.map((e) => (e.type === 'validator_flag' ? e.resolution : null)).filter(Boolean)
+    ).toEqual(['re_prompted', 're_prompted', 'accepted_with_flag']);
+  });
+
+  it('does not narrate DM prose when the same reply already calls narrate', async () => {
+    const { deps: built, sink } = deps({
+      dm: [
+        {
+          text: 'Let me set the scene first.',
+          toolCalls: [
+            toolCall('narrate', { text: 'The door creaks.' }),
+            toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } }),
+          ],
+        },
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    const narration = sink.events.filter((e) => e.type === 'narration');
+    expect(narration).toMatchObject([{ text: 'The door creaks.' }]);
+  });
+
+  it('does not repeat identical narration within one DM beat, and tells the DM why', async () => {
+    const {
+      deps: built,
+      model,
+      sink,
+    } = deps({
+      dm: [
+        { text: 'The engines roar to life.', toolCalls: [] },
+        { text: '  The engines roar   to life. ', toolCalls: [] },
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration')).toMatchObject([
+      { text: 'The engines roar to life.' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'duplicate_narration', resolution: 're_prompted' },
+    ]);
+    expect(model.requests[2]!.messages.at(-1)).toMatchObject({
+      role: 'tool',
+      content: expect.stringContaining('already narrated'),
+    });
+  });
+
+  it('does not speak player prose that arrives alongside a tool call', async () => {
+    const { deps: built, sink } = deps({
+      dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } }))],
+      'player-tomas': [
+        {
+          text: "I'll take a careful look around.",
+          toolCalls: [toolCall('act', { intent: 'look around the corridor' })],
+        },
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(3);
+    const tomasTurn = sink.events.filter((e) => 'actor' in e && e.actor === 'tomas');
+    expect(tomasTurn.map((e) => e.type)).toEqual(['action', 'turn_end']);
+    expect(sink.events.some((e) => e.type === 'dialogue')).toBe(false);
+  });
+
   it('forces a pass after a player keeps breaking the rules', async () => {
     const outcome = respond(toolCall('speak', { text: 'I successfully pick the lock.' }));
     const { deps: built, sink } = deps({

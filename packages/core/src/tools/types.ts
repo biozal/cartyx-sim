@@ -5,6 +5,16 @@ import type { SimEvent } from '../events';
 import type { LoreIndex, ToolCall, ToolSchema } from '../model';
 import type { TurnRecorder } from '../recorder';
 import { ownEntry, type GameState } from '../state';
+import { unwrapQuotes } from '../text';
+
+/** Words said out loud: trimmed, without quote marks wrapped around the whole line, and not empty. */
+export const SpokenText = z
+  .string()
+  .trim()
+  .min(1)
+  .max(4000)
+  .transform(unwrapQuotes)
+  .pipe(z.string().min(1, 'Say something inside the quotes.'));
 
 /** A tool misuse the model can correct, e.g. an unknown id. Returned to the model as an error result. */
 export class ToolError extends Error {
