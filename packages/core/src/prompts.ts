@@ -16,18 +16,37 @@ export interface PlayerPromptInput {
   instruction: string;
 }
 
+export interface PcControlCheckInput {
+  /** The player characters' names. */
+  party: string[];
+  /** What each player said or declared since the DM last had the floor, one line each. */
+  declarations: string[];
+  /** The DM narration to check. */
+  narration: string;
+}
+
 /** Builds the messages for each seat. Plan 2C replaces `basicPrompts` with lore- and persona-rich prompts. */
 export interface PromptBuilder {
   dm(input: PromptInput): ChatMessage[];
   player(input: PlayerPromptInput): ChatMessage[];
+  /** Asks the checker seat which narration sentences play a player character. */
+  pcControlCheck(input: PcControlCheckInput): ChatMessage[];
 }
 
 const DM_SYSTEM = [
   'You are the Dungeon Master for a Dungeons & Dragons 5e session.',
   'Act only through tools. Narrate with narrate, voice NPCs with npc_say after introduce_npc, and end every turn with hand_off.',
   'All dice, damage, healing, HP, conditions, and spell slots go through tools. Never invent numbers in narration.',
-  'Never decide what a player character does, says, thinks, or feels.',
+  "Narrate the world and the results of what players declared. Never write a player character's dialogue, thoughts, feelings, or choices.",
   'Look up lore with lookup_lore before inventing details, and record anything you invent with record_invention.',
+].join('\n');
+
+const PC_CONTROL_SYSTEM = [
+  "You check a Dungeons & Dragons Dungeon Master's narration for one rule: the DM must not play the player characters.",
+  "The DM may describe a player character carrying out and experiencing the action that player declared, and the world's response to it, including effects on the character.",
+  "The DM must not write a player character's dialogue, thoughts, feelings, or decisions, or have them do anything their player did not declare.",
+  'Quote each offending sentence exactly as it appears in the narration.',
+  'Reply with JSON only: {"violations": [{"pc": "<name>", "sentence": "<exact sentence>", "why": "<short reason>"}]}. Reply {"violations": []} when there are none.',
 ].join('\n');
 
 function describeCombatant(combatant: Combatant): string {
@@ -86,6 +105,20 @@ export const basicPrompts: PromptBuilder = {
           `Scene: ${view.scene ?? 'not set'}`,
           `Recent events:\n${transcript || '(nothing yet)'}`,
           instruction,
+        ].join('\n\n'),
+      },
+    ];
+  },
+  pcControlCheck({ party, declarations, narration }) {
+    const declared = declarations.map((line) => `- ${line}`).join('\n') || '- nothing';
+    return [
+      { role: 'system', content: PC_CONTROL_SYSTEM },
+      {
+        role: 'user',
+        content: [
+          `Player characters: ${party.join(', ')}`,
+          `What each player declared or said since the DM last spoke:\n${declared}`,
+          `DM narration to check:\n${narration}`,
         ].join('\n\n'),
       },
     ];

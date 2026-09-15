@@ -169,7 +169,13 @@ export const SimEvent = z.discriminatedUnion('type', [
     seat: z.string().min(1),
     rule: z.string().min(1),
     retries: z.number().int().min(0),
-    resolution: z.enum(['re_prompted', 'accepted_with_flag', 'forced_pass', 'forced_hand_off']),
+    resolution: z.enum([
+      're_prompted',
+      'accepted_with_flag',
+      'forced_pass',
+      'forced_hand_off',
+      'trimmed',
+    ]),
   }),
   z.object({ ...base, type: z.literal('ooc_note'), text: z.string().min(1) }),
   z.object({
