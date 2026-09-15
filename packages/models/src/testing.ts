@@ -16,6 +16,7 @@ export interface ChatCompletionRequest {
   tool_choice?: unknown;
   temperature?: number;
   max_tokens?: number;
+  reasoning_effort?: string;
 }
 
 export interface FakeToolCall {

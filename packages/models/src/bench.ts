@@ -1,6 +1,6 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { generateText, jsonSchema, tool } from 'ai';
-import { SeatConfig, type SeatConfigInput } from './seat';
+import { reasoningProviderOptions, SeatConfig, type SeatConfigInput } from './seat';
 
 export interface BenchResult {
   seat: string;
@@ -33,6 +33,7 @@ export interface BenchOptions {
 }
 
 const SPEED_PROMPT = 'Describe a torch-lit dungeon corridor in about sixty words.';
+const BENCH_PROVIDER = 'cartyx-sim-bench';
 const EXPECTED_DICE = '1d20+3';
 const MAX_ERRORS = 10;
 
@@ -89,7 +90,7 @@ export async function benchSeat(
   }
 
   const model = createOpenAICompatible({
-    name: 'cartyx-sim-bench',
+    name: BENCH_PROVIDER,
     baseURL: seat.endpoint.baseURL,
     apiKey: seat.endpoint.apiKey,
   }).chatModel(seat.model);
@@ -101,6 +102,7 @@ export async function benchSeat(
       prompt: SPEED_PROMPT,
       temperature: seat.temperature,
       maxOutputTokens: seat.maxOutputTokens,
+      providerOptions: reasoningProviderOptions(BENCH_PROVIDER, seat.reasoningEffort),
       maxRetries: 0,
       abortSignal: AbortSignal.timeout(seat.timeoutMs),
     });
@@ -137,6 +139,7 @@ export async function benchSeat(
         tools: { roll_dice: rollDice },
         toolChoice,
         temperature: seat.temperature,
+        providerOptions: reasoningProviderOptions(BENCH_PROVIDER, seat.reasoningEffort),
         maxRetries: 0,
         abortSignal: AbortSignal.timeout(seat.timeoutMs),
       });

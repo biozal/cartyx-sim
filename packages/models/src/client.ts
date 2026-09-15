@@ -2,11 +2,18 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { ModelClient, ModelRequest, ModelResponse } from '@cartyx-sim/core';
 import { generateText } from 'ai';
 import { toInstructions, toModelMessages, toToolCalls, toToolSet } from './messages';
-import { SeatConfig, type ModelTarget, type SeatConfigInput } from './seat';
+import {
+  reasoningProviderOptions,
+  SeatConfig,
+  type ModelTarget,
+  type SeatConfigInput,
+} from './seat';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+const PROVIDER_NAME = 'cartyx-sim';
 
 /**
  * A `ModelClient` for OpenAI-compatible servers, one configuration per seat. Each call tries the
@@ -44,7 +51,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
     request: ModelRequest
   ): Promise<ModelResponse> {
     const provider = createOpenAICompatible({
-      name: 'cartyx-sim',
+      name: PROVIDER_NAME,
       baseURL: target.endpoint.baseURL,
       apiKey: target.endpoint.apiKey,
     });
@@ -58,6 +65,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
       toolChoice: hasTools ? (seat.toolChoice ?? request.toolChoice) : undefined,
       temperature: seat.temperature,
       maxOutputTokens: seat.maxOutputTokens,
+      providerOptions: reasoningProviderOptions(PROVIDER_NAME, seat.reasoningEffort),
       // The director owns retries (with delays, then a resumable pause).
       maxRetries: 0,
       abortSignal: request.signal ? AbortSignal.any([timeout, request.signal]) : timeout,

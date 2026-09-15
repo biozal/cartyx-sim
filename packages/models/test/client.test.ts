@@ -12,6 +12,7 @@ import { scriptedRng } from '@cartyx-sim/rules';
 import { makeCombatant } from '@cartyx-sim/rules/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OpenAICompatibleModelClient } from '../src/client';
+import { reasoningProviderOptions } from '../src/seat';
 import { startFakeOpenAIServer, type FakeOpenAIServer } from '../src/testing';
 
 const narrateTool: ToolSchema = {
@@ -50,6 +51,16 @@ afterEach(async () => {
 });
 
 describe('OpenAICompatibleModelClient', () => {
+  it('reasoningProviderOptions converts provider names to camelCase keys without warning', () => {
+    expect(reasoningProviderOptions('cartyx-sim', 'none')).toEqual({
+      cartyxSim: { reasoningEffort: 'none' },
+    });
+    expect(reasoningProviderOptions('cartyx-sim-bench', 'medium')).toEqual({
+      cartyxSimBench: { reasoningEffort: 'medium' },
+    });
+    expect(reasoningProviderOptions('cartyx-sim', undefined)).toBeUndefined();
+  });
+
   it('sends an OpenAI chat completion and maps the tool calls back', async () => {
     const fake = await server(() => ({
       text: 'thinking',
@@ -286,5 +297,22 @@ describe('OpenAICompatibleModelClient', () => {
     const assistant = secondDmCall.messages.find((message) => message.role === 'assistant');
     expect(toolMessage).toMatchObject({ content: 'Narrated.' });
     expect(toolMessage?.tool_call_id).toBe(assistant?.tool_calls?.[0]?.id);
+  });
+
+  it("sends a seat's reasoning effort as reasoning_effort, and nothing when unset", async () => {
+    const fake = await server(() => ({ text: '{"violations": []}' }));
+    const client = new OpenAICompatibleModelClient({
+      checker: { endpoint: { baseURL: fake.baseURL }, model: 'glm', reasoningEffort: 'none' },
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'qwen-dm' },
+    });
+
+    await client.complete(request({ seat: 'checker', tools: [], toolChoice: 'auto' }));
+    await client.complete(request({ seat: 'dm', toolChoice: 'auto' }));
+
+    expect(fake.requests[0]).toMatchObject({ model: 'glm', reasoning_effort: 'none' });
+    expect(fake.requests[0]).not.toHaveProperty('reasoningEffort');
+    expect(fake.requests[0]).not.toHaveProperty('tools');
+    expect(fake.requests[0]).not.toHaveProperty('tool_choice');
+    expect(fake.requests[1]).not.toHaveProperty('reasoning_effort');
   });
 });

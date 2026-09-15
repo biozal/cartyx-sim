@@ -26,8 +26,38 @@ export const SeatConfig = ModelTarget.extend({
    * server that ignores "required", so a text-only reply is used as narration or speech instead.
    */
   toolChoice: z.enum(['auto', 'required']).optional(),
+  /**
+   * Sent as `reasoning_effort`. "none" turns thinking off on servers that support it (LM Studio,
+   * Ollama), which makes short structured replies such as the checker's fast. Unset leaves the
+   * server's default.
+   */
+  reasoningEffort: z.enum(['none', 'low', 'medium', 'high']).optional(),
   /** Tried in order when the primary target fails. */
   fallbacks: z.array(ModelTarget).default([]),
 });
 export type SeatConfig = z.output<typeof SeatConfig>;
 export type SeatConfigInput = z.input<typeof SeatConfig>;
+
+/**
+ * Convert a provider name like 'cartyx-sim' to camelCase 'cartyxSim' for use as the key in AI SDK
+ * provider options. `@ai-sdk/openai-compatible` reads options under the camelCase provider name
+ * and sends the contents as `reasoning_effort`; the raw provider-name key is deprecated.
+ */
+function toCamelCase(name: string): string {
+  return name.split(/[-_]/).reduce((acc, part, index) => {
+    if (index === 0) return part;
+    return acc + part.charAt(0).toUpperCase() + part.slice(1);
+  });
+}
+
+/**
+ * AI SDK provider options that carry a seat's reasoning effort. `@ai-sdk/openai-compatible` reads
+ * `reasoningEffort` under the camelCase provider name and sends it as `reasoning_effort`.
+ * The key uses camelCase (e.g. 'cartyxSim') to avoid a deprecation warning.
+ */
+export function reasoningProviderOptions(
+  providerName: string,
+  reasoningEffort: SeatConfig['reasoningEffort']
+): Record<string, Record<string, string>> | undefined {
+  return reasoningEffort ? { [toCamelCase(providerName)]: { reasoningEffort } } : undefined;
+}
