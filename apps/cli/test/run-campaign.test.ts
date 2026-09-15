@@ -41,6 +41,7 @@ describe('runSession with campaign model seats', () => {
     campaignsDir = await mkdtemp(join(tmpdir(), 'cartyx-sim-live-'));
     let dmCalls = 0;
     fake = await startFakeOpenAIServer((body) => {
+      if (body.tools === undefined) return { text: '{"violations": []}' };
       const tools = (body.tools ?? []).map((entry) => entry.function.name);
       if (tools.includes('speak')) {
         return { toolCalls: [{ name: 'speak', arguments: { text: 'Who turned off the wards?' } }] };
@@ -125,6 +126,37 @@ describe('runSession with campaign model seats', () => {
     ).rejects.toThrow('invalid campaign');
     await expect(stat(join(campaignsDir, 'live', 'sessions'))).rejects.toThrow();
     expect(fake.requests).toHaveLength(0);
+  });
+
+  it('checks DM narration with a configured checker seat', async () => {
+    const dir = join(campaignsDir, 'checked');
+    await mkdir(join(dir, 'characters'), { recursive: true });
+    await writeFile(
+      join(dir, 'campaign.json'),
+      JSON.stringify({
+        name: 'Checked',
+        targetMinutes: 0.12,
+        endpoints: { local: { baseURL: fake.baseURL } },
+        seats: {
+          dm: { endpoint: 'local', model: 'dm-model' },
+          checker: { endpoint: 'local', model: 'dm-model', reasoningEffort: 'none' },
+          players: { kira: { endpoint: 'local', model: 'player-model' } },
+        },
+      })
+    );
+    await writeFile(join(dir, 'characters', 'kira.json'), JSON.stringify(KIRA));
+
+    const result = await runSession({
+      campaignsDir,
+      campaign: 'checked',
+      session: 1,
+      resume: false,
+    });
+
+    expect(result.status).toBe('ended');
+    const checks = fake.requests.filter((request) => request.tools === undefined);
+    expect(checks.length).toBeGreaterThan(0);
+    expect(checks[0]).toMatchObject({ reasoning_effort: 'none' });
   });
 });
 

@@ -188,4 +188,53 @@ describe('loadCampaign', () => {
       'must be lowercase letters, digits, and dashes'
     );
   });
+
+  it('loads an optional checker seat with its reasoning effort', async () => {
+    const base = config();
+    const withChecker = {
+      ...base,
+      seats: {
+        ...base.seats,
+        checker: { endpoint: 'ampere', model: 'glm', reasoningEffort: 'none', timeoutMs: 20000 },
+      },
+    };
+    await writeCampaign(withChecker, { 'kira.json': KIRA });
+    const campaign = await loadCampaign(campaignsDir, 'test');
+
+    expect(campaign.seats).toEqual({
+      dm: 'dm',
+      players: { kira: 'player-kira' },
+      checker: 'checker',
+    });
+    expect(campaign.models.checker).toEqual({
+      endpoint: { baseURL: 'http://10.0.0.3:8080/v1', apiKey: 'secret' },
+      model: 'glm',
+      reasoningEffort: 'none',
+      timeoutMs: 20000,
+      fallbacks: [],
+    });
+  });
+
+  it('names an unknown checker endpoint and rejects an unknown reasoning effort', async () => {
+    const base = config();
+    await writeCampaign(
+      { ...base, seats: { ...base.seats, checker: { endpoint: 'nowhere', model: 'glm' } } },
+      { 'kira.json': KIRA }
+    );
+    await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
+      'seats.checker uses unknown endpoint "nowhere"'
+    );
+
+    await writeCampaign(
+      {
+        ...base,
+        seats: {
+          ...base.seats,
+          checker: { endpoint: 'ampere', model: 'glm', reasoningEffort: 'max' },
+        },
+      },
+      { 'kira.json': KIRA }
+    );
+    await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow('invalid campaign');
+  });
 });

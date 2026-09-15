@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { benchSeat, type BenchResult } from '@cartyx-sim/models';
-import { loadCampaign } from './campaign';
+import { CHECKER_SEAT, loadCampaign } from './campaign';
 
 export interface BenchOptions {
   campaignsDir: string;
@@ -37,8 +37,10 @@ export function formatBenchTable(results: readonly BenchResult[]): string[] {
     result.modelListed === null ? '?' : result.modelListed ? 'yes' : 'NO',
     result.tokensPerSecond === null ? '-' : String(result.tokensPerSecond),
     result.latencyMs === null ? '-' : String(result.latencyMs),
-    `${result.toolCallSuccesses}/${result.toolCallTrials}` +
-      (result.textReplies > 0 ? ` (+${result.textReplies} text)` : ''),
+    result.toolCallTrials === 0
+      ? '-'
+      : `${result.toolCallSuccesses}/${result.toolCallTrials}` +
+        (result.textReplies > 0 ? ` (+${result.textReplies} text)` : ''),
   ]);
   const widths = header.map((_, column) =>
     Math.max(...[header, ...rows].map((row) => row[column]!.length))
@@ -62,7 +64,9 @@ export async function runBench(options: BenchOptions): Promise<BenchReport> {
   const results: BenchResult[] = [];
   for (const [seat, model] of Object.entries(campaign.models)) {
     log(`Benchmarking ${seat} (${model.model} at ${model.endpoint.baseURL})...`);
-    results.push(await benchSeat(seat, model, { trials: options.trials }));
+    // The checker answers in JSON without tools, so it gets no tool-call trials.
+    const trials = seat === CHECKER_SEAT ? 0 : options.trials;
+    results.push(await benchSeat(seat, model, { trials }));
   }
   for (const line of formatBenchTable(results)) log(line);
 
