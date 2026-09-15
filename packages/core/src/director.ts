@@ -470,6 +470,9 @@ export class Director {
     let toolCalls = 0;
     let callLimitHit = false;
     let pcControlRetried = false;
+    // Narrations (by collapsed text) that were cut to nothing this beat: a DM that resends one
+    // verbatim is rejected as a duplicate without checking it again.
+    const fullyCutNarrations = new Set<string>();
     // Shared by the duplicate-narration check and a trimmed narration that repeats an earlier one.
     const rejectDuplicateNarration = (call: ToolCall) => {
       messages.push(
@@ -590,6 +593,11 @@ export class Director {
         let args = prepared.args;
         let removed = '';
         if (call.name === 'narrate' && text) {
+          if (fullyCutNarrations.has(collapseWhitespace(text))) {
+            // This exact narration was already cut to nothing this beat: nothing new to check.
+            rejectDuplicateNarration(call);
+            continue;
+          }
           const { findings, reply } = await this.checkPcControl(recorder, text);
           if (findings.length > 0) {
             const listed = describeFindings(findings);
@@ -628,6 +636,7 @@ export class Director {
             });
             this.logCheckerReply(recorder, reply);
             if (!kept) {
+              fullyCutNarrations.add(collapseWhitespace(text));
               messages.push(
                 toolMessage(
                   call,

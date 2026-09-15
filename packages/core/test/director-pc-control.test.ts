@@ -234,6 +234,7 @@ describe('DM player-character control checker', () => {
 
     expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual(['The door creaks open.']);
     expect(ofType(sink.events, 'validator_flag')).toEqual([]);
+    expect(ofType(sink.events, 'ooc_note')).toEqual([]);
   });
 
   it('narrates unchecked with a note when the checker fails or its reply is unreadable', async () => {
@@ -330,6 +331,48 @@ describe('DM player-character control checker', () => {
       role: 'tool',
       content: expect.stringContaining('Removed sentences that played player characters'),
     });
+    // Only the retry and the cut log the checker's reply; the third (duplicate) check does not.
+    expect(
+      ofType(sink.events, 'ooc_note').filter((n) => n.text.startsWith('Checker reply:'))
+    ).toHaveLength(2);
+  });
+
+  it('skips a repeated fully cut narration without calling the checker again', async () => {
+    const FULL = 'Kira turns to the others, eyes bright.';
+    const { director, model, sink } = setup({
+      dm: [respond(narrate(FULL)), respond(narrate(FULL)), respond(narrate(FULL), handOffTomas())],
+      checker: [flagged(FULL), flagged(FULL)],
+    });
+    await playDmBeat(director);
+
+    expect(ofType(sink.events, 'narration')).toEqual([]);
+    expect(
+      ofType(sink.events, 'validator_flag')
+        .filter((e) => e.rule === 'dm_controls_pc')
+        .map((e) => e.resolution)
+    ).toEqual(['re_prompted', 'trimmed']);
+    expect(
+      ofType(sink.events, 'ooc_note').filter((n) => n.text.includes('Cut from DM narration'))
+    ).toHaveLength(1);
+    expect(
+      ofType(sink.events, 'validator_flag').filter((e) => e.rule === 'duplicate_narration')
+    ).toHaveLength(1);
+    expect(model.requests.filter((request) => request.seat === 'checker')).toHaveLength(2);
+    expect(ofType(sink.events, 'hand_off')).toHaveLength(1);
+  });
+
+  it('logs the reply as unreadable when its shape does not parse', async () => {
+    const { director, sink } = setup({
+      dm: [respond(narrate('The door creaks open.'), handOffTomas())],
+      checker: [{ text: 42, toolCalls: [] } as unknown as ScriptedResponse],
+    });
+    await playDmBeat(director);
+
+    expect(ofType(sink.events, 'ooc_note').map((e) => e.text)).toEqual([
+      'Checker reply unreadable; narration not checked.',
+    ]);
+    expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual(['The door creaks open.']);
+    expect(ofType(sink.events, 'session_paused')).toEqual([]);
   });
 
   it('does not call the checker when the rule check already rejected the narration', async () => {

@@ -149,6 +149,25 @@ describe('parseCheckerReply', () => {
     expect(parseCheckerReply('{"violations": [{"pc": "Kira Vale", "sentence": "Kira')).toBeNull();
     expect(parseCheckerReply('No violations found.')).toBeNull();
   });
+
+  it('returns null in well under a second for degenerate brace-heavy replies', () => {
+    const degenerate = ['{}'.repeat(3000), '{"a":'.repeat(600) + '}'.repeat(3000)];
+    for (const reply of degenerate) {
+      const start = performance.now();
+      const result = parseCheckerReply(reply);
+      const elapsed = performance.now() - start;
+      expect(result).toBeNull();
+      expect(elapsed).toBeLessThan(1000);
+    }
+  });
+
+  it('finds a valid reply behind a wall of junk braces', () => {
+    const junk = '{'.repeat(1000);
+    const valid = '{"violations": [{"pc": "Kira Vale", "sentence": "Kira nods.", "why": "x"}]}';
+    expect(parseCheckerReply(junk + valid)).toEqual([
+      { pc: 'Kira Vale', sentence: 'Kira nods.', why: 'x' },
+    ]);
+  });
 });
 
 describe('verifyFindings', () => {

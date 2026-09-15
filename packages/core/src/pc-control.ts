@@ -46,10 +46,32 @@ export function declarationsSinceDm(history: readonly SimEvent[], state: GameSta
 /** Closed thinking blocks some models leak into their reply; they may hold braces of their own. */
 const THINK_BLOCK = /<think>[\s\S]*?<\/think>/gi;
 
+// A brace-heavy reply can offer thousands of "{"..."}" candidates to try; a probe of "{}" repeated
+// 3,000 times took roughly 19s to exhaust, so the search stops after this many parse attempts.
+const MAX_PARSE_ATTEMPTS = 500;
+
+const WHITESPACE = /\s/;
+
+/** The index of the first non-whitespace character in `text` at or after `from`. */
+function skipWhitespace(text: string, from: number): number {
+  let at = from;
+  while (at < text.length && WHITESPACE.test(text[at]!)) at++;
+  return at;
+}
+
+/** Whether the text right after the "{" at `start`, skipping whitespace, begins with the reply's
+ * own key: a start like this is where a real reply actually begins, junk braces aside. */
+function isViolationsStart(reply: string, start: number): boolean {
+  return reply.startsWith('"violations"', skipWhitespace(reply, start + 1));
+}
+
+/** Only an object that opens with a key or closes at once can be valid JSON; skip the rest cheaply. */
+function looksLikeJsonObject(candidate: string): boolean {
+  return /^\{\s*["}]/.test(candidate);
+}
+
 /** The findings in one JSON candidate, or null when it is not valid JSON of the reply's shape. */
 function readCandidate(candidate: string): PcControlFinding[] | null {
-  // Only an object that opens with a key or closes at once can be valid JSON; skip the rest cheaply.
-  if (!/^\{\s*["}]/.test(candidate)) return null;
   let raw: unknown;
   try {
     raw = JSON.parse(candidate);
@@ -62,15 +84,28 @@ function readCandidate(candidate: string): PcControlFinding[] | null {
 
 /**
  * The checker's findings, or null when its reply holds no readable `{ "violations": [...] }`
- * object. Closed `<think>` blocks are ignored; then each "{" in order is tried against each later
- * "}" from last to first, so code fences, surrounding text, stray braces, and a second object are
- * fine.
+ * object. Closed `<think>` blocks are ignored first. Then starts that look like the reply's own
+ * `"violations"` key are tried before any other "{", so a real reply is found immediately even
+ * behind a wall of junk braces that are not it; within each group, starts are tried in order, each
+ * against every later "}" from last to first, so code fences, surrounding text, stray braces, and
+ * a second object are all fine. At most `MAX_PARSE_ATTEMPTS` candidates are ever parsed, so a
+ * degenerate brace-heavy reply returns null quickly instead of trying every pair.
  */
 export function parseCheckerReply(text: string): PcControlFinding[] | null {
   const reply = text.replace(THINK_BLOCK, '');
+  const violationsStarts: number[] = [];
+  const otherStarts: number[] = [];
   for (let start = reply.indexOf('{'); start !== -1; start = reply.indexOf('{', start + 1)) {
+    (isViolationsStart(reply, start) ? violationsStarts : otherStarts).push(start);
+  }
+  let attempts = 0;
+  for (const start of [...violationsStarts, ...otherStarts]) {
     for (let end = reply.lastIndexOf('}'); end > start; end = reply.lastIndexOf('}', end - 1)) {
-      const found = readCandidate(reply.slice(start, end + 1));
+      const candidate = reply.slice(start, end + 1);
+      if (!looksLikeJsonObject(candidate)) continue;
+      if (attempts >= MAX_PARSE_ATTEMPTS) return null;
+      attempts++;
+      const found = readCandidate(candidate);
       if (found) return found;
     }
   }
