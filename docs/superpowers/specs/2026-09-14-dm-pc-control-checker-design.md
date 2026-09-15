@@ -59,9 +59,9 @@ Without `seats.checker`, the engine behaves exactly as it does today (fixtures, 
 ### 5.2 `packages/core`
 
 - **`pc-control.ts`** (new, pure):
-  - `declarationsSinceDm(history)`: the player characters' `dialogue`, `action`, and `pass` events after the DM's most recent `turn_end`, rendered as lines (`Kira Vale says: "…"`, `Kira Vale attempts: …`, `Kira Vale holds back.`). In combat this includes the declared action the DM is resolving.
+  - `declarationsSinceDm(history, state)` (state supplies character names): the player characters' `dialogue`, `action`, and `pass` events after the DM's most recent `turn_end`, rendered as lines (`Kira Vale says: "…"`, `Kira Vale attempts: …`, `Kira Vale holds back.`). In combat this includes the declared action the DM is resolving.
   - `PcControlFinding`: `{ pc: string; sentence: string; why: string }`, with a zod schema for the checker reply `{ violations: PcControlFinding[] }`.
-  - `parseCheckerReply(text)`: extracts the first JSON object (tolerating code fences and surrounding text) and validates it. Returns the findings, or `null` when the reply is unreadable.
+  - `parseCheckerReply(text)`: reads from the first "{" to the last "}" (tolerating code fences and surrounding text) and validates it. Returns the findings, or `null` when the reply is unreadable.
   - `verifyFindings(narration, findings)`: keeps only findings whose sentence appears in the narration, comparing with whitespace collapsed and straight/curly quotes treated alike.
   - `cutSentences(narration, findings)`: removes every narration sentence that contains a verified finding's text or is contained in it (both compared with whitespace collapsed and quotes normalized), so a finding spanning several sentences removes all of them and a finding that is one clause removes its whole sentence. Returns the remainder with paragraph breaks kept, or an empty string when nothing remains.
 - **`prompts.ts`:** `PromptBuilder` gains `pcControlCheck({ party, declarations, narration })`, and `basicPrompts` implements it with the rule in §2 and the reply format. `DM_SYSTEM` gains: "Narrate the world and the results of what players declared. Never write a player character's dialogue, thoughts, feelings, or choices."
@@ -92,7 +92,7 @@ Without `seats.checker`, the engine behaves exactly as it does today (fixtures, 
 Applies both to the DM's own `narrate` calls and to prose the engine turns into a narrate call.
 
 1. **Existing checks first.** The duplicate-narration check and `validateDmText` run as today. If either rejects the call, the checker is not called.
-2. **Check.** If a checker seat is configured and not disabled for this run, send `pcControlCheck` with the party names, `declarationsSinceDm(history)`, and the narration text.
+2. **Check.** If a checker seat is configured and not disabled for this run, send `pcControlCheck` with the party names, `declarationsSinceDm(history, state)`, and the narration text.
 3. **Verify.** Parse the reply and keep verified findings. With none, the narration proceeds unchanged.
 4. **First offense in the beat (the DM's own call only) → retry.** Nothing is narrated. The tool result names each verified sentence, its character, and the reason, and asks the DM to rewrite without them and call `narrate` again. Emit `validator_flag` (`seat: dm`, `rule: dm_controls_pc`, `resolution: re_prompted`). Later calls in the same response are not executed ("an earlier call was rejected"), as with other rejections. Each beat allows one such retry.
 5. **Second offense in the beat, or engine-made prose → cut.** Narrate `cutSentences(narration, findings)` if it is not empty. Emit `validator_flag` with `resolution: trimmed` and a DM-only `ooc_note` listing each cut sentence with its character and reason. The tool result tells the DM what was removed. Later calls in the response still run.

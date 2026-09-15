@@ -92,3 +92,25 @@ A session pauses (exit code 2) instead of crashing when:
 Fix the cause, then continue with the same command plus `--resume`: the log is the source of truth, so resuming keeps the logged target minutes (a differently configured value is ignored, with a note in the log), and the party and lore commit must match the log or the resume is refused. A backstop pause (the last two cases above) gives the table a fresh budget of turns or hand-offs; if the cause is unfixed, play continues until the same backstop trips again after another full limit.
 
 Ctrl-C releases the session lock before exiting. If a run was killed without releasing it, the next run replaces a lock whose process is no longer running and says so.
+
+## 7. Keep the DM from playing the players (optional)
+
+Models acting as DM tend to write dialogue, thoughts, and actions for the player characters. An optional checker seat reviews every DM narration against what the players declared since the DM last spoke. The DM may describe a character carrying out the action its player declared; it may not write that character's dialogue, thoughts, feelings, or choices, or have them do anything undeclared.
+
+When the checker finds sentences that cross that line, the DM is asked to rewrite once; if it does it again in the same turn, just those sentences are cut. Each case is logged as a `dm_controls_pc` flag (`re_prompted` or `trimmed`), and cut sentences are listed in a DM-only note. If the checker is down or its reply is unreadable, the narration goes through unchecked with a note; after 3 failures in a row, checking stops for the rest of the run. The checker never pauses a session.
+
+Add it under `seats` in `campaign.json`:
+
+```json
+"checker": {
+  "endpoint": "ampere",
+  "model": "glm-4.7-flash:latest",
+  "temperature": 0.2,
+  "maxOutputTokens": 1500,
+  "timeoutMs": 20000,
+  "reasoningEffort": "none",
+  "fallbacks": [{ "endpoint": "macbook", "model": "<a fast model id>" }]
+}
+```
+
+`reasoningEffort: "none"` turns thinking off, which keeps each check to a few seconds; any seat accepts `reasoningEffort` (`none`, `low`, `medium`, or `high`). `sim bench` checks the checker seat's reachability and speed but runs no tool-call trials for it, so its tool-calls column shows `-`.

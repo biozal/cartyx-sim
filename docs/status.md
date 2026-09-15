@@ -48,6 +48,7 @@ What the runs taught us:
 - **LM Studio does not enforce `tool_choice: required`.** After a tool result, Qwen often narrates in plain text, so the DM seat uses `auto` (text becomes narration). Players stay on `required`, so Gemma's occasional garbled tool call is retried rather than spoken.
 - **Rejected on the Ampere:** Gemma-4-31B-Storymaxxed (spills past 24 GB, ~4 tok/s), Cydonia-24B-v4 (writes Mistral tool calls Ollama cannot parse; no license), and Muse Glimmer (thinks past its limit on real turns unless `reasoning_effort` is `none`). GLM-4.7-Flash thinks briefly and calls tools reliably.
 - **Engine fixes from the runs:** DM prose that arrives alongside tool calls is narrated (after those calls, before `hand_off`) instead of dropped; identical narration within one beat is skipped and flagged `duplicate_narration`; quote marks wrapped around a whole spoken line are removed.
+- **The DM plays the players.** Session 001's DM wrote dialogue for three player characters; the verb-list validator missed it. An optional checker seat now reviews each narration (`docs/running-a-session.md` §7).
 
 Lore lookups always report a gap until Plan 2B, so the DM invents and records details.
 
@@ -88,7 +89,6 @@ The full list is in the roadmap's Backlog section. Highlights:
   - `sim bench` checks fallback targets;
   - backstop limits exposed in `campaign.json`;
   - player prompts that keep stage directions out of `speak` (kira mixes them into quoted lines);
-  - a per-seat `reasoningEffort` option (would make Muse Glimmer usable);
   - a `sim bench` tool trial realistic enough to expose thinking overflow (the dice-roll trial passes models that fail on real turns).
 - **Unscheduled:**
   - director-side response validation retries the primary, not the fallbacks;
