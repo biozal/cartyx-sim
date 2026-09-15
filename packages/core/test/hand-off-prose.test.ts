@@ -31,9 +31,31 @@ describe('extractHandOffProse', () => {
     expect(result.target).toEqual({ kind: 'pcs', ids: ['kira', 'mira'] });
   });
 
-  it('falls back to the party for an unknown name', () => {
-    const result = extractHandOffProse('Hand off to Bram.', party);
-    expect(result.target).toEqual({ kind: 'party' });
+  it('maps a comma-separated list of three PCs', () => {
+    const result = extractHandOffProse('Hand off to Kira, Mira, and Tomas.', party);
+    expect(result.target).toEqual({ kind: 'pcs', ids: ['kira', 'mira', 'tomas'] });
+  });
+
+  it('leaves a line naming an unknown PC untouched (no fallback to the party)', () => {
+    const text = 'Hand off to Bram.';
+    const result = extractHandOffProse(text, party);
+    expect(result.lines).toEqual([]);
+    expect(result.target).toBeUndefined();
+    expect(result.text).toBe(text);
+  });
+
+  it('leaves a line naming an unknown name with diacritics untouched', () => {
+    const text = 'Hand off to Élise.';
+    const result = extractHandOffProse(text, party);
+    expect(result.lines).toEqual([]);
+    expect(result.target).toBeUndefined();
+    expect(result.text).toBe(text);
+  });
+
+  it('matches a PC name with diacritics when the party has that member', () => {
+    const withElise = [...party, { id: 'elise', name: 'Élise Durand' }];
+    const result = extractHandOffProse('Hand off to Élise.', withElise);
+    expect(result.target).toEqual({ kind: 'pcs', ids: ['elise'] });
   });
 
   it.each(['anyone', 'whoever wants to act', 'whoever'])('maps "%s" to open', (phrase) => {
@@ -41,16 +63,26 @@ describe('extractHandOffProse', () => {
     expect(result.target).toEqual({ kind: 'open' });
   });
 
-  it('matches a leading "DM:" prefix', () => {
-    const result = extractHandOffProse('DM: Hand off to Bram.', party);
-    expect(result.lines).toEqual(['Hand off to Bram.']);
+  it('matches a leading "DM:" prefix, keeping the raw line in `lines`', () => {
+    const result = extractHandOffProse('DM: Hand off to Kira.', party);
+    expect(result.lines).toEqual(['DM: Hand off to Kira.']);
+    expect(result.target).toEqual({ kind: 'pcs', ids: ['kira'] });
+  });
+
+  it('matches surrounding ** emphasis, keeping the raw line in `lines`', () => {
+    const result = extractHandOffProse('**Hand off to the party.**', party);
+    expect(result.lines).toEqual(['**Hand off to the party.**']);
     expect(result.target).toEqual({ kind: 'party' });
   });
 
-  it('matches surrounding ** emphasis', () => {
-    const result = extractHandOffProse('**Hand off to the party.**', party);
-    expect(result.lines).toEqual(['Hand off to the party.']);
-    expect(result.target).toEqual({ kind: 'party' });
+  it('matches "DM:" outside a whole-line emphasis wrap', () => {
+    const result = extractHandOffProse('DM: **Hand off to Kira.**', party);
+    expect(result.target).toEqual({ kind: 'pcs', ids: ['kira'] });
+  });
+
+  it('matches an emphasis-wrapped "DM:" prefix ahead of plain text', () => {
+    const result = extractHandOffProse('**DM:** Hand off to Kira.', party);
+    expect(result.target).toEqual({ kind: 'pcs', ids: ['kira'] });
   });
 
   it('matches "Handing off to <name>!"', () => {
@@ -67,6 +99,46 @@ describe('extractHandOffProse', () => {
     expect(result.text).toBe(text);
   });
 
+  it('leaves a hand-off line with trailing narration after the name untouched', () => {
+    const text = 'Hand off to Kira. She draws her blade and Mira watches.';
+    const result = extractHandOffProse(text, party);
+    expect(result.lines).toEqual([]);
+    expect(result.target).toBeUndefined();
+    expect(result.text).toBe(text);
+  });
+
+  it('leaves a hand-off line with a trailing question untouched', () => {
+    const text = 'Hand off to the party. What do you do?';
+    const result = extractHandOffProse(text, party);
+    expect(result.lines).toEqual([]);
+    expect(result.target).toBeUndefined();
+    expect(result.text).toBe(text);
+  });
+
+  it('leaves untouched an emphasis-wrapped line with more emphasis inside it', () => {
+    const text = '*Hand off to Kira.* The dwarf nods, *grim*';
+    const result = extractHandOffProse(text, party);
+    expect(result.lines).toEqual([]);
+    expect(result.target).toBeUndefined();
+    expect(result.text).toBe(text);
+  });
+
+  it('leaves a hand-off line qualified by a clause about timing untouched', () => {
+    const text = 'Hand off to the next watch when the bell rings.';
+    const result = extractHandOffProse(text, party);
+    expect(result.lines).toEqual([]);
+    expect(result.target).toBeUndefined();
+    expect(result.text).toBe(text);
+  });
+
+  it('leaves a hand-off line naming a PC but qualified by a clause untouched', () => {
+    const text = 'Hand off to Kira when the bell rings.';
+    const result = extractHandOffProse(text, party);
+    expect(result.lines).toEqual([]);
+    expect(result.target).toBeUndefined();
+    expect(result.text).toBe(text);
+  });
+
   it('returns an empty text when the text is only the hand-off line', () => {
     const result = extractHandOffProse('Hand off to the party.', party);
     expect(result.text).toBe('');
@@ -77,6 +149,12 @@ describe('extractHandOffProse', () => {
     const result = extractHandOffProse(text, party);
     expect(result.text).toBe('First paragraph.\n\nSecond paragraph.');
     expect(result.lines).toEqual(['Hand off to Kira.']);
+  });
+
+  it('collapses whitespace-only blank lines left around a removed line', () => {
+    const text = 'A.\n  \nHand off to Kira.\n  \nB.';
+    const result = extractHandOffProse(text, party);
+    expect(result.text).toBe('A.\n\nB.');
   });
 
   it('uses the target from the last of two matched lines', () => {

@@ -15,7 +15,7 @@ function errorMessage(error: unknown): string {
 
 const PROVIDER_NAME = 'cartyx-sim';
 
-/** A reply that spent the whole output budget without finishing, whatever it did produce. */
+/** A reply with nothing usable (no text, no tool calls) or one cut off by the output-token limit. */
 function isIncompleteReply(response: ModelResponse, finishReason: string): boolean {
   return (
     (response.text.trim() === '' && response.toolCalls.length === 0) || finishReason === 'length'
@@ -39,7 +39,9 @@ export class OpenAICompatibleModelClient implements ModelClient {
     const seat = this.seats.get(request.seat);
     if (!seat) throw new Error(`No model is configured for seat "${request.seat}".`);
     const failures: string[] = [];
-    const attempts = request.incompleteReplyAttempts ?? 1;
+    // Clamped so a 0 (or otherwise non-positive) value still makes one call per target instead of
+    // throwing with no failures to report.
+    const attempts = Math.max(1, request.incompleteReplyAttempts ?? 1);
     for (const target of [seat, ...seat.fallbacks]) {
       for (let attempt = 0; attempt < attempts; attempt++) {
         let outcome: { response: ModelResponse; finishReason: string };

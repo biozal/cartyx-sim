@@ -388,6 +388,22 @@ describe('OpenAICompatibleModelClient', () => {
     expect(primary.requests).toHaveLength(1);
   });
 
+  it('still makes one call and returns a complete reply when incompleteReplyAttempts is 0', async () => {
+    const fake = await server(() => ({
+      toolCalls: [{ name: 'narrate', arguments: { text: 'The lab hums.' } }],
+    }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+
+    const response = await client.complete(request({ incompleteReplyAttempts: 0 }));
+
+    expect(response).toMatchObject({
+      toolCalls: [{ name: 'narrate', args: { text: 'The lab hums.' } }],
+    });
+    expect(fake.requests).toHaveLength(1);
+  });
+
   it("sends a seat's reasoning effort as reasoning_effort, and nothing when unset", async () => {
     const fake = await server(() => ({ text: '{"violations": []}' }));
     const client = new OpenAICompatibleModelClient({

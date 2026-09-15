@@ -453,13 +453,11 @@ export class Director {
       instruction: this.dmInstruction(reason, combatantId, nudge),
     });
     const context = this.toolContext(recorder, 'dm', seat);
-    const pcNames = this.state.partyIds.map(
-      (id) => ownEntry(this.state.combatants, id)?.name ?? id
-    );
     const partyForHandOff = this.state.partyIds.map((id) => ({
       id,
       name: ownEntry(this.state.combatants, id)?.name ?? id,
     }));
+    const pcNames = partyForHandOff.map((pc) => pc.name);
     let mechanicsCalled = false;
     let rejections = 0;
     let ended = false;
