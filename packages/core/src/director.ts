@@ -112,6 +112,10 @@ function callsFromResponse(response: ModelResponse, fallbackTool: string, id: st
   return text ? [{ id, name: fallbackTool, args: { text } }] : [];
 }
 
+// Thinking checkers occasionally spend their whole output budget thinking and return nothing
+// useful; retrying the same target once usually gets a real reply before falling back.
+const CHECKER_REPLY_ATTEMPTS = 2;
+
 /** Multi-word DM tool names, which only turn up in prose when the model talks about its calls. */
 const DM_TOOL_NAMES_IN_PROSE = DM_TOOLS.map((tool) => tool.name).filter((name) =>
   name.includes('_')
@@ -712,7 +716,7 @@ export class Director {
 
   /** Kept for review: the checker's raw reply text, DM-only. Logs nothing when there is none. */
   private logCheckerReply(recorder: TurnRecorder, reply: string | undefined): void {
-    if (reply !== undefined) {
+    if (reply !== undefined && reply.trim() !== '') {
       recorder.emit({ type: 'ooc_note', visibility: 'dm', text: `Checker reply: ${reply}` });
     }
   }
@@ -748,6 +752,7 @@ export class Director {
           messages,
           tools: [],
           toolChoice: 'auto',
+          incompleteReplyAttempts: CHECKER_REPLY_ATTEMPTS,
         })
       );
       if (response.success) {

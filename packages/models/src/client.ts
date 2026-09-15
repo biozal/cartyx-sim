@@ -15,10 +15,18 @@ function errorMessage(error: unknown): string {
 
 const PROVIDER_NAME = 'cartyx-sim';
 
+/** A reply that spent the whole output budget without finishing, whatever it did produce. */
+function isIncompleteReply(response: ModelResponse, finishReason: string): boolean {
+  return (
+    (response.text.trim() === '' && response.toolCalls.length === 0) || finishReason === 'length'
+  );
+}
+
 /**
  * A `ModelClient` for OpenAI-compatible servers, one configuration per seat. Each call tries the
  * seat's primary target, then its fallbacks in order; the engine's director handles retry delays
- * and pausing when every target fails.
+ * and pausing when every target fails. When `request.incompleteReplyAttempts` is set, an empty or
+ * cut-off reply from a target is retried on that same target before moving to the next.
  */
 export class OpenAICompatibleModelClient implements ModelClient {
   private readonly seats: ReadonlyMap<string, SeatConfig>;
@@ -31,13 +39,27 @@ export class OpenAICompatibleModelClient implements ModelClient {
     const seat = this.seats.get(request.seat);
     if (!seat) throw new Error(`No model is configured for seat "${request.seat}".`);
     const failures: string[] = [];
+    const attempts = request.incompleteReplyAttempts ?? 1;
     for (const target of [seat, ...seat.fallbacks]) {
-      try {
-        return await this.generate(seat, target, request);
-      } catch (error) {
-        // A deliberate abort (e.g. shutdown) is not an endpoint failure; do not fall back.
-        if (request.signal?.aborted) throw error;
-        failures.push(`${target.model} at ${target.endpoint.baseURL}: ${errorMessage(error)}`);
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        let outcome: { response: ModelResponse; finishReason: string };
+        try {
+          outcome = await this.generate(seat, target, request);
+        } catch (error) {
+          // A deliberate abort (e.g. shutdown) is not an endpoint failure; do not fall back.
+          if (request.signal?.aborted) throw error;
+          failures.push(`${target.model} at ${target.endpoint.baseURL}: ${errorMessage(error)}`);
+          break;
+        }
+        if (
+          !request.incompleteReplyAttempts ||
+          !isIncompleteReply(outcome.response, outcome.finishReason)
+        ) {
+          return outcome.response;
+        }
+        failures.push(
+          `${target.model} at ${target.endpoint.baseURL}: incomplete reply (finish: ${outcome.finishReason})`
+        );
       }
     }
     // No seat prefix here: the director adds one (`Seat "<seat>" failed: ...`) when it wraps this
@@ -49,7 +71,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
     seat: SeatConfig,
     target: ModelTarget,
     request: ModelRequest
-  ): Promise<ModelResponse> {
+  ): Promise<{ response: ModelResponse; finishReason: string }> {
     const provider = createOpenAICompatible({
       name: PROVIDER_NAME,
       baseURL: target.endpoint.baseURL,
@@ -70,6 +92,9 @@ export class OpenAICompatibleModelClient implements ModelClient {
       maxRetries: 0,
       abortSignal: request.signal ? AbortSignal.any([timeout, request.signal]) : timeout,
     });
-    return { text: result.text, toolCalls: toToolCalls(result.toolCalls) };
+    return {
+      response: { text: result.text, toolCalls: toToolCalls(result.toolCalls) },
+      finishReason: result.finishReason,
+    };
   }
 }

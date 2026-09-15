@@ -411,6 +411,29 @@ describe('DM player-character control checker', () => {
     );
   });
 
+  it('asks the checker with incompleteReplyAttempts set, to retry an empty or cut-off reply', async () => {
+    const { director, model } = setup({
+      dm: [respond(narrate('The door creaks open.'), handOffTomas())],
+      checker: [CLEAN],
+    });
+    await playDmBeat(director);
+
+    const [check] = model.requests.filter((request) => request.seat === 'checker');
+    expect(check).toMatchObject({ incompleteReplyAttempts: 2 });
+  });
+
+  it('logs no Checker reply note for a blank checker reply', async () => {
+    const { director, sink } = setup({
+      dm: [respond(narrate('The door creaks open.'), handOffTomas())],
+      checker: [{ text: '', toolCalls: [] }],
+    });
+    await playDmBeat(director);
+
+    expect(ofType(sink.events, 'ooc_note').map((e) => e.text)).toEqual([
+      'Checker reply unreadable; narration not checked.',
+    ]);
+  });
+
   it('never calls a checker when no checker seat is configured', async () => {
     const { director, model, sink } = setup(
       { dm: [respond(narrate('The door creaks open.'), handOffTomas())] },

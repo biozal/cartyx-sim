@@ -33,6 +33,8 @@ export interface FakeReply {
   status?: number;
   delayMs?: number;
   completionTokens?: number;
+  /** Sent as `finish_reason`. Defaults to `tool_calls` when there are tool calls, else `stop`. */
+  finishReason?: string;
 }
 
 export interface FakeOpenAIServer {
@@ -103,7 +105,7 @@ export async function startFakeOpenAIServer(
         choices: [
           {
             index: 0,
-            finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
+            finish_reason: planned.finishReason ?? (toolCalls.length > 0 ? 'tool_calls' : 'stop'),
             message: {
               role: 'assistant',
               content: planned.text ?? null,

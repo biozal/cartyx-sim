@@ -299,6 +299,95 @@ describe('OpenAICompatibleModelClient', () => {
     expect(toolMessage?.tool_call_id).toBe(assistant?.tool_calls?.[0]?.id);
   });
 
+  it('retries an empty reply on the same target when incompleteReplyAttempts is set', async () => {
+    const fake = await server((_body, index) =>
+      index === 0
+        ? { text: '' }
+        : { toolCalls: [{ name: 'narrate', arguments: { text: 'Second try.' } }] }
+    );
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+
+    const response = await client.complete(
+      request({ incompleteReplyAttempts: 2, toolChoice: 'auto' })
+    );
+
+    expect(response).toMatchObject({
+      toolCalls: [{ name: 'narrate', args: { text: 'Second try.' } }],
+    });
+    expect(fake.requests).toHaveLength(2);
+  });
+
+  it('falls back after every attempt on the primary is cut off by the output-token limit', async () => {
+    const primary = await server(() => ({ text: 'thinking forever', finishReason: 'length' }));
+    const backup = await server(() => ({
+      toolCalls: [{ name: 'narrate', arguments: { text: 'From the backup.' } }],
+    }));
+    const client = new OpenAICompatibleModelClient({
+      dm: {
+        endpoint: { baseURL: primary.baseURL },
+        model: 'big',
+        fallbacks: [{ endpoint: { baseURL: backup.baseURL }, model: 'small' }],
+      },
+    });
+
+    const response = await client.complete(
+      request({ incompleteReplyAttempts: 2, toolChoice: 'auto' })
+    );
+
+    expect(response).toMatchObject({
+      toolCalls: [{ name: 'narrate', args: { text: 'From the backup.' } }],
+    });
+    expect(primary.requests).toHaveLength(2);
+  });
+
+  it('throws naming the incomplete-reply failures when every attempt on every target is incomplete', async () => {
+    const fake = await server(() => ({ text: '', finishReason: 'length' }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+
+    await expect(
+      client.complete(request({ incompleteReplyAttempts: 2, toolChoice: 'auto' }))
+    ).rejects.toThrow(/Every endpoint failed.*incomplete reply \(finish: length\)/s);
+    expect(fake.requests).toHaveLength(2);
+  });
+
+  it('returns an empty reply as-is when incompleteReplyAttempts is unset', async () => {
+    const fake = await server(() => ({ text: '' }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+
+    expect(await client.complete(request({ toolChoice: 'auto' }))).toEqual({
+      text: '',
+      toolCalls: [],
+    });
+    expect(fake.requests).toHaveLength(1);
+  });
+
+  it('does not retry a 500 on the same target even when incompleteReplyAttempts is set', async () => {
+    const primary = await server(() => ({ status: 500 }));
+    const backup = await server(() => ({
+      toolCalls: [{ name: 'narrate', arguments: { text: 'From the backup.' } }],
+    }));
+    const client = new OpenAICompatibleModelClient({
+      dm: {
+        endpoint: { baseURL: primary.baseURL },
+        model: 'big',
+        fallbacks: [{ endpoint: { baseURL: backup.baseURL }, model: 'small' }],
+      },
+    });
+
+    const response = await client.complete(request({ incompleteReplyAttempts: 2 }));
+
+    expect(response).toMatchObject({
+      toolCalls: [{ name: 'narrate', args: { text: 'From the backup.' } }],
+    });
+    expect(primary.requests).toHaveLength(1);
+  });
+
   it("sends a seat's reasoning effort as reasoning_effort, and nothing when unset", async () => {
     const fake = await server(() => ({ text: '{"violations": []}' }));
     const client = new OpenAICompatibleModelClient({

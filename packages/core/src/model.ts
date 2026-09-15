@@ -39,6 +39,12 @@ export interface ModelRequest {
   toolChoice: ToolChoice;
   /** Aborts the call, e.g. on shutdown. Clients apply their own timeout as well. */
   signal?: AbortSignal;
+  /**
+   * When set, a reply that is empty (no text and no tool calls) or was cut off by the output-token
+   * limit counts as a failed attempt: the client tries the same target up to this many times, then
+   * each fallback the same way, and throws when every attempt fails. Unset returns any reply as-is.
+   */
+  incompleteReplyAttempts?: number;
 }
 
 export interface ModelClient {
