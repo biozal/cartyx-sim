@@ -3,6 +3,7 @@ export * from './director';
 export * from './errors';
 export * from './events';
 export * from './model';
+export * from './pc-control';
 export * from './prompts';
 export * from './recorder';
 export * from './sink';
