@@ -113,6 +113,7 @@ The checker never pauses a session. When it cannot give a verdict, the narration
 ## 8. Logging and state
 
 - `validator_flag` `dm_controls_pc` with `re_prompted` (retry) or `trimmed` (cut), plus the DM-only `ooc_note` for cuts and checker failures. Clean checks are not logged.
+- A retry also logs the DM's rejected draft in full, right after the `re_prompted` flag: `Rejected DM draft (dm_controls_pc): <the full narration text the DM sent>`. Retries, cuts, and unreadable replies also log the checker's raw reply text right after their existing note — `Checker reply: <raw reply text>` — so the checker's exact wording is kept for review even though only verified findings drive the outcome. A checker error with no reply (every target down or timed out) logs nothing beyond the existing `Checker unavailable (…)` note.
 - All of it is DM-only: none of it reaches player prompts or playback, and it does not count as progress for the stalled-turn backstop.
 - The one-retry budget is per beat and beats commit atomically, so resume needs no new state. The failure count and disabled flag live only in the running director.
 - **Event schema version stays 1.** `session_start.schemaVersion` is `z.literal(1)`, so a bump would make every existing log unreadable. Adding `trimmed` is additive, as adding `re_prompted` was in Plan 2A: all existing logs stay valid. Only an older build reading a new log would fail, which is acceptable.

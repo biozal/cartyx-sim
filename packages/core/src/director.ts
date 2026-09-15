@@ -493,7 +493,7 @@ export class Director {
         let args = prepared.args;
         let removed = '';
         if (call.name === 'narrate' && text) {
-          const findings = await this.checkPcControl(recorder, text);
+          const { findings, reply } = await this.checkPcControl(recorder, text);
           if (findings.length > 0) {
             const listed = describeFindings(findings);
             if (call.id !== proseCallId && !pcControlRetried) {
@@ -505,6 +505,13 @@ export class Director {
                 )
               );
               this.flag(recorder, seat, 'dm_controls_pc', pcControlRetried ? 1 : 0, 're_prompted');
+              // Kept for review: the DM's rejected draft and the checker's raw reply, DM-only.
+              recorder.emit({
+                type: 'ooc_note',
+                visibility: 'dm',
+                text: `Rejected DM draft (dm_controls_pc): ${text}`,
+              });
+              this.logCheckerReply(recorder, reply);
               skipRest = true;
               continue;
             }
@@ -522,6 +529,7 @@ export class Director {
               visibility: 'dm',
               text: `Cut from DM narration (dm_controls_pc): ${listed}`,
             });
+            this.logCheckerReply(recorder, reply);
             if (!kept) {
               messages.push(
                 toolMessage(
@@ -702,18 +710,27 @@ export class Director {
     recorder.emit({ type: 'validator_flag', visibility: 'dm', seat, rule, retries, resolution });
   }
 
+  /** Kept for review: the checker's raw reply text, DM-only. Logs nothing when there is none. */
+  private logCheckerReply(recorder: TurnRecorder, reply: string | undefined): void {
+    if (reply !== undefined) {
+      recorder.emit({ type: 'ooc_note', visibility: 'dm', text: `Checker reply: ${reply}` });
+    }
+  }
+
   /**
    * Asks the checker seat which sentences of a DM narration play a player character, and returns
-   * only findings that really appear in the narration. Never pauses the session: a failed or
-   * unreadable check leaves the narration unchecked, with a DM-only note, and repeated failures
+   * only findings that really appear in the narration, plus the checker's raw reply text (for the
+   * caller to log alongside a retry or a cut) when one was received. Never pauses the session: a
+   * failed or unreadable check leaves the narration unchecked, with a DM-only note (and, when a
+   * reply was received but unreadable, the raw reply logged right after), and repeated failures
    * stop checking for the rest of the run.
    */
   private async checkPcControl(
     recorder: TurnRecorder,
     narration: string
-  ): Promise<PcControlFinding[]> {
+  ): Promise<{ findings: PcControlFinding[]; reply?: string }> {
     const seat = this.config.seats.checker;
-    if (!seat || this.checkerDisabled) return [];
+    if (!seat || this.checkerDisabled) return { findings: [] };
     const party = this.state.partyIds.map((id) => ownEntry(this.state.combatants, id)?.name ?? id);
     const messages = this.deps.prompts.pcControlCheck({
       party,
@@ -722,6 +739,7 @@ export class Director {
     });
     let findings: PcControlFinding[] | null = null;
     let failure = 'Checker reply unreadable; narration not checked.';
+    let reply: string | undefined;
     try {
       const response = ModelResponse.safeParse(
         await this.deps.model.complete({
@@ -732,13 +750,17 @@ export class Director {
           toolChoice: 'auto',
         })
       );
-      findings = response.success ? parseCheckerReply(response.data.text) : null;
+      if (response.success) {
+        reply = response.data.text;
+        findings = parseCheckerReply(response.data.text);
+      }
     } catch (error) {
       failure = `Checker unavailable (${error instanceof Error ? error.message : String(error)}); narration not checked.`;
     }
     if (findings === null) {
       this.checkerFailures++;
       recorder.emit({ type: 'ooc_note', visibility: 'dm', text: failure });
+      this.logCheckerReply(recorder, reply);
       if (this.checkerFailures >= this.maxCheckerFailures) {
         this.checkerDisabled = true;
         recorder.emit({
@@ -747,10 +769,10 @@ export class Director {
           text: `Checker failed ${this.checkerFailures} times in a row; narration is not checked for the rest of this run.`,
         });
       }
-      return [];
+      return { findings: [] };
     }
     this.checkerFailures = 0;
-    return verifyFindings(narration, findings);
+    return { findings: verifyFindings(narration, findings), reply };
   }
 
   private dmInstruction(

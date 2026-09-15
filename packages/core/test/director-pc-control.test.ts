@@ -51,11 +51,13 @@ function setup(
 
 const CLEAN: ScriptedResponse = { text: '{"violations": []}', toolCalls: [] };
 
+/** The raw checker reply text `flagged` scripts, for asserting the logged `Checker reply: …` note. */
+function flaggedText(sentence: string, pc = 'Kira Vale'): string {
+  return JSON.stringify({ violations: [{ pc, sentence, why: 'the player never declared it' }] });
+}
+
 function flagged(sentence: string, pc = 'Kira Vale'): ScriptedResponse {
-  return {
-    text: JSON.stringify({ violations: [{ pc, sentence, why: 'the player never declared it' }] }),
-    toolCalls: [],
-  };
+  return { text: flaggedText(sentence, pc), toolCalls: [] };
 }
 
 const narrate = (text: string) => toolCall('narrate', { text });
@@ -84,6 +86,7 @@ describe('DM player-character control checker', () => {
 
     expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual(['The door creaks open.']);
     expect(ofType(sink.events, 'validator_flag')).toEqual([]);
+    expect(ofType(sink.events, 'ooc_note')).toEqual([]);
     const [check] = model.requests.filter((request) => request.seat === 'checker');
     expect(check).toMatchObject({ tools: [], toolChoice: 'auto' });
     expect(check!.messages[1]!.content).toContain('DM narration to check:\nThe door creaks open.');
@@ -108,6 +111,19 @@ describe('DM player-character control checker', () => {
       content: expect.stringContaining('Rejected (dm_controls_pc)'),
     });
     expect(dmRequests[1]!.messages.at(-1)!.content).toContain('These runes are old.');
+
+    // The rejected draft and the checker's raw reply are kept DM-only, right after the flag.
+    const notes = ofType(sink.events, 'ooc_note');
+    expect(notes).toEqual([
+      expect.objectContaining({
+        visibility: 'dm',
+        text: `Rejected DM draft (dm_controls_pc): ${BAD}`,
+      }),
+      expect.objectContaining({
+        visibility: 'dm',
+        text: `Checker reply: ${flaggedText(BAD_SENTENCE)}`,
+      }),
+    ]);
   });
 
   it('cuts the offending sentences on a second offense and records them', async () => {
@@ -124,10 +140,16 @@ describe('DM player-character control checker', () => {
       're_prompted',
       'trimmed',
     ]);
-    const [note] = ofType(sink.events, 'ooc_note');
-    expect(note).toMatchObject({ visibility: 'dm' });
-    expect(note!.text).toContain('Cut from DM narration (dm_controls_pc)');
-    expect(note!.text).toContain('These runes are old.');
+    const notes = ofType(sink.events, 'ooc_note');
+    expect(notes.every((n) => n.visibility === 'dm')).toBe(true);
+    // First offense: rejected draft, then the checker's raw reply.
+    expect(notes[0]!.text).toBe(`Rejected DM draft (dm_controls_pc): ${BAD}`);
+    expect(notes[1]!.text).toBe(`Checker reply: ${flaggedText(BAD_SENTENCE)}`);
+    // Second offense: the cut note, then the checker's raw reply again.
+    expect(notes[2]!.text).toContain('Cut from DM narration (dm_controls_pc)');
+    expect(notes[2]!.text).toContain('These runes are old.');
+    expect(notes[3]!.text).toBe(`Checker reply: ${flaggedText(BAD_SENTENCE)}`);
+    expect(notes).toHaveLength(4);
     expect(ofType(sink.events, 'hand_off')).toHaveLength(1);
   });
 
@@ -171,6 +193,7 @@ describe('DM player-character control checker', () => {
       'scene_change',
       'validator_flag',
       'ooc_note',
+      'ooc_note',
       'narration',
       'hand_off',
       'turn_end',
@@ -180,6 +203,13 @@ describe('DM player-character control checker', () => {
       resolution: 'trimmed',
       retries: 0,
     });
+    // No retry happens for engine-made prose, so only the cut note and the checker's raw reply
+    // are logged (no "Rejected DM draft" note, which is only for the DM's own re-prompted call).
+    const notes = ofType(sink.events, 'ooc_note');
+    expect(notes[0]!.text).toContain('Cut from DM narration (dm_controls_pc)');
+    expect(notes[1]!.text).toBe(
+      `Checker reply: ${flaggedText('Kira turns to the others, eyes bright.')}`
+    );
     expect(model.requests.filter((request) => request.seat === 'dm')).toHaveLength(1);
   });
 
@@ -215,9 +245,13 @@ describe('DM player-character control checker', () => {
 
     expect(ofType(sink.events, 'narration')).toHaveLength(2);
     expect(ofType(sink.events, 'ooc_note').map((e) => e.text)).toEqual([
+      // A thrown error has no reply text, so only the "unavailable" note is logged.
       'Checker unavailable (connection refused); narration not checked.',
+      // An unreadable-but-present reply also logs the checker's raw text, right after.
       'Checker reply unreadable; narration not checked.',
+      'Checker reply: Looks fine to me!',
     ]);
+    expect(ofType(sink.events, 'ooc_note').every((n) => n.visibility === 'dm')).toBe(true);
     expect(ofType(sink.events, 'session_paused')).toEqual([]);
   });
 
