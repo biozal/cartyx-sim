@@ -1,7 +1,8 @@
 import type { Combatant, Rng } from '@cartyx-sim/rules';
 import { clockInstruction, clockPhase } from './clock';
 import { SessionPausedError } from './errors';
-import { EVENT_SCHEMA_VERSION, type SimEvent } from './events';
+import { EVENT_SCHEMA_VERSION, type HandOffTarget, type SimEvent } from './events';
+import { extractHandOffProse } from './hand-off-prose';
 import {
   ModelResponse,
   type ChatMessage,
@@ -150,6 +151,58 @@ function dmCallsFromResponse(
   const at = handOff === -1 ? calls.length : handOff;
   const prose: ToolCall = { id, name: 'narrate', args: { text } };
   return { calls: [...calls.slice(0, at), prose, ...calls.slice(at)], proseCallId: id };
+}
+
+/**
+ * Strips any "Hand off to …" line written as DM narration out of this response's `narrate` calls
+ * (dropping a call left with no text), and, when a line matched and the response made no
+ * `hand_off` call of its own, appends one synthesized from the last matched line's target. Like
+ * the engine's own prose call, the synthesized call does not count toward the DM tool-call cap.
+ * Returns the (possibly unchanged) calls, that call's id when one was added, and a DM-only note
+ * describing what happened, or no note when nothing matched.
+ */
+function applyHandOffProse(
+  calls: readonly ToolCall[],
+  party: readonly { id: string; name: string }[],
+  step: number
+): { calls: ToolCall[]; proseHandOffCallId?: string; note?: string } {
+  const matchedLines: string[] = [];
+  let lastTarget: HandOffTarget | undefined;
+  const rewritten: ToolCall[] = [];
+  for (const call of calls) {
+    const text = call.name === 'narrate' ? call.args.text : undefined;
+    if (typeof text !== 'string') {
+      rewritten.push(call);
+      continue;
+    }
+    const extracted = extractHandOffProse(text, party);
+    if (extracted.lines.length === 0) {
+      rewritten.push(call);
+      continue;
+    }
+    matchedLines.push(...extracted.lines);
+    lastTarget = extracted.target;
+    if (extracted.text !== '') {
+      rewritten.push({ ...call, args: { ...call.args, text: extracted.text } });
+    }
+  }
+  if (matchedLines.length === 0) return { calls: rewritten };
+  const listed = matchedLines.join(' | ');
+  if (rewritten.some((call) => call.name === 'hand_off')) {
+    return {
+      calls: rewritten,
+      note: `Hand-off written in DM narration (${listed}); removed from the narration.`,
+    };
+  }
+  const proseHandOffCallId = `prose-hand-off-${step}`;
+  return {
+    calls: [
+      ...rewritten,
+      { id: proseHandOffCallId, name: 'hand_off', args: { target: lastTarget! } },
+    ],
+    proseHandOffCallId,
+    note: `Hand-off written in DM narration (${listed}); removed from the narration and treated as a hand_off call.`,
+  };
 }
 
 function collapseWhitespace(text: string): string {
@@ -403,6 +456,10 @@ export class Director {
     const pcNames = this.state.partyIds.map(
       (id) => ownEntry(this.state.combatants, id)?.name ?? id
     );
+    const partyForHandOff = this.state.partyIds.map((id) => ({
+      id,
+      name: ownEntry(this.state.combatants, id)?.name ?? id,
+    }));
     let mechanicsCalled = false;
     let rejections = 0;
     let ended = false;
@@ -422,7 +479,15 @@ export class Director {
 
     for (let step = 0; step < this.maxDmStepsPerBeat && !ended && !callLimitHit; step++) {
       const response = await this.callModel(seat, recorder.turnId, messages, DM_TOOL_SCHEMAS);
-      const { calls, proseCallId } = dmCallsFromResponse(response, `auto-narrate-${step}`);
+      const { calls: rawCalls, proseCallId } = dmCallsFromResponse(
+        response,
+        `auto-narrate-${step}`
+      );
+      const handOffProse = applyHandOffProse(rawCalls, partyForHandOff, step);
+      if (handOffProse.note) {
+        recorder.emit({ type: 'ooc_note', visibility: 'dm', text: handOffProse.note });
+      }
+      const calls = handOffProse.calls;
       // Prose that became a narrate call is not also kept as the assistant's text.
       messages.push({
         role: 'assistant',
@@ -440,7 +505,7 @@ export class Director {
       let skipRest = false;
       for (const call of calls) {
         // The engine's prose call does not count toward the cap, so it never crowds out a real call.
-        const counted = call.id !== proseCallId;
+        const counted = call.id !== proseCallId && call.id !== handOffProse.proseHandOffCallId;
         if (counted && !ended && !skipRest && toolCalls >= this.maxDmToolCallsPerBeat) {
           callLimitHit = true;
         }
