@@ -23,7 +23,7 @@ A throwaway probe sent three real narrations from session 001 to local models, e
 - **Thinking on** (GLM-4.7-Flash, Gemma 4 12B, Qwen3.6 35B): every model flagged exactly the invented dialogue and nothing in the two legitimate narrations. 7–34 s per check.
 - **Thinking off** (`reasoning_effort: "none"`): 0.1–4 s per check. The violation was caught every time, but some replies flagged "sentences" that were not in the narration (copied from the player's declaration), one borderline sentence was flagged, and one reply ran out of tokens.
 
-Verifying that each flagged sentence actually appears in the narration removes the invented-sentence false positives. The chosen design is the fast checker (thinking off) plus that verification, with one retry before any cut so a borderline flag costs at most a rewrite.
+Verifying that each flagged sentence actually appears in the narration removes the invented-sentence false positives. The design is the checker plus that verification, with one retry before any cut so a borderline flag costs at most a rewrite. The first draft chose thinking off for speed. Sessions are generated offline and the session clock counts spoken words, so run time does not matter (decided 2026-09-15): the recommended configuration leaves thinking on, which was the most precise in the probe, with generous timeouts.
 
 ## 4. Configuration
 
@@ -36,9 +36,8 @@ The checker is an optional seat in `campaign.json`, configured and called like a
     "endpoint": "ampere",
     "model": "glm-4.7-flash:latest",
     "temperature": 0.2,
-    "maxOutputTokens": 1500,
-    "timeoutMs": 20000,
-    "reasoningEffort": "none",
+    "maxOutputTokens": 4000,
+    "timeoutMs": 300000,
     "fallbacks": [{ "endpoint": "m5", "model": "qwen/qwen3.6-35b-a3b" }]
   },
   "players": {
@@ -78,7 +77,7 @@ Without `seats.checker`, the engine behaves exactly as it does today (fixtures, 
 
 ### 5.4 Docs
 
-`docs/running-a-session.md` gains a short checker section: what it does, the example seat, why `reasoningEffort: "none"`, and that it is optional.
+`docs/running-a-session.md` gains a short checker section: what it does, the example seat, why it leaves thinking on and how `reasoningEffort` turns it off, and that it is optional.
 
 ### 5.5 Out of scope
 
@@ -153,5 +152,5 @@ The checker never pauses a session. When it cannot give a verdict, the narration
 2. Play a 10-minute `avalon` session and read the transcript. Success means:
    - No narration writes a player character's dialogue.
    - Each `re_prompted` and `trimmed` flag points at a real violation.
-   - DM beats are no more than about 5 s slower on average than the 2026-09-14 run.
    - The session has no checker-caused pauses.
+3. Play a 10-minute session of the same party with no checker seat, and compare how often a player turn builds on words the DM wrote for a player character.

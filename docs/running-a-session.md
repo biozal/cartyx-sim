@@ -57,7 +57,7 @@ Then edit `campaigns/avalon/campaign.json`:
 
 The files are plain JSON: no comments and no trailing commas. A malformed file is reported with its path.
 
-Seat options: `temperature`, `maxOutputTokens`, `timeoutMs` (default 120000), `toolChoice` (`auto` or `required`), and `fallbacks` (tried in order when a call fails). A hung primary costs up to its `timeoutMs` on every call before its fallback is tried, since there is no sticky memory of a target that recently timed out.
+Seat options: `temperature`, `maxOutputTokens`, `timeoutMs` (default 120000), `toolChoice` (`auto` or `required`), and `fallbacks` (tried in order when a call fails). A hung primary costs up to its `timeoutMs` on every call before its fallback is tried, since there is no sticky memory of a target that recently timed out. Runs are generated offline, so a generous `timeoutMs` (for example `300000`) costs only run time, while a thinking turn that outlasts a short one fails and can pause the session.
 
 **Thinking models need room.** `maxOutputTokens` counts the model's thinking as well as its reply, and current Qwen, Gemma, and GLM models think for hundreds of tokens before calling a tool. A seat whose limit is too small stops mid-thought with no tool call, and the session pauses on that seat. Starting points that work: `2000` for players and `4000` for the DM. LM Studio does not enforce required tool calls, and Qwen often narrates in plain text after a tool result, so give a DM seat on LM Studio `"toolChoice": "auto"`. Keep players on `required`, so a garbled tool call is retried rather than spoken. `sim bench` uses a simple dice-roll trial, which does not show this; a short `sim run` does.
 
@@ -106,11 +106,10 @@ Add it under `seats` in `campaign.json`:
   "endpoint": "ampere",
   "model": "glm-4.7-flash:latest",
   "temperature": 0.2,
-  "maxOutputTokens": 1500,
-  "timeoutMs": 20000,
-  "reasoningEffort": "none",
+  "maxOutputTokens": 4000,
+  "timeoutMs": 300000,
   "fallbacks": [{ "endpoint": "macbook", "model": "<a fast model id>" }]
 }
 ```
 
-Set `timeoutMs` on this seat. Without it, the checker and each fallback wait up to the default 120 seconds, so a hung checker can hold up each narration for minutes before three failures in a row disable it. `reasoningEffort: "none"` turns thinking off, which keeps each check to a few seconds; any seat accepts `reasoningEffort` (`none`, `low`, `medium`, or `high`). `sim bench` checks the checker seat's reachability and speed but runs no tool-call trials for it, so its tool-calls column shows `-`.
+The example leaves thinking on. Sessions are generated offline and the session clock counts spoken words, not wall time, so a slower check only makes the run take longer, and thinking checkers flag more precisely. Thinking counts against `maxOutputTokens`, so give the checker room. `timeoutMs` applies to the checker and to each fallback, so with a 5-minute timeout a hung checker can hold up one narration for up to 10 minutes; three failures in a row disable checking for the rest of the run. To trade precision for speed, add `"reasoningEffort": "none"` to turn thinking off; any seat accepts `reasoningEffort` (`none`, `low`, `medium`, or `high`). `sim bench` checks the checker seat's reachability and speed but runs no tool-call trials for it, so its tool-calls column shows `-`.
