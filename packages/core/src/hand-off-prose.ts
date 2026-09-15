@@ -13,6 +13,11 @@ export interface HandOffProse {
 const DM_PREFIX = /^(?:([*_]{1,2})DM:\1|DM:)\s*/i;
 /** A whole line saying "hand off to <phrase>", with any of the accepted spellings of the verb. */
 const HAND_OFF_PREFIX = /^(?:hand[- ]?off|handing off) to /i;
+/**
+ * A whole line that is just one of the accepted spellings of the verb, with nothing else — no
+ * target phrase at all — optionally followed by one "." or "!" and nothing more.
+ */
+const BARE_HAND_OFF = /^(?:hand[- ]?off|handing off)[.!]?$/i;
 
 const PARTY_PHRASES = new Set(['party', 'group', 'players', 'everyone', 'all of you', 'you all']);
 const OPEN_PHRASES = new Set(['anyone', 'whoever wants to act', 'whoever']);
@@ -196,7 +201,7 @@ function parseNameSequence(
   for (let pos = 0; ;) {
     const entry = choiceEntry[pos]!;
     if (!ids.includes(entry.id)) ids.push(entry.id);
-    const sepEnd = choiceSepEnd[pos]!;
+    const sepEnd: number | null = choiceSepEnd[pos] ?? null;
     if (sepEnd === null) break;
     pos = sepEnd;
   }
@@ -224,15 +229,18 @@ function resolvePhraseTarget(
 }
 
 /**
- * The target of a decorated hand-off line, or null when it is not one: the line must read exactly
- * "hand off to <phrase>" (optional trailing "." or "!") with nothing else, and `<phrase>` must
- * resolve per `resolvePhraseTarget`. Trailing narration, an unresolved clause, or an unknown name
- * makes the whole line not a match, so it is left as ordinary narration.
+ * The target of a decorated hand-off line, or null when it is not one. A line that is just the
+ * verb on its own ("Hand off.", "Handing off!"), with no target phrase at all, always resolves to
+ * the party. Otherwise the line must read exactly "hand off to <phrase>" (optional trailing "." or
+ * "!") with nothing else, and `<phrase>` must resolve per `resolvePhraseTarget`. Trailing
+ * narration, an unresolved clause, or an unknown name makes the whole line not a match, so it is
+ * left as ordinary narration.
  */
 function matchHandOff(
   line: string,
   party: readonly { id: string; name: string }[]
 ): HandOffTarget | null {
+  if (BARE_HAND_OFF.test(line)) return { kind: 'party' };
   const prefix = HAND_OFF_PREFIX.exec(line);
   if (!prefix) return null;
   let phrase = line.slice(prefix[0].length);

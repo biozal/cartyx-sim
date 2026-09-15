@@ -311,4 +311,56 @@ describe('extractHandOffProse', () => {
     const result = extractHandOffProse(`Hand off to ${phrase}.`, party);
     expect(result.target).toEqual({ kind: 'pcs', ids: ['kira'] });
   });
+
+  describe('a bare hand-off line with no phrase', () => {
+    it('removes "**Hand off.**" after real narration and maps it to the party', () => {
+      const text = 'The creature steps forward.\n\n**Hand off.**';
+      const result = extractHandOffProse(text, party);
+      expect(result.text).toBe('The creature steps forward.');
+      expect(result.lines).toEqual(['**Hand off.**']);
+      expect(result.target).toEqual({ kind: 'party' });
+    });
+
+    it('removes "Hand off." on its own, leaving empty text', () => {
+      const result = extractHandOffProse('Hand off.', party);
+      expect(result.text).toBe('');
+      expect(result.target).toEqual({ kind: 'party' });
+    });
+
+    it('removes "Handing off!"', () => {
+      const result = extractHandOffProse('Handing off!', party);
+      expect(result.lines).toEqual(['Handing off!']);
+      expect(result.target).toEqual({ kind: 'party' });
+    });
+
+    it('removes "DM: Handoff."', () => {
+      const result = extractHandOffProse('DM: Handoff.', party);
+      expect(result.lines).toEqual(['DM: Handoff.']);
+      expect(result.target).toEqual({ kind: 'party' });
+    });
+
+    it('leaves "Hand off the torch." untouched', () => {
+      const text = 'Hand off the torch.';
+      const result = extractHandOffProse(text, party);
+      expect(result.lines).toEqual([]);
+      expect(result.target).toBeUndefined();
+      expect(result.text).toBe(text);
+    });
+
+    it('leaves "She hands off the lantern." untouched', () => {
+      const text = 'She hands off the lantern.';
+      const result = extractHandOffProse(text, party);
+      expect(result.lines).toEqual([]);
+      expect(result.target).toBeUndefined();
+      expect(result.text).toBe(text);
+    });
+
+    it('leaves "Hand off. Then the rain." untouched (extra text on the line)', () => {
+      const text = 'Hand off. Then the rain.';
+      const result = extractHandOffProse(text, party);
+      expect(result.lines).toEqual([]);
+      expect(result.target).toBeUndefined();
+      expect(result.text).toBe(text);
+    });
+  });
 });

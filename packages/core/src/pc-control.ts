@@ -52,6 +52,11 @@ const THINK_BLOCK = /<think>[\s\S]*?<\/think>/gi;
 // degenerate reply is read as unreadable quickly instead of exhaustively.
 const MAX_PARSE_ATTEMPTS = 2000;
 
+// Each attempt still slices and parses a candidate up to the length of the whole reply, so
+// MAX_PARSE_ATTEMPTS alone bounds worst-case work at about MAX_PARSE_ATTEMPTS x reply length; this
+// caps the total number of characters handed to JSON.parse across all attempts instead.
+const MAX_PARSE_CHARS = 20_000_000;
+
 const WHITESPACE = /\s/;
 
 /** The index of the first non-whitespace character in `text` at or after `from`. */
@@ -100,13 +105,17 @@ export function parseCheckerReply(text: string): PcControlFinding[] | null {
     closeBraces.push(end);
   }
   let attempts = 0;
+  let charsParsed = 0;
   for (let start = reply.indexOf('{'); start !== -1; start = reply.indexOf('{', start + 1)) {
     if (!canOpenJsonObject(reply, start)) continue;
     for (let i = closeBraces.length - 1; i >= 0; i--) {
       const end = closeBraces[i]!;
       if (end <= start) break; // closeBraces is ascending, so nothing before this is > start either
       if (attempts >= MAX_PARSE_ATTEMPTS) return null;
+      const length = end + 1 - start;
+      if (charsParsed + length > MAX_PARSE_CHARS) return null;
       attempts++;
+      charsParsed += length;
       const found = readCandidate(reply.slice(start, end + 1));
       if (found) return found;
     }

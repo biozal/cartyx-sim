@@ -121,6 +121,22 @@ describe('a "Hand off to …" line written in DM narration', () => {
     expect(ofType(sink.events, 'hand_off')).toMatchObject([{ target: { kind: 'party' } }]);
   });
 
+  it('is removed and treated as a hand_off call for a bare "**Hand off.**" line', async () => {
+    const { director, sink } = setup({
+      dm: [{ text: 'The creature steps forward.\n\n**Hand off.**', toolCalls: [] }],
+    });
+    await playDmBeat(director);
+
+    expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual([
+      'The creature steps forward.',
+    ]);
+    expect(ofType(sink.events, 'hand_off')).toMatchObject([{ target: { kind: 'party' } }]);
+    const notes = ofType(sink.events, 'ooc_note');
+    expect(notes.map((n) => n.text)).toEqual([
+      'Hand-off written in DM narration (**Hand off.**); removed from the narration and treated as a hand_off call.',
+    ]);
+  });
+
   it('runs the synthesized call exempt from the tool-call cap and logs it as treated', async () => {
     const { director, sink } = setup(
       {

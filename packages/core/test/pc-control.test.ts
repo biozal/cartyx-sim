@@ -201,6 +201,32 @@ describe('parseCheckerReply', () => {
     const reply = valid + '}'.repeat(2001);
     expect(parseCheckerReply(reply)).toBeNull();
   });
+
+  it('returns null in well under a second for a huge valid-prefix array followed by many stray braces', () => {
+    // A single "{" that can open JSON (next character is `"`), a several-hundred-thousand-character
+    // valid JSON-array prefix (never closed, so no attempt against it ever succeeds), then 3,000
+    // stray "}" characters. MAX_PARSE_ATTEMPTS alone still allows up to 2,000 attempts here, each
+    // one slicing and parsing a candidate as long as the whole reply, so bounding by attempt count
+    // alone leaves this ~2,000 x reply-length worth of work; MAX_PARSE_CHARS must cut it off well
+    // before that.
+    const reply = '{"violations": [' + '"x",'.repeat(150000) + '"x"' + '}'.repeat(3000);
+    const start = performance.now();
+    const result = parseCheckerReply(reply);
+    const elapsed = performance.now() - start;
+    expect(result).toBeNull();
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  it('still fully parses a realistic ~10,000-character reply of many findings', () => {
+    const findings = Array.from({ length: 90 }, (_, i) => ({
+      pc: 'Kira Vale',
+      sentence: `Kira does thing number ${i} in the story right now.`,
+      why: 'undeclared dialogue',
+    }));
+    const reply = JSON.stringify({ violations: findings });
+    expect(reply.length).toBeGreaterThan(9000);
+    expect(parseCheckerReply(reply)).toEqual(findings);
+  });
 });
 
 describe('verifyFindings', () => {
