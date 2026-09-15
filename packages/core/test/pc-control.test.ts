@@ -196,7 +196,7 @@ describe('parseCheckerReply', () => {
     // "}" from last to first, this one start alone needs 2,001 failed attempts (each one spanning
     // into the trailing junk, so parsing the leading valid object but then finding trailing
     // content) before its 2,002nd attempt — the object's own true closing "}" — would succeed.
-    // With MAX_PARSE_ATTEMPTS at 2,000, the budget runs out one attempt short of ever trying it.
+    // With MAX_PARSE_ATTEMPTS at 2,000, the budget runs out two attempts short of ever trying it.
     const valid = '{"violations": [{"pc": "Kira Vale", "sentence": "Kira nods.", "why": "x"}]}';
     const reply = valid + '}'.repeat(2001);
     expect(parseCheckerReply(reply)).toBeNull();

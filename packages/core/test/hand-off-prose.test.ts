@@ -292,4 +292,23 @@ describe('extractHandOffProse', () => {
       expect(result.text).toBe(text);
     });
   });
+
+  it('leaves a hand-off line of thousands of repeated names untouched, without throwing', () => {
+    // Well over the 1,000-character cap, and (before that cap) also well over the old recursive
+    // parser's stack depth for a resolving or a failing phrase alike.
+    const text = `Hand off to ${'Kira, '.repeat(10000)}Kira.`;
+    expect(() => extractHandOffProse(text, party)).not.toThrow();
+    const result = extractHandOffProse(text, party);
+    expect(result.lines).toEqual([]);
+    expect(result.target).toBeUndefined();
+    expect(result.text).toBe(text);
+  });
+
+  it('resolves a name repeated just under the phrase-length cap without recursing', () => {
+    const phrase = 'Kira and '.repeat(110) + 'Kira';
+    expect(phrase.length).toBeLessThan(1000);
+    expect(phrase.length).toBeGreaterThan(900);
+    const result = extractHandOffProse(`Hand off to ${phrase}.`, party);
+    expect(result.target).toEqual({ kind: 'pcs', ids: ['kira'] });
+  });
 });

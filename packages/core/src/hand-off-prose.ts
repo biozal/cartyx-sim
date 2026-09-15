@@ -130,65 +130,77 @@ function separatorEnds(phrase: string, pos: number): number[] {
 }
 
 /**
- * The ids named by the whole normalized phrase from `pos` onward, matching the grammar
- * `NAME (SEP NAME)*`, in the order they were named (duplicates included; the caller dedupes), or
- * null when no reading of the rest of the phrase resolves. At each position, candidate names are
- * tried longest-first (full names before first names), and for each, every possible separator
- * reading is tried before moving on — backtracking to a shorter name or a shorter separator when a
- * greedy choice leads to a dead end further on (a full name that swallows another PC's name, or a
- * ", and" that swallows the start of a PC named "And Roe"). `memo` caches the result for a
- * position once known, so although names and separators may need retrying, each position in the
- * phrase is ever resolved once: the parse stays O(phrase length × party size).
+ * A hand-off phrase this long is not really a list of names (more likely a runaway reply or
+ * repeated text); rejecting it outright, before the name search runs at all, keeps that search's
+ * already-bounded cost from ever being spent on a pathological line.
  */
-function matchNamesFrom(
-  phrase: string,
-  pos: number,
-  candidates: readonly NameEntry[],
-  memo: Map<number, string[] | null>
-): string[] | null {
-  if (pos === phrase.length) return [];
-  const cached = memo.get(pos);
-  if (cached !== undefined) return cached;
-  let result: string[] | null = null;
-  search: for (const entry of candidates) {
-    const end = pos + entry.text.length;
-    if (end > phrase.length || phrase.slice(pos, end) !== entry.text) continue;
-    if (isWordChar(phrase[end])) continue;
-    if (end === phrase.length) {
-      result = [entry.id];
-      break;
-    }
-    for (const sepEnd of separatorEnds(phrase, end)) {
-      if (sepEnd === phrase.length) continue; // a trailing separator with nothing named after it
-      const rest = matchNamesFrom(phrase, sepEnd, candidates, memo);
-      if (rest !== null) {
-        result = [entry.id, ...rest];
-        break search;
-      }
-    }
-  }
-  memo.set(pos, result);
-  return result;
-}
+const MAX_PHRASE_LENGTH = 1000;
 
 /**
  * The ids named by a whole normalized phrase matching the grammar `NAME (SEP NAME)*`, in the
- * order they were named, without duplicates. Returns null when no reading of the phrase resolves
- * it entirely: an unresolved name, a leading or trailing separator, an empty part, or text left
- * over after the last name.
+ * order they were named, without duplicates, or null when no reading of the phrase resolves it
+ * entirely: an unresolved name, a leading or trailing separator, an empty part, or text left over
+ * after the last name.
+ *
+ * Resolved back to front, without recursion: for each position (from the end of the phrase down
+ * to 0), `canParseFrom` records whether some reading of the grammar matches the rest of the phrase
+ * from there, and `choice` records which candidate name (and, unless it reached the end of the
+ * phrase outright, which separator reading) made that true. Candidate names are tried
+ * longest-first (full names before first names) and, for each, every separator reading is tried
+ * before moving to the next candidate, so the first candidate whose chosen separator's `sepEnd`
+ * already resolves (per `canParseFrom`, always already known since `sepEnd > pos`) wins — the same
+ * greedy-with-fallback priority a recursive backtracking search would give, but computed by a
+ * single pass over positions instead of a call per name, so it cannot overflow the stack on a long
+ * line. A final forward walk from position 0, following `choice`, reads off the ids. O(phrase
+ * length × party size): each position tries at most a fixed number of candidates and separator
+ * readings.
  */
 function parseNameSequence(
   phrase: string,
   party: readonly { id: string; name: string }[]
 ): string[] | null {
+  if (phrase.length > MAX_PHRASE_LENGTH) return null;
   const { fullNames, firstNames } = nameEntries(party);
-  const ids = matchNamesFrom(phrase, 0, [...fullNames, ...firstNames], new Map());
-  if (!ids) return null;
-  const deduped: string[] = [];
-  for (const id of ids) {
-    if (!deduped.includes(id)) deduped.push(id);
+  const candidates = [...fullNames, ...firstNames];
+  const n = phrase.length;
+  const canParseFrom = new Array<boolean>(n + 1).fill(false);
+  const choiceEntry = new Array<NameEntry | null>(n + 1).fill(null);
+  // The position right after the separator following the chosen name, or null when that name's
+  // own end is the end of the phrase (nothing more to read).
+  const choiceSepEnd = new Array<number | null>(n + 1).fill(null);
+
+  for (let pos = n - 1; pos >= 0; pos--) {
+    for (const entry of candidates) {
+      const end = pos + entry.text.length;
+      if (end > n || phrase.slice(pos, end) !== entry.text) continue;
+      if (isWordChar(phrase[end])) continue;
+      if (end === n) {
+        canParseFrom[pos] = true;
+        choiceEntry[pos] = entry;
+        break;
+      }
+      const sepEnd = separatorEnds(phrase, end).find(
+        (candidate) => candidate < n && canParseFrom[candidate]
+      );
+      if (sepEnd !== undefined) {
+        canParseFrom[pos] = true;
+        choiceEntry[pos] = entry;
+        choiceSepEnd[pos] = sepEnd;
+        break;
+      }
+    }
   }
-  return deduped;
+
+  if (!canParseFrom[0]) return null;
+  const ids: string[] = [];
+  for (let pos = 0; ;) {
+    const entry = choiceEntry[pos]!;
+    if (!ids.includes(entry.id)) ids.push(entry.id);
+    const sepEnd = choiceSepEnd[pos]!;
+    if (sepEnd === null) break;
+    pos = sepEnd;
+  }
+  return ids;
 }
 
 /**
