@@ -97,7 +97,7 @@ Ctrl-C releases the session lock before exiting. If a run was killed without rel
 
 Models acting as DM tend to write dialogue, thoughts, and actions for the player characters. An optional checker seat reviews every DM narration against what the players declared since the DM last spoke. The DM may describe a character carrying out the action its player declared; it may not write that character's dialogue, thoughts, feelings, or choices, or have them do anything undeclared.
 
-When the checker finds sentences that cross that line, the DM is asked to rewrite once; if it does it again in the same turn, just those sentences are cut. Each case is logged as a `dm_controls_pc` flag (`re_prompted` or `trimmed`), and cut sentences are listed in a DM-only note. If the checker is down or its reply is unreadable, the narration goes through unchecked with a note; after 3 failures in a row, checking stops for the rest of the run. The checker never pauses a session.
+When the checker finds sentences that cross that line, the DM is asked to rewrite once; if it does it again in the same turn, just those sentences are cut. Prose the engine made into narration (text the DM wrote alongside its tool calls rather than through `narrate`) is cut right away, without a retry. Each case is logged as a `dm_controls_pc` flag (`re_prompted` or `trimmed`), and cut sentences are listed in a DM-only note. If the checker is down or its reply is unreadable, the narration goes through unchecked with a note; after 3 failures in a row, checking stops for the rest of the run. The checker never pauses a session.
 
 Add it under `seats` in `campaign.json`:
 
@@ -113,4 +113,4 @@ Add it under `seats` in `campaign.json`:
 }
 ```
 
-`reasoningEffort: "none"` turns thinking off, which keeps each check to a few seconds; any seat accepts `reasoningEffort` (`none`, `low`, `medium`, or `high`). `sim bench` checks the checker seat's reachability and speed but runs no tool-call trials for it, so its tool-calls column shows `-`.
+Set `timeoutMs` on this seat. Without it, the checker and each fallback wait up to the default 120 seconds, so a hung checker can hold up each narration for minutes before three failures in a row disable it. `reasoningEffort: "none"` turns thinking off, which keeps each check to a few seconds; any seat accepts `reasoningEffort` (`none`, `low`, `medium`, or `high`). `sim bench` checks the checker seat's reachability and speed but runs no tool-call trials for it, so its tool-calls column shows `-`.

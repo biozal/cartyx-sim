@@ -1,7 +1,7 @@
 # DM player-character control checker — Design
 
 **Date:** 2026-09-14
-**Status:** Approved in brainstorming; awaiting spec review
+**Status:** Implemented on `feat/dm-pc-control-checker`; live verification pending
 **Related:** v1 design §5.6 Validators (`2026-09-13-cartyx-sim-v1-design.md`), roadmap "Heuristic validators" deviation and Plan 2C checker model (`../plans/2026-09-13-cartyx-sim-v1-roadmap.md`)
 
 ## 1. Problem
@@ -53,7 +53,7 @@ Without `seats.checker`, the engine behaves exactly as it does today (fixtures, 
 
 ### 5.1 `packages/models`
 
-- `SeatConfig` gains `reasoningEffort?: 'none' | 'low' | 'medium' | 'high'`. `OpenAICompatibleModelClient` passes it as `providerOptions: { 'cartyx-sim': { reasoningEffort } }`, which `@ai-sdk/openai-compatible` sends as `reasoning_effort`. Unset means the field is not sent. This also resolves the backlog item for a per-seat reasoning setting (which makes Muse Glimmer usable).
+- `SeatConfig` gains `reasoningEffort?: 'none' | 'low' | 'medium' | 'high'`. `OpenAICompatibleModelClient` passes it as `providerOptions: { cartyxSim: { reasoningEffort } }`, keyed by the camelCase provider name (the provider is `cartyx-sim`), which `@ai-sdk/openai-compatible` sends as `reasoning_effort`. Unset means the field is not sent. This also resolves the backlog item for a per-seat reasoning setting (which makes Muse Glimmer usable).
 - A request with no tools already sends no `tools` or `tool_choice`; a test pins that.
 
 ### 5.2 `packages/core`
@@ -61,9 +61,9 @@ Without `seats.checker`, the engine behaves exactly as it does today (fixtures, 
 - **`pc-control.ts`** (new, pure):
   - `declarationsSinceDm(history, state)` (state supplies character names): the player characters' `dialogue`, `action`, and `pass` events after the DM's most recent `turn_end`, rendered as lines (`Kira Vale says: "…"`, `Kira Vale attempts: …`, `Kira Vale holds back.`). In combat this includes the declared action the DM is resolving.
   - `PcControlFinding`: `{ pc: string; sentence: string; why: string }`, with a zod schema for the checker reply `{ violations: PcControlFinding[] }`.
-  - `parseCheckerReply(text)`: reads from the first "{" to the last "}" (tolerating code fences and surrounding text) and validates it. Returns the findings, or `null` when the reply is unreadable.
-  - `verifyFindings(narration, findings)`: keeps only findings whose sentence appears in the narration, comparing with whitespace collapsed and straight/curly quotes treated alike.
-  - `cutSentences(narration, findings)`: removes every narration sentence that contains a verified finding's text or is contained in it (both compared with whitespace collapsed and quotes normalized), so a finding spanning several sentences removes all of them and a finding that is one clause removes its whole sentence. Returns the remainder with paragraph breaks kept, or an empty string when nothing remains.
+  - `parseCheckerReply(text)`: ignores closed `<think>…</think>` blocks (case-insensitive), then tries each "{" in order against each later "}" from last to first and returns the first candidate that parses as JSON of the reply shape, so code fences, surrounding text, stray braces, and a second object are tolerated. Returns the findings, or `null` when no candidate is readable.
+  - `verifyFindings(narration, findings)`: keeps only findings whose sentence appears in the narration. Both are normalized alike: whitespace collapsed, straight/curly quotes treated alike, "…" read as "...", em and en dashes read as " - ", lowercased, and quote marks around the finding ignored. An occurrence counts only at word boundaries (it may not start or end inside a word). A finding is kept only if it occurs and is at least three words long or covers a whole narration sentence (quote marks aside), so a bare name or a short fragment such as "she nods" is dropped.
+  - `cutSentences(narration, findings)`: removes the narration sentences a finding's text overlaps, wherever that full text occurs at word boundaries, using the same matching and keep rule as `verifyFindings` (so a finding that would be dropped cuts nothing). A finding spanning several sentences removes all of them, a finding that is one clause removes its whole sentence, and a sentence merely contained in a finding, such as an NPC's repeated `"Yes."`, stays unless the finding's occurrence overlaps it. Returns the remainder with paragraph breaks kept, or an empty string when nothing remains.
 - **`prompts.ts`:** `PromptBuilder` gains `pcControlCheck({ party, declarations, narration })`, and `basicPrompts` implements it with the rule in §2 and the reply format. `DM_SYSTEM` gains: "Narrate the world and the results of what players declared. Never write a player character's dialogue, thoughts, feelings, or choices."
 - **`events.ts`:** the `validator_flag` resolution enum gains `trimmed`.
 - **`director.ts`:**
@@ -91,7 +91,7 @@ Without `seats.checker`, the engine behaves exactly as it does today (fixtures, 
 
 Applies both to the DM's own `narrate` calls and to prose the engine turns into a narrate call.
 
-1. **Existing checks first.** The duplicate-narration check and `validateDmText` run as today. If either rejects the call, the checker is not called.
+1. **Existing checks first.** The duplicate-narration check and `validateDmText` run as today. If either rejects the call (asks the DM to retry, or drops engine-made prose), the checker is not called. A narration `validateDmText` flags after its retries are used up is accepted with a flag and still goes through the checker; its `accepted_with_flag` flag is emitted only if the narration is then executed.
 2. **Check.** If a checker seat is configured and not disabled for this run, send `pcControlCheck` with the party names, `declarationsSinceDm(history, state)`, and the narration text.
 3. **Verify.** Parse the reply and keep verified findings. With none, the narration proceeds unchanged.
 4. **First offense in the beat (the DM's own call only) → retry.** Nothing is narrated. The tool result names each verified sentence, its character, and the reason, and asks the DM to rewrite without them and call `narrate` again. Emit `validator_flag` (`seat: dm`, `rule: dm_controls_pc`, `resolution: re_prompted`). Later calls in the same response are not executed ("an earlier call was rejected"), as with other rejections. Each beat allows one such retry.

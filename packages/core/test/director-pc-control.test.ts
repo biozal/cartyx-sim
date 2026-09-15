@@ -308,7 +308,52 @@ describe('DM player-character control checker', () => {
     });
     await playDmBeat(director);
 
-    expect(model.requests.filter((request) => request.seat === 'checker')).toHaveLength(1);
+    const checks = model.requests.filter((request) => request.seat === 'checker');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]!.messages[1]!.content).toMatch(/DM narration to check:\nThe door creaks\.$/);
+  });
+
+  it('checks a narration the rule check accepted with a flag once retries are used up', async () => {
+    const { director, model, sink } = setup(
+      {
+        dm: [respond(narrate('Kira decides to open the door.'), handOffTomas())],
+        checker: [CLEAN],
+      },
+      { maxValidatorRetries: 0 }
+    );
+    await playDmBeat(director);
+
+    const checks = model.requests.filter((request) => request.seat === 'checker');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]!.messages[1]!.content).toMatch(
+      /DM narration to check:\nKira decides to open the door\.$/
+    );
+    expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual([
+      'Kira decides to open the door.',
+    ]);
+    expect(ofType(sink.events, 'validator_flag')).toMatchObject([
+      { seat: 'dm', rule: 'dm_controls_pc', resolution: 'accepted_with_flag' },
+    ]);
+  });
+
+  it('asks for a rewrite when the checker flags a narration the rule check accepted with a flag', async () => {
+    const { director, model, sink } = setup(
+      {
+        dm: [
+          respond(narrate('Kira decides to open the door.')),
+          respond(narrate('The door creaks.'), handOffTomas()),
+        ],
+        checker: [flagged('Kira decides to open the door.'), CLEAN],
+      },
+      { maxValidatorRetries: 0 }
+    );
+    await playDmBeat(director);
+
+    expect(model.requests.filter((request) => request.seat === 'checker')).toHaveLength(2);
+    expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual(['The door creaks.']);
+    expect(ofType(sink.events, 'validator_flag')).toMatchObject([
+      { seat: 'dm', rule: 'dm_controls_pc', resolution: 're_prompted', retries: 1 },
+    ]);
   });
 
   it('sends the checker what players declared since the DM last spoke', async () => {

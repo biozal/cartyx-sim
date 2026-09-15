@@ -1,3 +1,4 @@
+import { makeCombatant } from '@cartyx-sim/rules/testing';
 import { describe, expect, it } from 'vitest';
 import {
   cutSentences,
@@ -69,6 +70,36 @@ describe('declarationsSinceDm', () => {
     });
     expect(declarationsSinceDm(history, state)).toEqual(['Kira Vale attempts: study the runes']);
   });
+
+  it('includes the combat declaration the DM is resolving', () => {
+    const goblin = makeCombatant({ id: 'goblin-1', name: 'Goblin', kind: 'monster' });
+    const { history, state } = historyWith((recorder) => {
+      recorder.emit({ type: 'combatant_added', combatant: goblin });
+      recorder.emit({
+        type: 'combat_start',
+        order: [
+          { combatantId: 'goblin-1', roll: 20, dexMod: 0, total: 20 },
+          { combatantId: 'kira', roll: 10, dexMod: 2, total: 12 },
+          { combatantId: 'tomas', roll: 5, dexMod: 1, total: 6 },
+        ],
+      });
+      recorder.emit({
+        type: 'narration',
+        speaker: 'dm',
+        text: 'The goblin lunges.',
+        emotion: 'neutral',
+      });
+      recorder.emit({ type: 'turn_end', actor: 'dm' });
+      recorder.emit({ type: 'combat_turn', round: 1, turnIndex: 1, combatantId: 'kira' });
+      recorder.emit({ type: 'action', actor: 'kira', intent: 'swing my hammer at the goblin' });
+      recorder.emit({ type: 'turn_end', actor: 'kira' });
+    });
+
+    expect(state.combat).not.toBeNull();
+    expect(declarationsSinceDm(history, state)).toEqual([
+      'Kira Vale attempts: swing my hammer at the goblin',
+    ]);
+  });
 });
 
 describe('parseCheckerReply', () => {
@@ -93,6 +124,26 @@ describe('parseCheckerReply', () => {
     ).toEqual([{ pc: 'Kira Vale', sentence: 'Kira nods.', why: '' }]);
   });
 
+  it('reads a reply after a leaked thinking block that holds braces', () => {
+    expect(
+      parseCheckerReply(
+        '<THINK>\nThe format is {"violations": [...]}, so {maybe}.\n</think>\n{"violations": []}'
+      )
+    ).toEqual([]);
+  });
+
+  it('reads a reply followed by text with a brace in it', () => {
+    expect(parseCheckerReply(`${reply}\nI followed the format, which was {violations}.`)).toEqual([
+      { pc: 'Kira Vale', sentence: 'Kira nods.', why: 'undeclared' },
+    ]);
+  });
+
+  it('reads the first valid object when the reply holds two', () => {
+    expect(parseCheckerReply(`{"note": "checking"}\n${reply}\n{"violations": []}`)).toEqual([
+      { pc: 'Kira Vale', sentence: 'Kira nods.', why: 'undeclared' },
+    ]);
+  });
+
   it('returns null for the wrong shape, cut-off JSON, or no JSON', () => {
     expect(parseCheckerReply('{"violations": "none"}')).toBeNull();
     expect(parseCheckerReply('{"violations": [{"pc": "Kira Vale", "sentence": "Kira')).toBeNull();
@@ -113,6 +164,34 @@ describe('verifyFindings', () => {
 
   it('drops findings that are not in the narration', () => {
     expect(verifyFindings(narration, [finding('I grip the stone a little harder.')])).toEqual([]);
+  });
+
+  it('matches across ellipsis and dash styles', () => {
+    const styled = 'Kira hesitates\u2026 then speaks \u2014 softly \u2013 to the others.';
+    expect(
+      verifyFindings(styled, [finding('Kira hesitates... then speaks - softly - to the others.')])
+    ).toHaveLength(1);
+    expect(
+      verifyFindings('Kira hesitates... then speaks - softly.', [
+        finding('Kira hesitates\u2026 then speaks \u2014 softly.'),
+      ])
+    ).toHaveLength(1);
+  });
+
+  it('keeps a short finding that is a whole sentence', () => {
+    expect(verifyFindings('The door opens. Kira nods.', [finding('Kira nods.')])).toHaveLength(1);
+  });
+
+  it('drops a name or short fragment that is not a whole sentence', () => {
+    const runes =
+      "Kira presses her palm to the stone. The runes flare under Kira's hand. The hall is silent.";
+    expect(verifyFindings(runes, [finding('Kira')])).toEqual([]);
+    const elder = 'The elder speaks. She nods slowly toward the door. The fire crackles.';
+    expect(verifyFindings(elder, [finding('she nods')])).toEqual([]);
+  });
+
+  it('does not match inside a longer word', () => {
+    expect(verifyFindings('The door opens. Kira nods.', [finding('nod')])).toEqual([]);
   });
 });
 
@@ -144,6 +223,31 @@ describe('cutSentences', () => {
       finding('“These runes are old. They seem to be a ward.”'),
     ]);
     expect(cut).toBe('The runes pulse. Kira turns to the others. Tomas nods.');
+  });
+
+  it('cuts nothing for a name or short fragment', () => {
+    const runes =
+      "Kira presses her palm to the stone. The runes flare under Kira's hand. The hall is silent.";
+    expect(cutSentences(runes, [finding('Kira')])).toBe(runes);
+    const elder = 'The elder speaks. She nods slowly toward the door. The fire crackles.';
+    expect(cutSentences(elder, [finding('she nods')])).toBe(elder);
+    expect(cutSentences('The door opens. Kira nods.', [finding('nod')])).toBe(
+      'The door opens. Kira nods.'
+    );
+  });
+
+  it("cuts only the PC's line when an NPC says the same words", () => {
+    expect(
+      cutSentences('"Run!" the guard shouts. Kira says "Run!"', [finding('Kira says "Run!"')])
+    ).toBe('"Run!" the guard shouts.');
+  });
+
+  it('keeps an NPC quote that repeats inside a flagged sentence', () => {
+    expect(
+      cutSentences('The old man grins. "Yes." Kira smiles and says, "Yes."', [
+        finding('Kira smiles and says, "Yes."'),
+      ])
+    ).toBe('The old man grins. "Yes."');
   });
 });
 

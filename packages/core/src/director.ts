@@ -492,7 +492,7 @@ export class Director {
         }
         let args = prepared.args;
         let removed = '';
-        if (call.name === 'narrate' && text && !violation) {
+        if (call.name === 'narrate' && text) {
           const findings = await this.checkPcControl(recorder, text);
           if (findings.length > 0) {
             const listed = describeFindings(findings);
