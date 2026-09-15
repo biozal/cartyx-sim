@@ -11,6 +11,14 @@ import {
   type ToolCall,
   type ToolSchema,
 } from './model';
+import {
+  cutSentences,
+  declarationsSinceDm,
+  describeFindings,
+  parseCheckerReply,
+  verifyFindings,
+  type PcControlFinding,
+} from './pc-control';
 import type { PromptBuilder } from './prompts';
 import { TurnRecorder } from './recorder';
 import type { EventSink } from './sink';
@@ -37,8 +45,8 @@ export interface DirectorConfig {
   targetMinutes: number;
   loreCommit: string;
   party: Combatant[];
-  /** Seat ids for the DM and for each PC id. */
-  seats: { dm: string; players: Record<string, string> };
+  /** Seat ids for the DM, each PC id, and optionally the checker that reviews DM narration. */
+  seats: { dm: string; players: Record<string, string>; checker?: string };
   /** Minimum lore search score treated as relevant. Default 0.35. */
   loreThreshold?: number;
   /** Model calls allowed in one DM beat before hand_off is forced. Default 12. */
@@ -60,6 +68,8 @@ export interface DirectorConfig {
   maxDmToolCallsPerBeat?: number;
   /** Waits between retries of a failing model call; the session pauses after the last. */
   retryDelaysMs?: number[];
+  /** Consecutive checker failures before narration stops being checked for the run. Default 3. */
+  maxCheckerFailures?: number;
 }
 
 export interface DirectorDeps {
@@ -162,6 +172,11 @@ export class Director {
   private readonly idleHandOffLimit: number;
   private readonly maxDmToolCallsPerBeat: number;
   private readonly retryDelaysMs: number[];
+  private readonly maxCheckerFailures: number;
+  /** Consecutive checker calls that gave no verdict; reset by a successful check. */
+  private checkerFailures = 0;
+  /** Set once the checker has failed too often; lasts for this run only. */
+  private checkerDisabled = false;
   private readonly now: () => Date;
   private readonly newTurnId: () => string;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -182,6 +197,7 @@ export class Director {
     this.idleHandOffLimit = config.idleHandOffLimit ?? 3;
     this.maxDmToolCallsPerBeat = config.maxDmToolCallsPerBeat ?? 24;
     this.retryDelaysMs = config.retryDelaysMs ?? [1000, 4000, 15000];
+    this.maxCheckerFailures = config.maxCheckerFailures ?? 3;
     this.now = deps.now ?? (() => new Date());
     this.newTurnId = deps.newTurnId ?? (() => crypto.randomUUID());
     this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -388,6 +404,17 @@ export class Director {
     let ended = false;
     let toolCalls = 0;
     let callLimitHit = false;
+    let pcControlRetried = false;
+    // Shared by the duplicate-narration check and a trimmed narration that repeats an earlier one.
+    const rejectDuplicateNarration = (call: ToolCall) => {
+      messages.push(
+        toolMessage(
+          call,
+          'Not narrated again: you already narrated that this turn. Continue with other tools, or call hand_off.'
+        )
+      );
+      this.flag(recorder, seat, 'duplicate_narration', rejections, 're_prompted');
+    };
 
     for (let step = 0; step < this.maxDmStepsPerBeat && !ended && !callLimitHit; step++) {
       const response = await this.callModel(seat, recorder.turnId, messages, DM_TOOL_SCHEMAS);
@@ -432,13 +459,7 @@ export class Director {
         }
         const text = prepared.def.narrativeText?.(prepared.args);
         if (call.name === 'narrate' && text && narratedThisBeat(recorder, text)) {
-          messages.push(
-            toolMessage(
-              call,
-              'Not narrated again: you already narrated that this turn. Continue with other tools, or call hand_off.'
-            )
-          );
-          this.flag(recorder, seat, 'duplicate_narration', rejections, 're_prompted');
+          rejectDuplicateNarration(call);
           continue;
         }
         const violation = text
@@ -469,7 +490,52 @@ export class Director {
           skipRest = true;
           continue;
         }
-        const execution = await runPreparedCall(prepared.def, prepared.args, context);
+        let args = prepared.args;
+        let removed = '';
+        if (call.name === 'narrate' && text && !violation) {
+          const findings = await this.checkPcControl(recorder, text);
+          if (findings.length > 0) {
+            const listed = describeFindings(findings);
+            if (call.id !== proseCallId && !pcControlRetried) {
+              pcControlRetried = true;
+              messages.push(
+                toolMessage(
+                  call,
+                  `Rejected (dm_controls_pc): these sentences play player characters: ${listed}. Rewrite the narration without them and call narrate again.`
+                )
+              );
+              this.flag(recorder, seat, 'dm_controls_pc', pcControlRetried ? 1 : 0, 're_prompted');
+              skipRest = true;
+              continue;
+            }
+            // A second offense this beat, or prose the engine narrated: cut only those sentences.
+            const kept = cutSentences(text, findings);
+            if (kept && narratedThisBeat(recorder, kept)) {
+              // The cut narration is identical to one already narrated this beat: treat it as a
+              // duplicate instead of narrating (and flagging trimmed) a second time.
+              rejectDuplicateNarration(call);
+              continue;
+            }
+            this.flag(recorder, seat, 'dm_controls_pc', pcControlRetried ? 1 : 0, 'trimmed');
+            recorder.emit({
+              type: 'ooc_note',
+              visibility: 'dm',
+              text: `Cut from DM narration (dm_controls_pc): ${listed}`,
+            });
+            if (!kept) {
+              messages.push(
+                toolMessage(
+                  call,
+                  `Not narrated: every sentence played a player character. ${listed}`
+                )
+              );
+              continue;
+            }
+            args = { ...(prepared.args as Record<string, unknown>), text: kept };
+            removed = ` Removed sentences that played player characters: ${listed}`;
+          }
+        }
+        const execution = await runPreparedCall(prepared.def, args, context);
         if (!execution.ok) {
           messages.push(toolMessage(call, `Error: ${execution.error}`));
           this.flag(recorder, seat, 'tool_error', rejections, 're_prompted');
@@ -480,7 +546,7 @@ export class Director {
         if (violation) this.flag(recorder, seat, violation.rule, rejections, 'accepted_with_flag');
         if (MECHANICS_TOOL_NAMES.has(call.name)) mechanicsCalled = true;
         if (execution.outcome.endsBeat) ended = true;
-        messages.push(toolMessage(call, execution.outcome.result));
+        messages.push(toolMessage(call, execution.outcome.result + removed));
       }
     }
 
@@ -631,9 +697,60 @@ export class Director {
     seat: string,
     rule: string,
     retries: number,
-    resolution: 're_prompted' | 'accepted_with_flag' | 'forced_pass' | 'forced_hand_off'
+    resolution: 're_prompted' | 'accepted_with_flag' | 'forced_pass' | 'forced_hand_off' | 'trimmed'
   ): void {
     recorder.emit({ type: 'validator_flag', visibility: 'dm', seat, rule, retries, resolution });
+  }
+
+  /**
+   * Asks the checker seat which sentences of a DM narration play a player character, and returns
+   * only findings that really appear in the narration. Never pauses the session: a failed or
+   * unreadable check leaves the narration unchecked, with a DM-only note, and repeated failures
+   * stop checking for the rest of the run.
+   */
+  private async checkPcControl(
+    recorder: TurnRecorder,
+    narration: string
+  ): Promise<PcControlFinding[]> {
+    const seat = this.config.seats.checker;
+    if (!seat || this.checkerDisabled) return [];
+    const party = this.state.partyIds.map((id) => ownEntry(this.state.combatants, id)?.name ?? id);
+    const messages = this.deps.prompts.pcControlCheck({
+      party,
+      declarations: declarationsSinceDm(this.history, this.state),
+      narration,
+    });
+    let findings: PcControlFinding[] | null = null;
+    let failure = 'Checker reply unreadable; narration not checked.';
+    try {
+      const response = ModelResponse.safeParse(
+        await this.deps.model.complete({
+          seat,
+          turnId: recorder.turnId,
+          messages,
+          tools: [],
+          toolChoice: 'auto',
+        })
+      );
+      findings = response.success ? parseCheckerReply(response.data.text) : null;
+    } catch (error) {
+      failure = `Checker unavailable (${error instanceof Error ? error.message : String(error)}); narration not checked.`;
+    }
+    if (findings === null) {
+      this.checkerFailures++;
+      recorder.emit({ type: 'ooc_note', visibility: 'dm', text: failure });
+      if (this.checkerFailures >= this.maxCheckerFailures) {
+        this.checkerDisabled = true;
+        recorder.emit({
+          type: 'ooc_note',
+          visibility: 'dm',
+          text: `Checker failed ${this.checkerFailures} times in a row; narration is not checked for the rest of this run.`,
+        });
+      }
+      return [];
+    }
+    this.checkerFailures = 0;
+    return verifyFindings(narration, findings);
   }
 
   private dmInstruction(
