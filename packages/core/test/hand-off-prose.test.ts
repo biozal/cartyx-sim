@@ -163,4 +163,84 @@ describe('extractHandOffProse', () => {
     expect(result.lines).toEqual(['Hand off to Kira.', 'Hand off to Tomas.']);
     expect(result.target).toEqual({ kind: 'pcs', ids: ['tomas'] });
   });
+
+  it('leaves a line with a leading stray separator untouched', () => {
+    const text = 'Hand off to , Mira.';
+    const result = extractHandOffProse(text, party);
+    expect(result.lines).toEqual([]);
+    expect(result.target).toBeUndefined();
+    expect(result.text).toBe(text);
+  });
+
+  it('leaves a line with a trailing stray separator untouched', () => {
+    const text = 'Hand off to Mira,';
+    const result = extractHandOffProse(text, party);
+    expect(result.lines).toEqual([]);
+    expect(result.target).toBeUndefined();
+    expect(result.text).toBe(text);
+  });
+
+  it('leaves a line with a dangling "and" untouched', () => {
+    const text = 'Hand off to Mira and.';
+    const result = extractHandOffProse(text, party);
+    expect(result.lines).toEqual([]);
+    expect(result.target).toBeUndefined();
+    expect(result.text).toBe(text);
+  });
+
+  it('matches names joined with no spaces around the comma', () => {
+    const result = extractHandOffProse('Hand off to Kira,Mira.', party);
+    expect(result.target).toEqual({ kind: 'pcs', ids: ['kira', 'mira'] });
+  });
+
+  describe('a party member whose full name contains a separator word', () => {
+    const partyWithSaltAndPepper = [
+      { id: 'salt-and-pepper', name: 'Salt and Pepper' },
+      { id: 'mira', name: 'Mira Ashdown' },
+    ];
+
+    it('matches the full name alone', () => {
+      const result = extractHandOffProse('Hand off to Salt and Pepper.', partyWithSaltAndPepper);
+      expect(result.target).toEqual({ kind: 'pcs', ids: ['salt-and-pepper'] });
+    });
+
+    it('matches the full name followed by another PC', () => {
+      const result = extractHandOffProse(
+        'Hand off to Salt and Pepper and Mira.',
+        partyWithSaltAndPepper
+      );
+      expect(result.target).toEqual({ kind: 'pcs', ids: ['salt-and-pepper', 'mira'] });
+    });
+  });
+
+  describe('two party members sharing a first name', () => {
+    const partyWithSharedFirstName = [
+      { id: 'kira-vale', name: 'Kira Vale' },
+      { id: 'kira-stone', name: 'Kira Stone' },
+    ];
+
+    it('leaves the shared first name unresolved', () => {
+      const text = 'Hand off to Kira.';
+      const result = extractHandOffProse(text, partyWithSharedFirstName);
+      expect(result.lines).toEqual([]);
+      expect(result.target).toBeUndefined();
+      expect(result.text).toBe(text);
+    });
+
+    it('still matches a full name', () => {
+      const result = extractHandOffProse('Hand off to Kira Stone.', partyWithSharedFirstName);
+      expect(result.target).toEqual({ kind: 'pcs', ids: ['kira-stone'] });
+    });
+  });
+
+  it('resolves a huge run of whitespace inside the phrase in well under a second', () => {
+    const text = `Hand off to Mira${' '.repeat(50000)}x.`;
+    const start = performance.now();
+    const result = extractHandOffProse(text, party);
+    const elapsed = performance.now() - start;
+    expect(result.lines).toEqual([]);
+    expect(result.target).toBeUndefined();
+    expect(result.text).toBe(text);
+    expect(elapsed).toBeLessThan(1000);
+  });
 });

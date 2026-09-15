@@ -25,11 +25,14 @@ function config(overrides: Partial<DirectorConfig> = {}): DirectorConfig {
   };
 }
 
-function setup(script: Record<string, ScriptedResponse[]>) {
+function setup(
+  script: Record<string, ScriptedResponse[]>,
+  overrides: Partial<DirectorConfig> = {}
+) {
   let turn = 0;
   const model = new ScriptedModelClient(script);
   const sink = new MemorySink();
-  const director = Director.create(config(), {
+  const director = Director.create(config(overrides), {
     model,
     lore: new StaticLoreIndex([]),
     rng: scriptedRng([]),
@@ -98,6 +101,40 @@ describe('a "Hand off to …" line written in DM narration', () => {
     expect(ofType(sink.events, 'narration')).toEqual([]);
     expect(ofType(sink.events, 'hand_off')).toMatchObject([
       { target: { kind: 'pcs', ids: ['kira'] } },
+    ]);
+  });
+
+  it('logs the implied call as not executed, without a "treated as" note, when it is skipped', async () => {
+    const { director, sink } = setup({
+      dm: [
+        respond(narrate('Kira decides to open the door.\n\nHand off to the party.')),
+        respond(narrate('The door creaks.'), toolCall('hand_off', { target: { kind: 'party' } })),
+      ],
+    });
+    await playDmBeat(director);
+
+    const notes = ofType(sink.events, 'ooc_note').map((n) => n.text);
+    expect(notes).toContainEqual(
+      'Hand-off written in DM narration (Hand off to the party.); removed from the narration. The hand_off call it implied was not executed: an earlier call was rejected.'
+    );
+    expect(notes.some((text) => text.includes('treated as a hand_off call'))).toBe(false);
+    expect(ofType(sink.events, 'hand_off')).toMatchObject([{ target: { kind: 'party' } }]);
+  });
+
+  it('runs the synthesized call exempt from the tool-call cap and logs it as treated', async () => {
+    const { director, sink } = setup(
+      {
+        dm: [respond(narrate('First line.'), narrate('Second line.\n\nHand off to the party.'))],
+      },
+      { maxDmToolCallsPerBeat: 2 }
+    );
+    await playDmBeat(director);
+
+    expect(ofType(sink.events, 'hand_off')).toMatchObject([{ target: { kind: 'party' } }]);
+    expect(ofType(sink.events, 'validator_flag')).toEqual([]);
+    const notes = ofType(sink.events, 'ooc_note').map((n) => n.text);
+    expect(notes).toEqual([
+      'Hand-off written in DM narration (Hand off to the party.); removed from the narration and treated as a hand_off call.',
     ]);
   });
 });

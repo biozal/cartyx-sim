@@ -153,19 +153,28 @@ function dmCallsFromResponse(
   return { calls: [...calls.slice(0, at), prose, ...calls.slice(at)], proseCallId: id };
 }
 
+/** The shared prefix of every "Hand-off written in DM narration …" note, built in one place. */
+function handOffProseBase(lines: string): string {
+  return `Hand-off written in DM narration (${lines}); removed from the narration`;
+}
+
 /**
  * Strips any "Hand off to …" line written as DM narration out of this response's `narrate` calls
  * (dropping a call left with no text), and, when a line matched and the response made no
  * `hand_off` call of its own, appends one synthesized from the last matched line's target. Like
  * the engine's own prose call, the synthesized call does not count toward the DM tool-call cap.
- * Returns the (possibly unchanged) calls, that call's id when one was added, and a DM-only note
- * describing what happened, or no note when nothing matched.
+ *
+ * When a real `hand_off` call is already present, nothing is synthesized and a DM-only note is
+ * returned immediately, since removing the written line is all that happened. When a call is
+ * synthesized, no note is returned here — its fate (executed, skipped, or failed) is not yet
+ * known, so the caller emits the note once the loop reaches that call (`proseHandOffCallId`),
+ * using `proseHandOffLines` for the "(<lines>)" text.
  */
 function applyHandOffProse(
   calls: readonly ToolCall[],
   party: readonly { id: string; name: string }[],
   step: number
-): { calls: ToolCall[]; proseHandOffCallId?: string; note?: string } {
+): { calls: ToolCall[]; proseHandOffCallId?: string; proseHandOffLines?: string; note?: string } {
   const matchedLines: string[] = [];
   let lastTarget: HandOffTarget | undefined;
   const rewritten: ToolCall[] = [];
@@ -189,10 +198,7 @@ function applyHandOffProse(
   if (matchedLines.length === 0) return { calls: rewritten };
   const listed = matchedLines.join(' | ');
   if (rewritten.some((call) => call.name === 'hand_off')) {
-    return {
-      calls: rewritten,
-      note: `Hand-off written in DM narration (${listed}); removed from the narration.`,
-    };
+    return { calls: rewritten, note: `${handOffProseBase(listed)}.` };
   }
   const proseHandOffCallId = `prose-hand-off-${step}`;
   return {
@@ -201,7 +207,7 @@ function applyHandOffProse(
       { id: proseHandOffCallId, name: 'hand_off', args: { target: lastTarget! } },
     ],
     proseHandOffCallId,
-    note: `Hand-off written in DM narration (${listed}); removed from the narration and treated as a hand_off call.`,
+    proseHandOffLines: listed,
   };
 }
 
@@ -474,6 +480,29 @@ export class Director {
       );
       this.flag(recorder, seat, 'duplicate_narration', rejections, 're_prompted');
     };
+    // A DM-only note about the synthesized hand_off call, emitted once the loop reaches it and
+    // its fate is known (`applyHandOffProse` cannot know yet whether it will run).
+    const noteProseHandOff = (
+      handOffProse: ReturnType<typeof applyHandOffProse>,
+      call: ToolCall,
+      reason?: string
+    ) => {
+      if (
+        call.id !== handOffProse.proseHandOffCallId ||
+        handOffProse.proseHandOffLines === undefined
+      ) {
+        return;
+      }
+      const base = handOffProseBase(handOffProse.proseHandOffLines);
+      recorder.emit({
+        type: 'ooc_note',
+        visibility: 'dm',
+        text:
+          reason === undefined
+            ? `${base} and treated as a hand_off call.`
+            : `${base}. The hand_off call it implied was not executed: ${reason}.`,
+      });
+    };
 
     for (let step = 0; step < this.maxDmStepsPerBeat && !ended && !callLimitHit; step++) {
       const response = await this.callModel(seat, recorder.turnId, messages, DM_TOOL_SCHEMAS);
@@ -514,6 +543,7 @@ export class Director {
               ? 'you reached the tool call limit for this turn'
               : 'an earlier call was rejected';
           messages.push(toolMessage(call, `Not executed: ${why}.`));
+          noteProseHandOff(handOffProse, call, why);
           continue;
         }
         if (counted) toolCalls++;
@@ -614,6 +644,7 @@ export class Director {
         if (!execution.ok) {
           messages.push(toolMessage(call, `Error: ${execution.error}`));
           this.flag(recorder, seat, 'tool_error', rejections, 're_prompted');
+          noteProseHandOff(handOffProse, call, execution.error);
           skipRest = true;
           continue;
         }
@@ -622,6 +653,7 @@ export class Director {
         if (MECHANICS_TOOL_NAMES.has(call.name)) mechanicsCalled = true;
         if (execution.outcome.endsBeat) ended = true;
         messages.push(toolMessage(call, execution.outcome.result + removed));
+        noteProseHandOff(handOffProse, call);
       }
     }
 

@@ -16,9 +16,13 @@ const HAND_OFF_PREFIX = /^(?:hand[- ]?off|handing off) to /i;
 
 const PARTY_PHRASES = new Set(['party', 'group', 'players', 'everyone', 'all of you', 'you all']);
 const OPEN_PHRASES = new Set(['anyone', 'whoever wants to act', 'whoever']);
-/** ",", ", and", "and", or "&" between names, whitespace-tolerant. Checked in this order so a
- * ", and" is not first cut down to a plain ",". */
-const NAME_SEPARATOR = /\s*,\s*and\s+|\s*,\s*|\s*&\s*|\s+and\s+/;
+
+/** A letter or digit, Unicode-aware, for the name-boundary rule. */
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+
+function isWordChar(char: string | undefined): boolean {
+  return char !== undefined && WORD_CHAR.test(char);
+}
 
 /**
  * Strips a single matching pair of `*` or `_` wrapping the *whole* line, but only when no further
@@ -52,12 +56,110 @@ function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? name;
 }
 
-/** The comma/"and"/"&"-separated names in a phrase, trimmed, lowercased, empties dropped. */
-function splitNames(phrase: string): string[] {
-  return phrase
-    .split(NAME_SEPARATOR)
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
+/** Lowercased, with whitespace runs collapsed to one space, trimmed. */
+function normalizeName(name: string): string {
+  return name.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+interface NameEntry {
+  id: string;
+  text: string;
+}
+
+/**
+ * Full names and unambiguous first names for a party, each normalized and sorted longest-first so
+ * a linear scan always tries the longest candidate at a position first. A first name shared by two
+ * or more party members is left out of `firstNames` entirely: it can never resolve on its own,
+ * though the members' full names still can.
+ */
+function nameEntries(party: readonly { id: string; name: string }[]): {
+  fullNames: NameEntry[];
+  firstNames: NameEntry[];
+} {
+  const fullNames = party
+    .map((pc) => ({ id: pc.id, text: normalizeName(pc.name) }))
+    .sort((a, b) => b.text.length - a.text.length);
+  const firstNameCounts = new Map<string, number>();
+  for (const pc of party) {
+    const text = normalizeName(firstName(pc.name));
+    firstNameCounts.set(text, (firstNameCounts.get(text) ?? 0) + 1);
+  }
+  const firstNames = party
+    .map((pc) => ({ id: pc.id, text: normalizeName(firstName(pc.name)) }))
+    .filter((entry) => firstNameCounts.get(entry.text) === 1)
+    .sort((a, b) => b.text.length - a.text.length);
+  return { fullNames, firstNames };
+}
+
+/**
+ * The party member whose full or (unambiguous) first name starts exactly at `pos` in `phrase` and
+ * ends at a word boundary (the end of the phrase or a non-letter/digit character), trying full
+ * names before first names, and the longest candidate in each group before shorter ones.
+ */
+function matchNameAt(
+  phrase: string,
+  pos: number,
+  entries: { fullNames: NameEntry[]; firstNames: NameEntry[] }
+): { id: string; end: number } | null {
+  for (const group of [entries.fullNames, entries.firstNames]) {
+    for (const entry of group) {
+      const end = pos + entry.text.length;
+      if (end > phrase.length || phrase.slice(pos, end) !== entry.text) continue;
+      if (isWordChar(phrase[end])) continue;
+      return { id: entry.id, end };
+    }
+  }
+  return null;
+}
+
+/**
+ * The end of the separator starting at `pos` in `phrase`, or null when there is none there. Since
+ * the caller has already collapsed whitespace runs to a single space, "optional" spacing here
+ * means a single space is either present or absent, never more. Spacing around `,` and `&` is
+ * optional; the word "and" needs exactly one space on each side of it, wherever it appears (both
+ * as a separator by itself and after a comma).
+ */
+function matchSeparator(phrase: string, pos: number): number | null {
+  let at = pos;
+  const leadingSpace = phrase[at] === ' ';
+  if (leadingSpace) at++;
+  if (phrase[at] === ',') {
+    at++;
+    if (phrase[at] === ' ') at++;
+    return phrase.startsWith('and ', at) ? at + 4 : at;
+  }
+  if (phrase[at] === '&') {
+    at++;
+    if (phrase[at] === ' ') at++;
+    return at;
+  }
+  return leadingSpace && phrase.startsWith('and ', at) ? at + 4 : null;
+}
+
+/**
+ * The ids named by a whole normalized phrase matching the grammar `NAME (SEP NAME)*`, in the
+ * order they were named, without duplicates. Returns null when any part of the phrase does not
+ * parse: an unresolved name, a leading or trailing separator, an empty part, or text left over
+ * after the last name. A single left-to-right pass: each position is tried once, so this is
+ * linear in the length of `phrase` (times the small, fixed cost of checking each party member).
+ */
+function parseNameSequence(
+  phrase: string,
+  party: readonly { id: string; name: string }[]
+): string[] | null {
+  const entries = nameEntries(party);
+  const ids: string[] = [];
+  let pos = 0;
+  for (;;) {
+    const match = matchNameAt(phrase, pos, entries);
+    if (!match) return null;
+    if (!ids.includes(match.id)) ids.push(match.id);
+    pos = match.end;
+    if (pos === phrase.length) return ids;
+    const sepEnd = matchSeparator(phrase, pos);
+    if (sepEnd === null || sepEnd === phrase.length) return null;
+    pos = sepEnd;
+  }
 }
 
 /**
@@ -70,22 +172,13 @@ function resolvePhraseTarget(
   phrase: string,
   party: readonly { id: string; name: string }[]
 ): HandOffTarget | null {
-  const normalized = phrase.trim().toLowerCase();
+  const normalized = phrase.toLowerCase().replace(/\s+/g, ' ').trim();
   if (normalized.length === 0) return null;
   const withoutLeadingThe = normalized.replace(/^the\s+/, '');
   if (PARTY_PHRASES.has(withoutLeadingThe)) return { kind: 'party' };
   if (OPEN_PHRASES.has(withoutLeadingThe)) return { kind: 'open' };
-  const tokens = splitNames(normalized);
-  if (tokens.length === 0) return null;
-  const ids: string[] = [];
-  for (const token of tokens) {
-    const pc = party.find(
-      (member) =>
-        member.name.trim().toLowerCase() === token || firstName(member.name).toLowerCase() === token
-    );
-    if (!pc) return null;
-    if (!ids.includes(pc.id)) ids.push(pc.id);
-  }
+  const ids = parseNameSequence(normalized, party);
+  if (!ids || ids.length === 0) return null;
   return { kind: 'pcs', ids };
 }
 
