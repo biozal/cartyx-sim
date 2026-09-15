@@ -340,7 +340,12 @@ describe('DM player-character control checker', () => {
   it('skips a repeated fully cut narration without calling the checker again', async () => {
     const FULL = 'Kira turns to the others, eyes bright.';
     const { director, model, sink } = setup({
-      dm: [respond(narrate(FULL)), respond(narrate(FULL)), respond(narrate(FULL), handOffTomas())],
+      dm: [
+        respond(narrate(FULL)),
+        respond(narrate(FULL)),
+        respond(narrate(FULL)),
+        respond(handOffTomas()),
+      ],
       checker: [flagged(FULL), flagged(FULL)],
     });
     await playDmBeat(director);
@@ -359,6 +364,15 @@ describe('DM player-character control checker', () => {
     ).toHaveLength(1);
     expect(model.requests.filter((request) => request.seat === 'checker')).toHaveLength(2);
     expect(ofType(sink.events, 'hand_off')).toHaveLength(1);
+
+    // The resent, already-cut narration gets its own message, not the "already narrated" one:
+    // nothing was actually narrated the first time, only cut.
+    const dmRequests = model.requests.filter((request) => request.seat === 'dm');
+    expect(dmRequests[3]!.messages.at(-1)).toMatchObject({
+      role: 'tool',
+      content:
+        'Not narrated: every sentence of that narration was already cut this turn because it played player characters. Continue with other tools, or call hand_off.',
+    });
   });
 
   it('logs the reply as unreadable when its shape does not parse', async () => {

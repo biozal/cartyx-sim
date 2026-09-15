@@ -68,16 +68,23 @@ interface NameEntry {
 
 /**
  * Full names and unambiguous first names for a party, each normalized and sorted longest-first so
- * a linear scan always tries the longest candidate at a position first. A first name shared by two
- * or more party members is left out of `firstNames` entirely: it can never resolve on its own,
- * though the members' full names still can.
+ * a search always tries the longest candidate at a position first. A full name or a first name
+ * shared by two or more party members is left out entirely: it can never resolve on its own, even
+ * though a *different*, unique name of theirs (a unique full name when the first name collides, or
+ * vice versa) still can.
  */
 function nameEntries(party: readonly { id: string; name: string }[]): {
   fullNames: NameEntry[];
   firstNames: NameEntry[];
 } {
+  const fullNameCounts = new Map<string, number>();
+  for (const pc of party) {
+    const text = normalizeName(pc.name);
+    fullNameCounts.set(text, (fullNameCounts.get(text) ?? 0) + 1);
+  }
   const fullNames = party
     .map((pc) => ({ id: pc.id, text: normalizeName(pc.name) }))
+    .filter((entry) => fullNameCounts.get(entry.text) === 1)
     .sort((a, b) => b.text.length - a.text.length);
   const firstNameCounts = new Map<string, number>();
   for (const pc of party) {
@@ -92,74 +99,96 @@ function nameEntries(party: readonly { id: string; name: string }[]): {
 }
 
 /**
- * The party member whose full or (unambiguous) first name starts exactly at `pos` in `phrase` and
- * ends at a word boundary (the end of the phrase or a non-letter/digit character), trying full
- * names before first names, and the longest candidate in each group before shorter ones.
+ * The possible ends of a separator starting at `pos` in `phrase`, longest/most-specific first, so
+ * a backtracking search tries the greedy reading before falling back to a shorter one. Since the
+ * caller has already collapsed whitespace runs to a single space, "optional" spacing here means a
+ * single space is either present or absent, never more. Spacing around `,` and `&` is optional;
+ * the word "and" needs exactly one space on each side of it, wherever it appears (both as a
+ * separator by itself and directly after a comma) — so `Kira,and Mira` is not a `, and` separator
+ * (no space before "and"), only a plain "," is offered there, and `Kira, And Roe` (a PC named "And
+ * Roe") can fall back from the greedy ", and " reading to a plain "," that leaves "And Roe" whole.
  */
-function matchNameAt(
-  phrase: string,
-  pos: number,
-  entries: { fullNames: NameEntry[]; firstNames: NameEntry[] }
-): { id: string; end: number } | null {
-  for (const group of [entries.fullNames, entries.firstNames]) {
-    for (const entry of group) {
-      const end = pos + entry.text.length;
-      if (end > phrase.length || phrase.slice(pos, end) !== entry.text) continue;
-      if (isWordChar(phrase[end])) continue;
-      return { id: entry.id, end };
-    }
-  }
-  return null;
-}
-
-/**
- * The end of the separator starting at `pos` in `phrase`, or null when there is none there. Since
- * the caller has already collapsed whitespace runs to a single space, "optional" spacing here
- * means a single space is either present or absent, never more. Spacing around `,` and `&` is
- * optional; the word "and" needs exactly one space on each side of it, wherever it appears (both
- * as a separator by itself and after a comma).
- */
-function matchSeparator(phrase: string, pos: number): number | null {
+function separatorEnds(phrase: string, pos: number): number[] {
   let at = pos;
   const leadingSpace = phrase[at] === ' ';
   if (leadingSpace) at++;
   if (phrase[at] === ',') {
     at++;
-    if (phrase[at] === ' ') at++;
-    return phrase.startsWith('and ', at) ? at + 4 : at;
+    const spaceAfterComma = phrase[at] === ' ';
+    const plain = spaceAfterComma ? at + 1 : at;
+    if (spaceAfterComma && phrase.startsWith('and ', at + 1)) {
+      return [at + 1 + 4, plain];
+    }
+    return [plain];
   }
   if (phrase[at] === '&') {
     at++;
     if (phrase[at] === ' ') at++;
-    return at;
+    return [at];
   }
-  return leadingSpace && phrase.startsWith('and ', at) ? at + 4 : null;
+  return leadingSpace && phrase.startsWith('and ', at) ? [at + 4] : [];
+}
+
+/**
+ * The ids named by the whole normalized phrase from `pos` onward, matching the grammar
+ * `NAME (SEP NAME)*`, in the order they were named (duplicates included; the caller dedupes), or
+ * null when no reading of the rest of the phrase resolves. At each position, candidate names are
+ * tried longest-first (full names before first names), and for each, every possible separator
+ * reading is tried before moving on — backtracking to a shorter name or a shorter separator when a
+ * greedy choice leads to a dead end further on (a full name that swallows another PC's name, or a
+ * ", and" that swallows the start of a PC named "And Roe"). `memo` caches the result for a
+ * position once known, so although names and separators may need retrying, each position in the
+ * phrase is ever resolved once: the parse stays O(phrase length × party size).
+ */
+function matchNamesFrom(
+  phrase: string,
+  pos: number,
+  candidates: readonly NameEntry[],
+  memo: Map<number, string[] | null>
+): string[] | null {
+  if (pos === phrase.length) return [];
+  const cached = memo.get(pos);
+  if (cached !== undefined) return cached;
+  let result: string[] | null = null;
+  search: for (const entry of candidates) {
+    const end = pos + entry.text.length;
+    if (end > phrase.length || phrase.slice(pos, end) !== entry.text) continue;
+    if (isWordChar(phrase[end])) continue;
+    if (end === phrase.length) {
+      result = [entry.id];
+      break;
+    }
+    for (const sepEnd of separatorEnds(phrase, end)) {
+      if (sepEnd === phrase.length) continue; // a trailing separator with nothing named after it
+      const rest = matchNamesFrom(phrase, sepEnd, candidates, memo);
+      if (rest !== null) {
+        result = [entry.id, ...rest];
+        break search;
+      }
+    }
+  }
+  memo.set(pos, result);
+  return result;
 }
 
 /**
  * The ids named by a whole normalized phrase matching the grammar `NAME (SEP NAME)*`, in the
- * order they were named, without duplicates. Returns null when any part of the phrase does not
- * parse: an unresolved name, a leading or trailing separator, an empty part, or text left over
- * after the last name. A single left-to-right pass: each position is tried once, so this is
- * linear in the length of `phrase` (times the small, fixed cost of checking each party member).
+ * order they were named, without duplicates. Returns null when no reading of the phrase resolves
+ * it entirely: an unresolved name, a leading or trailing separator, an empty part, or text left
+ * over after the last name.
  */
 function parseNameSequence(
   phrase: string,
   party: readonly { id: string; name: string }[]
 ): string[] | null {
-  const entries = nameEntries(party);
-  const ids: string[] = [];
-  let pos = 0;
-  for (;;) {
-    const match = matchNameAt(phrase, pos, entries);
-    if (!match) return null;
-    if (!ids.includes(match.id)) ids.push(match.id);
-    pos = match.end;
-    if (pos === phrase.length) return ids;
-    const sepEnd = matchSeparator(phrase, pos);
-    if (sepEnd === null || sepEnd === phrase.length) return null;
-    pos = sepEnd;
+  const { fullNames, firstNames } = nameEntries(party);
+  const ids = matchNamesFrom(phrase, 0, [...fullNames, ...firstNames], new Map());
+  if (!ids) return null;
+  const deduped: string[] = [];
+  for (const id of ids) {
+    if (!deduped.includes(id)) deduped.push(id);
   }
+  return deduped;
 }
 
 /**

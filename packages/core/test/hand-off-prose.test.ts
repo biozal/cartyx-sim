@@ -243,4 +243,53 @@ describe('extractHandOffProse', () => {
     expect(result.text).toBe(text);
     expect(elapsed).toBeLessThan(1000);
   });
+
+  it('leaves a comma-then-"and" with no space before "and" untouched', () => {
+    const text = 'Hand off to Kira,and Mira.';
+    const result = extractHandOffProse(text, party);
+    expect(result.lines).toEqual([]);
+    expect(result.target).toBeUndefined();
+    expect(result.text).toBe(text);
+  });
+
+  describe('names that would be swallowed by a greedy match', () => {
+    const partyWithSaltPepperAndPepperJones = [
+      { id: 'salt', name: 'Salt' },
+      { id: 'salt-and-pepper', name: 'Salt and Pepper' },
+      { id: 'pepper-jones', name: 'Pepper Jones' },
+    ];
+
+    it('backtracks off a full name that would swallow the next PC', () => {
+      const result = extractHandOffProse(
+        'Hand off to Salt and Pepper Jones.',
+        partyWithSaltPepperAndPepperJones
+      );
+      expect(result.target).toEqual({ kind: 'pcs', ids: ['salt', 'pepper-jones'] });
+    });
+
+    const partyWithAndRoe = [
+      { id: 'kira', name: 'Kira' },
+      { id: 'and-roe', name: 'And Roe' },
+    ];
+
+    it('backtracks off a ", and" separator that would swallow a PC named "And Roe"', () => {
+      const result = extractHandOffProse('Hand off to Kira, And Roe.', partyWithAndRoe);
+      expect(result.target).toEqual({ kind: 'pcs', ids: ['kira', 'and-roe'] });
+    });
+  });
+
+  describe('two party members sharing a full name', () => {
+    const partyWithSameFullName = [
+      { id: 'kira-1', name: 'Kira Vale' },
+      { id: 'kira-2', name: 'Kira Vale' },
+    ];
+
+    it('leaves the shared full name unresolved', () => {
+      const text = 'Hand off to Kira Vale.';
+      const result = extractHandOffProse(text, partyWithSameFullName);
+      expect(result.lines).toEqual([]);
+      expect(result.target).toBeUndefined();
+      expect(result.text).toBe(text);
+    });
+  });
 });

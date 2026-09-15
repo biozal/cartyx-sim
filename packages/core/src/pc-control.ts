@@ -46,9 +46,11 @@ export function declarationsSinceDm(history: readonly SimEvent[], state: GameSta
 /** Closed thinking blocks some models leak into their reply; they may hold braces of their own. */
 const THINK_BLOCK = /<think>[\s\S]*?<\/think>/gi;
 
-// A brace-heavy reply can offer thousands of "{"..."}" candidates to try; a probe of "{}" repeated
-// 3,000 times took roughly 19s to exhaust, so the search stops after this many parse attempts.
-const MAX_PARSE_ATTEMPTS = 500;
+// A brace-heavy reply can offer thousands of "{"..."}" candidates; each JSON.parse attempt is
+// cheap on its own, but trying every one is not (a probe of two nested 10,000-character brace
+// runs took ~2s with no cap). The search gives up once it has made this many parse attempts, so a
+// degenerate reply is read as unreadable quickly instead of exhaustively.
+const MAX_PARSE_ATTEMPTS = 2000;
 
 const WHITESPACE = /\s/;
 
@@ -59,15 +61,15 @@ function skipWhitespace(text: string, from: number): number {
   return at;
 }
 
-/** Whether the text right after the "{" at `start`, skipping whitespace, begins with the reply's
- * own key: a start like this is where a real reply actually begins, junk braces aside. */
-function isViolationsStart(reply: string, start: number): boolean {
-  return reply.startsWith('"violations"', skipWhitespace(reply, start + 1));
-}
-
-/** Only an object that opens with a key or closes at once can be valid JSON; skip the rest cheaply. */
-function looksLikeJsonObject(candidate: string): boolean {
-  return /^\{\s*["}]/.test(candidate);
+/**
+ * Whether a "{" at `start` in `reply` could possibly open valid JSON: skipping whitespace, the
+ * next character is a `"` (an object with a key) or a `}` (an object that closes at once). This
+ * depends only on `start`, never on which "}" would end the candidate, so it is decided once per
+ * start and a start that fails it is skipped entirely — no `}` end is ever tried against it.
+ */
+function canOpenJsonObject(reply: string, start: number): boolean {
+  const char = reply[skipWhitespace(reply, start + 1)];
+  return char === '"' || char === '}';
 }
 
 /** The findings in one JSON candidate, or null when it is not valid JSON of the reply's shape. */
@@ -84,28 +86,28 @@ function readCandidate(candidate: string): PcControlFinding[] | null {
 
 /**
  * The checker's findings, or null when its reply holds no readable `{ "violations": [...] }`
- * object. Closed `<think>` blocks are ignored first. Then starts that look like the reply's own
- * `"violations"` key are tried before any other "{", so a real reply is found immediately even
- * behind a wall of junk braces that are not it; within each group, starts are tried in order, each
- * against every later "}" from last to first, so code fences, surrounding text, stray braces, and
- * a second object are all fine. At most `MAX_PARSE_ATTEMPTS` candidates are ever parsed, so a
+ * object. Closed `<think>` blocks are ignored first. Then each "{" is tried, in order, against
+ * each later "}" from last to first, so code fences, surrounding text, stray braces, and a second
+ * object are all fine, and the first (leftmost, then widest) candidate that parses as JSON of the
+ * reply's shape wins. A start that could not possibly open JSON is skipped without trying any "}"
+ * against it at all, and at most `MAX_PARSE_ATTEMPTS` candidates are ever parsed in total, so a
  * degenerate brace-heavy reply returns null quickly instead of trying every pair.
  */
 export function parseCheckerReply(text: string): PcControlFinding[] | null {
   const reply = text.replace(THINK_BLOCK, '');
-  const violationsStarts: number[] = [];
-  const otherStarts: number[] = [];
-  for (let start = reply.indexOf('{'); start !== -1; start = reply.indexOf('{', start + 1)) {
-    (isViolationsStart(reply, start) ? violationsStarts : otherStarts).push(start);
+  const closeBraces: number[] = [];
+  for (let end = reply.indexOf('}'); end !== -1; end = reply.indexOf('}', end + 1)) {
+    closeBraces.push(end);
   }
   let attempts = 0;
-  for (const start of [...violationsStarts, ...otherStarts]) {
-    for (let end = reply.lastIndexOf('}'); end > start; end = reply.lastIndexOf('}', end - 1)) {
-      const candidate = reply.slice(start, end + 1);
-      if (!looksLikeJsonObject(candidate)) continue;
+  for (let start = reply.indexOf('{'); start !== -1; start = reply.indexOf('{', start + 1)) {
+    if (!canOpenJsonObject(reply, start)) continue;
+    for (let i = closeBraces.length - 1; i >= 0; i--) {
+      const end = closeBraces[i]!;
+      if (end <= start) break; // closeBraces is ascending, so nothing before this is > start either
       if (attempts >= MAX_PARSE_ATTEMPTS) return null;
       attempts++;
-      const found = readCandidate(candidate);
+      const found = readCandidate(reply.slice(start, end + 1));
       if (found) return found;
     }
   }

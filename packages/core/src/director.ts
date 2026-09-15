@@ -473,16 +473,17 @@ export class Director {
     // Narrations (by collapsed text) that were cut to nothing this beat: a DM that resends one
     // verbatim is rejected as a duplicate without checking it again.
     const fullyCutNarrations = new Set<string>();
-    // Shared by the duplicate-narration check and a trimmed narration that repeats an earlier one.
-    const rejectDuplicateNarration = (call: ToolCall) => {
-      messages.push(
-        toolMessage(
-          call,
-          'Not narrated again: you already narrated that this turn. Continue with other tools, or call hand_off.'
-        )
-      );
+    // Shared by every path that rejects a narrate call as a duplicate of one already narrated (or,
+    // for a resent fully cut narration, already cut) this beat. Each call site supplies its own
+    // message, since what was or was not actually narrated differs.
+    const rejectDuplicateNarration = (call: ToolCall, message: string) => {
+      messages.push(toolMessage(call, message));
       this.flag(recorder, seat, 'duplicate_narration', rejections, 're_prompted');
     };
+    const ALREADY_NARRATED =
+      'Not narrated again: you already narrated that this turn. Continue with other tools, or call hand_off.';
+    const ALREADY_CUT =
+      'Not narrated: every sentence of that narration was already cut this turn because it played player characters. Continue with other tools, or call hand_off.';
     // A DM-only note about the synthesized hand_off call, emitted once the loop reaches it and
     // its fate is known (`applyHandOffProse` cannot know yet whether it will run).
     const noteProseHandOff = (
@@ -554,12 +555,13 @@ export class Director {
         if (!prepared.ok) {
           messages.push(toolMessage(call, prepared.error));
           this.flag(recorder, seat, 'invalid_tool_call', rejections, 're_prompted');
+          noteProseHandOff(handOffProse, call, prepared.error);
           skipRest = true;
           continue;
         }
         const text = prepared.def.narrativeText?.(prepared.args);
         if (call.name === 'narrate' && text && narratedThisBeat(recorder, text)) {
-          rejectDuplicateNarration(call);
+          rejectDuplicateNarration(call, ALREADY_NARRATED);
           continue;
         }
         const violation = text
@@ -595,7 +597,7 @@ export class Director {
         if (call.name === 'narrate' && text) {
           if (fullyCutNarrations.has(collapseWhitespace(text))) {
             // This exact narration was already cut to nothing this beat: nothing new to check.
-            rejectDuplicateNarration(call);
+            rejectDuplicateNarration(call, ALREADY_CUT);
             continue;
           }
           const { findings, reply } = await this.checkPcControl(recorder, text);
@@ -625,7 +627,7 @@ export class Director {
             if (kept && narratedThisBeat(recorder, kept)) {
               // The cut narration is identical to one already narrated this beat: treat it as a
               // duplicate instead of narrating (and flagging trimmed) a second time.
-              rejectDuplicateNarration(call);
+              rejectDuplicateNarration(call, ALREADY_NARRATED);
               continue;
             }
             this.flag(recorder, seat, 'dm_controls_pc', pcControlRetried ? 1 : 0, 'trimmed');

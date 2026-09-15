@@ -151,7 +151,14 @@ describe('parseCheckerReply', () => {
   });
 
   it('returns null in well under a second for degenerate brace-heavy replies', () => {
-    const degenerate = ['{}'.repeat(3000), '{"a":'.repeat(600) + '}'.repeat(3000)];
+    const degenerate = [
+      '{}'.repeat(3000),
+      '{"a":'.repeat(600) + '}'.repeat(3000),
+      // A start that cannot possibly open JSON (the character after "{" is neither `"` nor `}`)
+      // must be skipped without trying any "}" against it at all.
+      '{'.repeat(10000) + '}'.repeat(10000),
+      '{ x'.repeat(2000) + '}'.repeat(2000),
+    ];
     for (const reply of degenerate) {
       const start = performance.now();
       const result = parseCheckerReply(reply);
@@ -161,12 +168,38 @@ describe('parseCheckerReply', () => {
     }
   });
 
-  it('finds a valid reply behind a wall of junk braces', () => {
-    const junk = '{'.repeat(1000);
-    const valid = '{"violations": [{"pc": "Kira Vale", "sentence": "Kira nods.", "why": "x"}]}';
-    expect(parseCheckerReply(junk + valid)).toEqual([
+  it('prefers the first (leftmost) valid object over a later one, even one that looks like the key', () => {
+    // The finding's own outer "{" is tried before the later "Example format" one, so the object
+    // that actually holds the finding wins.
+    const withExample =
+      '{"summary": "one", "violations": [{"pc": "Kira Vale", "sentence": "Kira nods.", "why": "x"}]}\n' +
+      'Example format: {"violations": []}';
+    expect(parseCheckerReply(withExample)).toEqual([
       { pc: 'Kira Vale', sentence: 'Kira nods.', why: 'x' },
     ]);
+  });
+
+  it('reads a real reply behind format-example junk lines that also mention "violations"', () => {
+    const junkLine = 'Format: {"violations": [...]}\n';
+    const findings = Array.from({ length: 30 }, (_, i) => ({
+      pc: 'Kira Vale',
+      sentence: `Kira does thing ${i}.`,
+      why: 'x',
+    }));
+    const reply = junkLine.repeat(20) + JSON.stringify({ violations: findings });
+    expect(parseCheckerReply(reply)).toEqual(findings);
+  });
+
+  it('returns null when the only valid object is reachable only after more than 2,000 failed parses', () => {
+    // A single "{" that can open JSON (its next character is a quote) followed by a complete,
+    // schema-valid object and then 2,001 stray "}" characters: since the search tries every later
+    // "}" from last to first, this one start alone needs 2,001 failed attempts (each one spanning
+    // into the trailing junk, so parsing the leading valid object but then finding trailing
+    // content) before its 2,002nd attempt — the object's own true closing "}" — would succeed.
+    // With MAX_PARSE_ATTEMPTS at 2,000, the budget runs out one attempt short of ever trying it.
+    const valid = '{"violations": [{"pc": "Kira Vale", "sentence": "Kira nods.", "why": "x"}]}';
+    const reply = valid + '}'.repeat(2001);
+    expect(parseCheckerReply(reply)).toBeNull();
   });
 });
 
