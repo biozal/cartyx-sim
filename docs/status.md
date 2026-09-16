@@ -53,6 +53,25 @@ What the runs taught us:
 
 Lore lookups always report a gap until Plan 2B, so the DM invents and records details.
 
+## Script stage on real sessions (2026-09-16)
+
+`sim script` ran on avalon sessions 002–004 (labeling seat: `checker`, GLM-4.7-Flash) and on the checker-off control session. The control campaign had no checker seat, so a `script` seat with the same model was added to its `campaign.json`. With a labeling seat, no quote fell back to rules, and no script kept markdown, a `DM:` prefix, or a hand-off line.
+
+| Session     | Voiced lines | Spoken words | Quotes labeled | Stage directions dropped | Unlisted NPC speakers                                          |
+| ----------- | ------------ | ------------ | -------------- | ------------------------ | -------------------------------------------------------------- |
+| avalon 002  | 47           | 1870         | 0              | 0                        | none                                                           |
+| avalon 003  | 61           | 2074         | 1              | 6                        | `npc-faceless-figure`                                          |
+| avalon 004  | 38           | 1937         | 0              | 1                        | none                                                           |
+| control 001 | 71           | 2022         | 13             | 1                        | `npc-spice-merchant`, `npc-elderly-woman`, `npc-guard-captain` |
+
+What the scripts show:
+
+- **Stage directions:** all six of Kira's asides in 003 ("I keep my voice low…", "I let that sit for a beat.") were dropped from her lines and kept as asides in `script.md`; the spoken parts around them were kept whole. 004's stray trailing quote and 002's markdown are gone.
+- **Embedded NPC speech:** 003's "You... opened... the door." became a line for a new speaker, `npc-faceless-figure`. The control session's merchant, elderly woman, and guard captain were each named from the narration.
+- **DM-written player lines:** in the control session the model marked 7 quotes as a player character's words (Kira, Bram, Mira, Tomas), and each stayed in the DM's voice as `DM (as …)`. Two are flyers a PC reads aloud, which the DM narrated rather than invented dialogue.
+- **Rules only:** without a model, every quote of three or more words goes to `npc-unnamed`, including the control session's DM-written player lines. The model is needed to catch those.
+- **One awkward split:** "She mutters something about "outsiders bringing bad luck" and pulls her shawl tight" was labeled as the elderly woman's speech, so the sentence splits around a reported-speech fragment. The labeling prompt could treat a quote inside reported speech as `none`.
+
 ## What Plan 2A added
 
 - **Engine hardening:** a runaway-loop backstop (12 stalled turns, 3 idle hand-offs, 24 DM tool calls per beat), a validator flag for every DM outcome, a player-safe `PlayerView` for prompts, downed PCs kept in initiative, turn ids and tool choice on model requests, an event schema version, a Node-free typecheck for `core` and `rules`, and recovery from a torn final log line.
