@@ -210,7 +210,7 @@ export class ModelLabeler implements Labeler {
         text = response.text;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return { labels: null, reason: `script seat unavailable (${message})` };
+        return { labels: null, reason: `seat "${seat}" unavailable (${message})` };
       }
       const parsed = parseLabelReply(text, request);
       if ('labels' in parsed) {

@@ -195,7 +195,7 @@ describe('ModelLabeler', () => {
     const result = await new ModelLabeler({ model, seat: 'script', modelId: 'glm' }).label(REQUEST);
     expect(result).toEqual({
       labels: null,
-      reason: expect.stringMatching(/script seat unavailable \(Every endpoint failed\)/),
+      reason: expect.stringMatching(/seat "script" unavailable \(Every endpoint failed\)/),
     });
   });
 
