@@ -67,10 +67,10 @@ campaigns/<id>/sessions/NNN/
 
 These are the only transformations applied to kept source text. Each is implemented once in `normalize.ts` and used by both the build and the invariant test:
 
-1. Remove markdown emphasis markers (`*`, `_`, `**`, `__`), heading marks (`#` at line start), and bullet markers (`-`, `*`, `+`, `1.` at line start). A bullet item's text becomes its own sentence: a terminal period is added when it has no terminal punctuation.
+1. Remove markdown emphasis markers (`*`, `_`, `**`, `__`), heading marks (`#` at line start), and bullet markers (`-`, `*`, `+`, `1.` at line start).
 2. Remove a leading `DM:` (optionally bold) at the start of the text or a paragraph.
-3. Remove wrapping, doubled, and unbalanced straight or curly double quotes around a spoken line.
-4. When a quote is split out of narration, a comma directly before its closing quote becomes a period.
+3. Remove every double quote mark (straight or curly) from PC and NPC speech, action text, and narration.
+4. After whitespace is collapsed, a line ending in `,` `;` or `:` ends in `.` instead, and a line with no ending punctuation (`. ! ? … — – - ' ’ ) ]`) gets a `.`; text with no letters or digits produces no line.
 5. Collapse runs of whitespace within a line to one space and trim the ends.
 
 ### 4.2 `script.json`
@@ -128,8 +128,9 @@ Line fields:
 - Voiced lines carry `speaker`, `text`, `emotion` (from the event; embedded NPC quotes take `neutral`), and `sources` with character offsets into the event's text field (`text` for narration and dialogue, `intent` for actions).
 - `dropped` (optional): removed spans with a reason (`stage_direction`, `hand_off`, `dm_prefix`), kept for `script.md` and review.
 - `overlaps` (optional): the line id of the line an interjection talks over (from the event's `overlaps` seq, mapped to the first line built from that event).
-- `flags` (optional): `dm_wrote_pc` with the PC id (§5.3).
+- `flags` (optional): `dmWrotePc` with the PC id (§5.3).
 - Silent lines have `sources` entries with `seq` only (no offsets) and carry structured data only: `roll` (actor, label, total, target, outcome, mode, subject), `scene` (location, artPrompt, loreEntityId), `combat` (`start` with order, `turn` with round and combatant, `end`), `state` (entity, field, before, after), `pause` (reason).
+- A note may carry `dropped` spans for an event that produced no line.
 
 ### 4.3 `speakers.json`
 
@@ -154,7 +155,7 @@ The build reads the log in order and uses public events only. State needed for n
 1. Remove leading `DM:` markers (dropped as `dm_prefix`).
 2. Remove hand-off prose with core's `extractHandOffProse` (dropped as `hand_off`), so `**Hand off.**` and "Hand off to …" lines are caught by the engine's own detector.
 3. Remove markdown (§4.1.1).
-4. Split on blank lines; each paragraph is processed separately.
+4. Split on blank lines; each paragraph is processed separately. Heading and list-item lines are paragraphs of their own.
 5. Find double-quoted spans (straight or curly, optionally wrapped in emphasis). A paragraph with none becomes one `narration` line.
 6. A paragraph with quoted spans is labeled (§5.3) and split: text before a speech span stays `narration`, the span becomes a `dialogue` line for its speaker, and the text after continues as `narration` (for example `it rasps, the voice sounding like grinding stones.`). Spans labeled `none` stay inside the narration.
 
@@ -166,10 +167,10 @@ Each label is one of:
 
 - an existing NPC id;
 - `new:<short label>`: creates speaker `npc-<slug>` (core's `slugify`), `unlisted: true`, `firstSeq` set; a later `new:` label with the same slug reuses it;
-- a PC id: the DM wrote that PC's dialogue. The line stays in the **DM's voice** with `flags: { dm_wrote_pc: <id> }`, so the script never presents it as the player's words;
+- a PC id: the DM wrote that PC's dialogue. The line stays in the **DM's voice** with `flags: { dmWrotePc: <id> }`, so the script never presents it as the player's words;
 - `none`: not speech (a scare quote, an inscription, a single word); stays in the narration.
 
-Validation (zod): every span labeled exactly once, every id known or in `new:` form. An invalid reply gets one retry with the error; after that, the **rules fallback** labels each span: the single NPC introduced since the last `scene_change` if there is exactly one, else `npc-unnamed`. Each fallback adds a `notes` entry. A `--no-model` run uses the fallback for every span.
+Validation (zod): every span labeled exactly once, every id known or in `new:` form. An invalid reply gets one retry with the error; after that, the **rules fallback** labels a quote of fewer than 3 words `none`, and every other quote as the single NPC introduced since the last `scene_change` if there is exactly one, else `npc-unnamed`. Each fallback adds a `notes` entry. A `--no-model` run uses the fallback for every span.
 
 Because the model returns labels only, all text in the script comes from the log.
 
@@ -183,13 +184,13 @@ Each `action` event becomes one `action` line in the actor's voice: the intent w
 
 ### 5.5 Silent cues
 
-| Event                                                           | Line     |
-| --------------------------------------------------------------- | -------- |
-| `roll`                                                          | `roll`   |
-| `scene_change`                                                  | `scene`  |
-| `combat_start`, `combat_turn`, `combat_end`                     | `combat` |
-| `state_change` on `hp`, `conditions`, or `dead` (becoming true) | `state`  |
-| `session_paused` followed by a resume                           | `pause`  |
+| Event                                                                                                        | Line     |
+| ------------------------------------------------------------------------------------------------------------ | -------- |
+| `roll`                                                                                                       | `roll`   |
+| `scene_change`                                                                                               | `scene`  |
+| `combat_start`, `combat_turn`, `combat_end`                                                                  | `combat` |
+| `state_change` on `hp`, `conditions`, or `dead` (becoming true)                                              | `state`  |
+| `session_paused` followed by a resume (detected regardless of visibility; the engine logs pauses as DM-only) | `pause`  |
 
 Not in the script: `hand_off`, `turn_end`, `pass`, `validator_flag`, `ooc_note`, `lore_lookup`, `lore_invention`, `npc_introduced` (used for speakers only), `combatant_added`, `session_start`, `session_end`, and other `state_change` fields.
 
@@ -206,7 +207,7 @@ Rendered from `script.json` only:
 - Title and header: campaign, session, spoken words, line counts, unlisted speakers.
 - A `##` heading per `scene` line.
 - Narration as plain paragraphs under a bold `DM` label when the previous line had a different speaker.
-- Dialogue as `**Name:** text`; NPC names from the speaker table; `dm_wrote_pc` lines labeled `**DM (as Name):**`; interjections marked `(interrupting)`.
+- Dialogue as `**Name:** text`; NPC names from the speaker table; `dmWrotePc` lines labeled `**DM (as Name):**`; interjections marked `(interrupting)`.
 - Dropped stage directions as an italic aside after the line (`*— I keep my voice low, …*`).
 - Actions as `> *Name:* intent`.
 - Rolls as `> 🎲 label — total N, outcome`; monster AC and HP hidden, as in the player transcript.
