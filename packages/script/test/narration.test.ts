@@ -77,6 +77,15 @@ describe('segmentNarration', () => {
   it('skips quotes with no words', () => {
     expect(segmentNarration('A sound: "..." then nothing.', PARTY).quotes).toEqual([]);
   });
+
+  it('never copies a quote mark from a dropped span into the prompt', () => {
+    // `**Hand off.** "x"` is not a recognized hand-off line (extra text after the verb), so this
+    // does not exercise a hand-off drop; it pins that no stray quote leaks in from the dropped
+    // `DM:` prefix either, which is the reachable case for this bug.
+    const segmented = segmentNarration('DM: "Go."\nThe door opens.', PARTY);
+    expect(segmented.dropped).toEqual([{ start: 0, end: 3, reason: 'dm_prefix' }]);
+    expect(segmented.promptText).toBe('[[1]]"Go." The door opens.');
+  });
 });
 
 describe('narrationPieces', () => {

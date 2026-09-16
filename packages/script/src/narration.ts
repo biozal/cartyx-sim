@@ -2,7 +2,6 @@ import { extractHandOffProse } from '@cartyx-sim/core';
 import {
   finishLine,
   hasWords,
-  isQuoteMark,
   Mask,
   pairQuotes,
   removeMarkdown,
@@ -94,7 +93,7 @@ function renderPrompt(mask: Mask, blocks: readonly Range[], quotes: readonly Nar
       for (let i = block.start; i < block.end; i++) {
         const n = numbers.get(i);
         if (n !== undefined) text += `[[${n}]]`;
-        if (!mask.isRemoved(i) || isQuoteMark(mask.raw[i])) text += mask.raw[i];
+        if (!mask.isRemoved(i)) text += mask.raw[i];
       }
       return text.replace(/\s+/g, ' ').trim();
     })
