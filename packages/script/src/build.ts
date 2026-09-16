@@ -228,7 +228,10 @@ class ScriptBuilder {
   }
 
   private addSpeech(event: Dialogue): void {
-    const split = splitSpeech(event.text);
+    const pcName =
+      event.speakerKind === 'pc' ? ownEntry(this.state.combatants, event.speaker)?.name : undefined;
+    const names = pcName ? [pcName, pcName.split(/\s+/)[0]!] : [];
+    const split = splitSpeech(event.text, names);
     const speaker =
       event.speakerKind === 'pc'
         ? this.speakers.pc(event.speaker)

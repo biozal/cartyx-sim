@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { finishLine, sliceText, type Range } from '../src/normalize';
 import { cleanAction, splitSpeech } from '../src/speech';
 
-function spoken(raw: string): { lines: string[]; directions: string[] } {
-  const split = splitSpeech(raw);
+function spoken(
+  raw: string,
+  names: readonly string[] = []
+): { lines: string[]; directions: string[] } {
+  const split = splitSpeech(raw, names);
   return {
     lines: split.lines.map((ranges) => finishLine(sliceText(raw, ranges))),
     directions: split.directions.map((range: Range) => raw.slice(range.start, range.end)),
@@ -85,6 +88,51 @@ describe('splitSpeech', () => {
     for (const range of split.directions) {
       expect(split.mask.keptText(range.start, range.end)).toBe('');
     }
+  });
+});
+
+describe('splitSpeech direction rule', () => {
+  it('drops a leading first-person action', () => {
+    expect(spoken('I nod slowly. "Let\'s go, then."')).toEqual({
+      lines: ["Let's go, then."],
+      directions: ['I nod slowly.'],
+    });
+  });
+
+  it('drops a short trailing speech tag', () => {
+    expect(spoken('"Hello," she says.')).toEqual({
+      lines: ['Hello.'],
+      directions: ['she says.'],
+    });
+  });
+
+  it('drops a long speech tag between two quotes', () => {
+    expect(
+      spoken('"Stay back," I say, drawing my blade and stepping between them. "Now."')
+    ).toEqual({
+      lines: ['Stay back.', 'Now.'],
+      directions: ['I say, drawing my blade and stepping between them.'],
+    });
+  });
+
+  it("accepts the speaker's own name as a tag subject", () => {
+    const raw = '"Wait." Kira whispers it, barely moving.';
+    const split = splitSpeech(raw, ['Kira Vale', 'Kira']);
+    expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual([
+      'Kira whispers it, barely moving.',
+    ]);
+  });
+
+  it.each([
+    'Aye, the "old road" is safer.',
+    'I think "Stay back" is wise.',
+    '"Never." Well, I don\'t.',
+    '"Go." I let him go once.',
+    'I nod. "Fine." We should move before dark.',
+    'I nod slowly. "Stay back," I say. "Now',
+  ])('keeps %j whole', (raw) => {
+    expect(spoken(raw).directions).toEqual([]);
+    expect(spoken(raw).lines).toHaveLength(1);
   });
 });
 

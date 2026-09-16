@@ -1,7 +1,7 @@
 # Session script (post-processing) — Design
 
 **Date:** 2026-09-16
-**Status:** Approved design; implementation plan not yet written
+**Status:** Approved design; implementation plan not yet written. §5.1 amended 2026-09-16 to add the direction rule.
 **Related:** v1 design §4 (event log), §8 (media), §9 (playback) (`2026-09-13-cartyx-sim-v1-design.md`); roadmap Plans 3 and 4 (`../plans/2026-09-13-cartyx-sim-v1-roadmap.md`); checker design (`2026-09-14-dm-pc-control-checker-design.md`)
 
 ## 1. Purpose
@@ -146,9 +146,11 @@ The build reads the log in order and uses public events only. State needed for n
 
 ### 5.1 PC `dialogue` (from `speak` and `interject`), rules only
 
-- The text is split into quoted spans and dialogue lines only when all four hold: it contains at least one balanced quoted span; the first kept character is a quote mark; the text outside the quotes has words; and the quoted text is at least half of the text's non-space characters. When it splits, each quoted span becomes a `dialogue` line and each outside span is dropped as `stage_direction`.
+- The text is split into quoted spans and dialogue lines when either path holds. When it splits, each quoted span becomes a `dialogue` line and each outside span is dropped as `stage_direction`.
+  - **The quote-majority path** (unchanged): it contains at least one balanced quoted span; the first kept character is a quote mark; the text outside the quotes has words; and the quoted text is at least half of the text's non-space characters.
+  - **The direction path**: every quote span is closed and reads as a whole sentence (its first kept letter is uppercase, its last kept non-space character one of `. , ! ? … — –`); the text outside the quotes has words; and every outside gap with words, split into sentences at `[.!?…]` followed by whitespace, is entirely speech tags (`I say, drawing my blade and stepping between them.`) or first-person actions (`I nod slowly.`) — matched against a fixed tag verb list and a fixed action verb list, with the speaker's own names (PCs only) counting as a tag subject alongside `I`/`he`/`she`/`they`. Verbs such as `keep`, `let`, `hold`, `think`, and `mean` are deliberately excluded from both lists, because they start real speech ("I let him go once.", "I think we wait.").
 - Otherwise the whole text is one line, with stray or wrapping quotes removed (§4.1.3).
-- **Known cost:** these four conditions were chosen so the split never drops speech, at the cost of sometimes voicing a stage direction whole when it doesn't clearly stand apart from the quoted speech. For example, `I nod slowly. "Let's go, then."` and `"Hello," she says.` are voiced whole rather than split.
+- **Known cost:** these conditions were chosen so the split never drops speech, at the cost of sometimes voicing a stage direction whole when it doesn't clearly stand apart from the quoted speech — a direction that matches neither pattern is still voiced whole.
 - Markdown emphasis is removed. Slips such as "Kira's — I mean, _my_ — take" are kept as spoken: fixing them would need rewriting.
 
 ### 5.2 DM `narration`
