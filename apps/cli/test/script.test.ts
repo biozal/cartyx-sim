@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -126,6 +127,18 @@ describe('makeScript', () => {
     expect(book).toContain('**Faceless creature:** You... opened... the door.');
     expect(book).toContain('**Kira Vale:** Not us. *(I back away.)*');
     await expect(stat(join(sessionPath, 'events.jsonl.lock'))).rejects.toThrow();
+  });
+
+  it('releases the session lock before asking the labeling seat', async () => {
+    let lockHeldDuringLabel: boolean | undefined;
+    reply = () => {
+      lockHeldDuringLabel = existsSync(join(sessionPath, 'events.jsonl.lock'));
+      return { text: LABELS };
+    };
+
+    await makeScript(options());
+
+    expect(lockHeldDuringLabel).toBe(false);
   });
 
   it('answers from the cache on a second run, and asks again with refresh', async () => {

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { SimEvent } from '@cartyx-sim/core';
 import { OpenAICompatibleModelClient } from '@cartyx-sim/models';
 import {
   buildScript,
@@ -88,8 +89,9 @@ async function campaignLabeler(
 
 /**
  * Builds `script.json` and `script.md` for one session from its event log, which it never
- * modifies. Holds the session lock while it reads and builds, so it cannot run against a session
- * that is still being played.
+ * modifies. Holds the session lock only while it reads and hashes the log, so it refuses to start
+ * while the session is being played, but does not hold the lock while the (potentially slow)
+ * labeling model runs or while the outputs are written.
  */
 export async function makeScript(options: ScriptOptions): Promise<ScriptResult> {
   const log = options.log ?? (() => {});
@@ -109,39 +111,41 @@ export async function makeScript(options: ScriptOptions): Promise<ScriptResult> 
       `Replaced a stale lock from process ${stalePid}, which is no longer running: ${eventsPath}.lock`
     );
   }
+  let events: SimEvent[];
+  let eventsSha256: string;
   try {
-    const events = await sink.readAll();
+    const bytes = await readFile(eventsPath);
+    eventsSha256 = createHash('sha256').update(bytes).digest('hex');
+    events = await sink.readAll();
     if (sink.tornTail) {
       log(
         `Ignoring an incomplete final line (line ${sink.tornTail.line}) left by an interrupted ` +
           `write: ${eventsPath}`
       );
     }
-    const eventsSha256 = createHash('sha256')
-      .update(await readFile(eventsPath))
-      .digest('hex');
-    const { script, stats } = await buildScript({
-      campaign: options.campaign,
-      session: options.session,
-      eventsSha256,
-      events,
-      labeler: labeling.labeler,
-      speakers,
-    });
-    const scriptPath = join(dir, 'script.json');
-    const markdownPath = join(dir, 'script.md');
-    await writeFileAtomic(scriptPath, `${JSON.stringify(script, null, 2)}\n`);
-    await writeFileAtomic(markdownPath, renderScriptMarkdown(script));
-    return {
-      scriptPath,
-      markdownPath,
-      stats,
-      notes: script.notes,
-      ...(labeling.seat ? { labelSeat: labeling.seat } : {}),
-    };
   } finally {
     await sink.releaseLock();
   }
+
+  const { script, stats } = await buildScript({
+    campaign: options.campaign,
+    session: options.session,
+    eventsSha256,
+    events,
+    labeler: labeling.labeler,
+    speakers,
+  });
+  const scriptPath = join(dir, 'script.json');
+  const markdownPath = join(dir, 'script.md');
+  await writeFileAtomic(scriptPath, `${JSON.stringify(script, null, 2)}\n`);
+  await writeFileAtomic(markdownPath, renderScriptMarkdown(script));
+  return {
+    scriptPath,
+    markdownPath,
+    stats,
+    notes: script.notes,
+    ...(labeling.seat ? { labelSeat: labeling.seat } : {}),
+  };
 }
 
 export function formatScriptSummary(result: ScriptResult): string[] {

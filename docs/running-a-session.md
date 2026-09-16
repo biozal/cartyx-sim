@@ -159,4 +159,4 @@ To rename or merge speakers, add `sessions/NNN/speakers.json` and re-run:
 
 `name` renames a speaker; `id` merges one NPC into another. Unknown speakers and merges into a player character or the DM are errors.
 
-`sim script` refuses to run while the session is being played (it takes the same lock as `sim run`) and prints a summary: lines by kind, spoken words, how quotes were labeled, dropped stage directions, unlisted speakers, and notes.
+`sim script` refuses to start while the session is being played: it takes the same lock as `sim run`, but only while it reads and hashes the log, releasing it before labeling and writing the outputs. It prints a summary: lines by kind, spoken words, how quotes were labeled, dropped stage directions, unlisted speakers, and notes.
