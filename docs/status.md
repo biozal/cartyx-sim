@@ -115,4 +115,5 @@ The full list is in the roadmap's Backlog section. Highlights:
   - `ModelRequest.signal` is never set;
   - a seeded run's dice restart on resume;
   - kira's 8-bit Qwen3.8 is the slowest seat; a 4-bit build would roughly halve its turns;
+  - the script labeling prompt should label a quote inside reported speech ("mutters something about "…"") as `none`; bump `LABEL_PROMPT_VERSION` when it changes;
   - plus the older cleanup items.
