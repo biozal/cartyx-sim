@@ -113,25 +113,30 @@ class ScriptBuilder {
   }
 
   async run(): Promise<void> {
-    let pause: { seq: number; reason: string } | undefined;
+    const pauses: { seq: number; reason: string }[] = [];
     for (const event of this.input.events) {
       this.state = applyEvent(this.state, event);
       if (event.type === 'session_paused') {
-        pause = { seq: event.seq, reason: event.reason };
+        pauses.push({ seq: event.seq, reason: event.reason });
         continue;
       }
-      if (pause) {
+      for (const pause of pauses) {
         this.push({
           kind: 'pause',
           sources: [{ seq: pause.seq }],
           pause: { reason: pause.reason },
         });
-        pause = undefined;
       }
+      pauses.length = 0;
       if (event.type === 'scene_change') this.sceneNpcs = [];
       if (event.type === 'npc_introduced') {
         this.descriptions.set(event.npcId, event.description);
         if (!this.sceneNpcs.includes(event.npcId)) this.sceneNpcs.push(event.npcId);
+        this.speakers.promote(event.npcId, event.name);
+        const labelIndex = this.newLabels.findIndex(
+          (label) => `npc-${slugify(label)}` === event.npcId
+        );
+        if (labelIndex !== -1) this.newLabels.splice(labelIndex, 1);
       }
       if (event.visibility === 'public') await this.add(event);
     }

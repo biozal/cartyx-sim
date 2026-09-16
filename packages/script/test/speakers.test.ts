@@ -45,6 +45,35 @@ describe('SpeakerTable', () => {
   });
 });
 
+describe('SpeakerTable.promote', () => {
+  it('turns an unlisted NPC into a listed one, keeping its position', () => {
+    const speakers = new SpeakerTable(PARTY);
+    speakers.unlisted('npc-thing', 'Thing', 12);
+    speakers.npc('npc-warden', 'The Warden');
+    speakers.promote('npc-thing', 'The Thing');
+    expect(speakers.list()).toEqual([
+      { id: 'dm', name: 'Dungeon Master', kind: 'dm' },
+      { id: 'kira', name: 'Kira Vale', kind: 'pc' },
+      { id: 'tomas', name: 'Tomas Reed', kind: 'pc' },
+      { id: 'npc-thing', name: 'The Thing', kind: 'npc' },
+      { id: 'npc-warden', name: 'The Warden', kind: 'npc' },
+    ]);
+  });
+
+  it('does nothing to an already-listed speaker', () => {
+    const speakers = new SpeakerTable(PARTY);
+    speakers.npc('npc-warden', 'The Warden');
+    speakers.promote('npc-warden', 'Someone Else');
+    expect(speakers.list()).toContainEqual({ id: 'npc-warden', name: 'The Warden', kind: 'npc' });
+  });
+
+  it('does nothing for an unknown id', () => {
+    const speakers = new SpeakerTable(PARTY);
+    speakers.promote('npc-ghost', 'Ghost');
+    expect(speakers.list().map((s) => s.id)).not.toContain('npc-ghost');
+  });
+});
+
 describe('applySpeakerOverrides', () => {
   it('renames a speaker', () => {
     const result = applySpeakerOverrides(table(), [], {

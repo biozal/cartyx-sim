@@ -35,6 +35,20 @@ export class SpeakerTable {
     return [...this.byId.values()].map((speaker) => ({ ...speaker }));
   }
 
+  /**
+   * Turns an unlisted NPC into a listed one named `name`, keeping its position in the table.
+   * Does nothing if `id` is not an unlisted speaker.
+   */
+  promote(id: string, name: string): void {
+    const speaker = this.byId.get(id);
+    if (!speaker?.unlisted) return;
+    const entries = [...this.byId.entries()].map(([key, value]): [string, Speaker] =>
+      key === id ? [key, { id, name, kind: 'npc' }] : [key, value]
+    );
+    this.byId.clear();
+    for (const [key, value] of entries) this.byId.set(key, value);
+  }
+
   private add(speaker: Speaker): string {
     if (!this.byId.has(speaker.id)) this.byId.set(speaker.id, speaker);
     return speaker.id;

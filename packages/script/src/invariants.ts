@@ -1,6 +1,6 @@
 import type { SimEvent } from '@cartyx-sim/core';
 import { BULLET, finishLine, sourceLines } from './normalize';
-import { isVoiced, type ScriptFile } from './schema';
+import { isVoiced, type DroppedSpan, type ScriptFile } from './schema';
 
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 
@@ -24,8 +24,9 @@ function markerOffsets(text: string): Set<number> {
 /**
  * Everything wrong with a script against its log (empty when it is sound): ids must run L0001,
  * L0002, … and lines follow log order; every voiced line's text must equal `finishLine` of its
- * source slices; and every letter or digit of a public spoken event must be in some line or a
- * dropped span.
+ * source slices, from a public event; every dropped span must lie inside its event's source text
+ * and match the text it records; and every letter or digit of a public spoken event must be in
+ * some line or a dropped span.
  */
 export function invariantViolations(script: ScriptFile, events: readonly SimEvent[]): string[] {
   const problems: string[] = [];
@@ -41,6 +42,21 @@ export function invariantViolations(script: ScriptFile, events: readonly SimEven
     }
     marks.fill(1, start, end);
   };
+  /** Checks a dropped span against its event's source text, reporting `where` if it is wrong. */
+  const checkSpan = (where: string, span: DroppedSpan): boolean => {
+    const text = sourceText(bySeq.get(span.seq));
+    const valid =
+      text !== undefined &&
+      span.start <= span.end &&
+      span.end <= text.length &&
+      span.text === text.slice(span.start, span.end);
+    if (!valid) {
+      problems.push(
+        `${where}: dropped span ${span.seq}:${span.start}-${span.end} does not match its source`
+      );
+    }
+    return valid;
+  };
 
   let lastSeq = -1;
   script.lines.forEach((line, index) => {
@@ -52,11 +68,16 @@ export function invariantViolations(script: ScriptFile, events: readonly SimEven
     if (!isVoiced(line)) return;
     const pieces: string[] = [];
     for (const source of line.sources) {
-      const text = sourceText(bySeq.get(source.seq));
+      const event = bySeq.get(source.seq);
+      const text = sourceText(event);
       if (text === undefined || source.start > source.end || source.end > text.length) {
         problems.push(
           `${line.id}: source ${source.seq}:${source.start}-${source.end} is not in a spoken event`
         );
+        return;
+      }
+      if (event?.visibility !== 'public') {
+        problems.push(`${line.id}: source ${source.seq} is not a public event`);
         return;
       }
       pieces.push(text.slice(source.start, source.end));
@@ -69,10 +90,14 @@ export function invariantViolations(script: ScriptFile, events: readonly SimEven
           JSON.stringify(expected)
       );
     }
-    for (const span of line.dropped ?? []) cover(span.seq, span.start, span.end);
+    for (const span of line.dropped ?? []) {
+      if (checkSpan(line.id, span)) cover(span.seq, span.start, span.end);
+    }
   });
   for (const note of script.notes) {
-    for (const span of note.dropped ?? []) cover(span.seq, span.start, span.end);
+    for (const span of note.dropped ?? []) {
+      if (checkSpan(`note ${note.seq}`, span)) cover(span.seq, span.start, span.end);
+    }
   }
 
   for (const event of events) {

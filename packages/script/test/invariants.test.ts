@@ -50,4 +50,42 @@ describe('invariantViolations', () => {
     expect(problems).toContain('L0009: expected id L0001');
     expect(problems).toContain('L0009: source 0:0-3 is not in a spoken event');
   });
+
+  it('reports a dropped span whose text does not match its source', async () => {
+    const script = await built();
+    const line = script.lines.find(
+      (candidate): candidate is VoicedLine => 'dropped' in candidate && !!candidate.dropped?.length
+    )!;
+    const span = line.dropped![0]!;
+    span.text = 'x';
+    expect(invariantViolations(script, EVENTS)).toContain(
+      `${line.id}: dropped span ${span.seq}:${span.start}-${span.end} does not match its source`
+    );
+  });
+
+  it('reports a dropped span whose end runs past its source text', async () => {
+    const script = await built();
+    const line = script.lines.find(
+      (candidate): candidate is VoicedLine => 'dropped' in candidate && !!candidate.dropped?.length
+    )!;
+    const span = line.dropped![0]!;
+    span.end += 1000;
+    expect(invariantViolations(script, EVENTS)).toContain(
+      `${line.id}: dropped span ${span.seq}:${span.start}-${span.end} does not match its source`
+    );
+  });
+
+  it('reports a line whose source points at a non-public event', async () => {
+    const log = eventLog([
+      narration('The gate creaks.'),
+      { ...narration('Note.'), visibility: 'dm' },
+    ]);
+    const script = (
+      await buildScript({ campaign: 'a', session: 1, eventsSha256: SHA, events: log })
+    ).script;
+    const line = script.lines[0] as VoicedLine;
+    line.sources = [{ seq: 2, start: 0, end: 5 }];
+    line.text = 'Note.';
+    expect(invariantViolations(script, log)).toContain('L0001: source 2 is not a public event');
+  });
 });

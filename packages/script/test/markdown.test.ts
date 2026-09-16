@@ -274,4 +274,23 @@ describe('renderScriptMarkdown', () => {
     expect(state(3, 0)).toContain('*Goblin is down.*');
     expect(state(0, 4)).toContain('*Goblin recovers.*');
   });
+
+  it('adds no line for an unchanged hidden HP value, and flags one that cannot be compared', () => {
+    const state = (before: unknown, after: unknown) =>
+      renderScriptMarkdown({
+        ...SCRIPT,
+        speakers: [],
+        notes: [],
+        lines: [
+          {
+            id: 'L0001',
+            kind: 'state',
+            sources: [{ seq: 1 }],
+            state: { entity: 'g', name: 'Goblin', field: 'hp', before, after, hidden: true },
+          },
+        ],
+      });
+    expect(state(4, 4)).not.toContain('Goblin');
+    expect(state('?', 3)).toContain("*Goblin's condition changes.*");
+  });
 });

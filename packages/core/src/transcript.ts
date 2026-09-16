@@ -12,13 +12,37 @@ function isHiddenStats(id: string, state: GameState): boolean {
   return ownEntry(state.combatants, id)?.kind !== 'pc';
 }
 
+/** How an HP value moved, without exposing the numbers themselves. */
+export type HpTrend = 'down' | 'wounded' | 'recovers' | 'unchanged' | 'unknown';
+
+/**
+ * Compares two HP values coarsely: `unknown` when either is not a finite number, `down` when
+ * `after` is at or below zero, `wounded` for a drop, `recovers` for a rise, else `unchanged`.
+ */
+export function hpTrend(before: unknown, after: unknown): HpTrend {
+  const from = Number(before);
+  const to = Number(after);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return 'unknown';
+  if (to <= 0) return 'down';
+  if (to < from) return 'wounded';
+  if (to > from) return 'recovers';
+  return 'unchanged';
+}
+
 /** Spec §5.5: monster AC and HP never enter a player prompt or transcript. */
 function describeHpChange(name: string, before: unknown, after: unknown): string {
-  const from = typeof before === 'number' ? before : Number(before);
-  const to = typeof after === 'number' ? after : Number(after);
-  if (to === 0) return `[state] ${name} is down`;
-  if (to < from) return `[state] ${name} is wounded`;
-  return `[state] ${name} recovers`;
+  switch (hpTrend(before, after)) {
+    case 'down':
+      return `[state] ${name} is down`;
+    case 'wounded':
+      return `[state] ${name} is wounded`;
+    case 'recovers':
+      return `[state] ${name} recovers`;
+    case 'unchanged':
+      return `[state] ${name} is unchanged`;
+    case 'unknown':
+      return `[state] ${name} changes condition`;
+  }
 }
 
 /** One human-readable transcript line for an event, or null if the event is not shown. */

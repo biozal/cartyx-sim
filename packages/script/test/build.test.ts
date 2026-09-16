@@ -1,7 +1,7 @@
 import { makeCombatant } from '@cartyx-sim/rules/testing';
 import { describe, expect, it } from 'vitest';
 import { buildScript } from '../src/build';
-import { ScriptError, type ScriptFile } from '../src/schema';
+import { isVoiced, ScriptError, type ScriptFile } from '../src/schema';
 import { eventLog, FakeLabeler, KIRA, narration, SHA, TOMAS } from './helpers';
 
 const CREATURE = 'The slit opens.\n\n*"You... opened... the door,"* it rasps.\n\n**Hand off.**';
@@ -209,6 +209,63 @@ describe('buildScript', () => {
       { id: 'L0004', kind: 'pause', sources: [{ seq: 6 }], pause: { reason: 'Seat failed' } },
       { id: 'L0005', kind: 'combat', sources: [{ seq: 8 }], combat: { phase: 'end' } },
     ]);
+  });
+
+  it('keeps every pause when the session pauses more than once in a row', async () => {
+    const events = eventLog([
+      { type: 'session_paused', visibility: 'dm', seat: 'dm', reason: 'Seat failed', kind: 'seat' },
+      {
+        type: 'session_paused',
+        visibility: 'dm',
+        seat: 'player',
+        reason: 'Player disconnected',
+        kind: 'seat',
+      },
+      narration('The fire crackles.'),
+    ]);
+    const { script } = await build(events);
+    expect(summary(script)).toEqual([
+      ['L0001', 'pause'],
+      ['L0002', 'pause'],
+      ['L0003', 'narration', 'dm', 'The fire crackles.'],
+    ]);
+    expect(script.lines[0]).toMatchObject({
+      sources: [{ seq: 1 }],
+      pause: { reason: 'Seat failed' },
+    });
+    expect(script.lines[1]).toMatchObject({
+      sources: [{ seq: 2 }],
+      pause: { reason: 'Player disconnected' },
+    });
+  });
+
+  it('promotes an NPC named by the model before its npc_introduced event', async () => {
+    const labeler = new FakeLabeler((request) =>
+      request.seq === 1
+        ? { labels: [{ kind: 'new', label: 'the warden' }], source: 'model' }
+        : { labels: [{ kind: 'npc', id: 'npc-the-warden' }], source: 'model' }
+    );
+    const events = eventLog([
+      narration('"Open the gate," a voice says.'),
+      {
+        type: 'npc_introduced',
+        npcId: 'npc-the-warden',
+        name: 'The Warden',
+        description: 'A stone guardian',
+        invented: true,
+      },
+      narration('"Now," the Warden says.'),
+    ]);
+    const { script } = await build(events, { labeler });
+    expect(script.speakers.filter((speaker) => speaker.id === 'npc-the-warden')).toEqual([
+      { id: 'npc-the-warden', name: 'The Warden', kind: 'npc' },
+    ]);
+    const dialogueLines = script.lines.filter((line) => isVoiced(line) && line.kind === 'dialogue');
+    expect(dialogueLines).toHaveLength(2);
+    expect(dialogueLines.every((line) => isVoiced(line) && line.speaker === 'npc-the-warden')).toBe(
+      true
+    );
+    expect(labeler.requests[1]!.newLabels).not.toContain('the warden');
   });
 
   it('attributes quotes by rules without a labeler, and says why when the labeler fails', async () => {

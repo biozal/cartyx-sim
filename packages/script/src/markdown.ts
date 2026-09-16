@@ -1,4 +1,4 @@
-import { countWords } from '@cartyx-sim/core';
+import { countWords, hpTrend } from '@cartyx-sim/core';
 import {
   isVoiced,
   type CombatLine,
@@ -45,17 +45,29 @@ function combat({ combat }: CombatLine): string {
   }
 }
 
-/** Spec §5.5 of the v1 design: a non-PC's HP numbers never appear, only how it is doing. */
-function stateChange({ state }: StateLine): string {
+/**
+ * Spec §5.5 of the v1 design: a non-PC's HP numbers never appear, only how it is doing. Returns
+ * null for a hidden entity whose HP did not change, so `renderScriptMarkdown` adds no block.
+ */
+function stateChange({ state }: StateLine): string | null {
   if (state.field === 'dead') return `*${state.name} dies.*`;
   if (state.field === 'conditions') {
     const list = Array.isArray(state.after) ? state.after.map(String).join(', ') : '';
     return `*${state.name} conditions: ${list || 'none'}.*`;
   }
   if (state.hidden) {
-    const after = Number(state.after);
-    const how = after <= 0 ? 'is down' : after < Number(state.before) ? 'is wounded' : 'recovers';
-    return `*${state.name} ${how}.*`;
+    switch (hpTrend(state.before, state.after)) {
+      case 'down':
+        return `*${state.name} is down.*`;
+      case 'wounded':
+        return `*${state.name} is wounded.*`;
+      case 'recovers':
+        return `*${state.name} recovers.*`;
+      case 'unchanged':
+        return null;
+      case 'unknown':
+        return `*${state.name}'s condition changes.*`;
+    }
   }
   return `*${state.name}: HP ${String(state.before)} → ${String(state.after)}.*`;
 }
@@ -107,9 +119,11 @@ export function renderScriptMarkdown(script: ScriptFile): string {
       case 'combat':
         blocks.push(combat(line));
         break;
-      case 'state':
-        blocks.push(stateChange(line));
+      case 'state': {
+        const cue = stateChange(line);
+        if (cue !== null) blocks.push(cue);
         break;
+      }
       case 'pause':
         blocks.push('---', '*The session paused here and resumed later.*', '---');
         break;
