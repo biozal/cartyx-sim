@@ -146,8 +146,9 @@ The build reads the log in order and uses public events only. State needed for n
 
 ### 5.1 PC `dialogue` (from `speak` and `interject`), rules only
 
-- If the text contains at least one balanced quoted span **and** non-whitespace text outside quotes, each quoted span becomes a `dialogue` line and each outside span is dropped as `stage_direction`.
+- The text is split into quoted spans and dialogue lines only when all four hold: it contains at least one balanced quoted span; the first kept character is a quote mark; the text outside the quotes has words; and the quoted text is at least half of the text's non-space characters. When it splits, each quoted span becomes a `dialogue` line and each outside span is dropped as `stage_direction`.
 - Otherwise the whole text is one line, with stray or wrapping quotes removed (§4.1.3).
+- **Known cost:** these four conditions were chosen so the split never drops speech, at the cost of sometimes voicing a stage direction whole when it doesn't clearly stand apart from the quoted speech. For example, `I nod slowly. "Let's go, then."` and `"Hello," she says.` are voiced whole rather than split.
 - Markdown emphasis is removed. Slips such as "Kira's — I mean, _my_ — take" are kept as spoken: fixing them would need rewriting.
 
 ### 5.2 DM `narration`
@@ -229,7 +230,7 @@ npm run sim -- script --campaign avalon --session 3 [--no-model] [--refresh] [--
 
 - **Unit tests per pass**, with fixtures copied from the real quirks in §2 (trimmed excerpts; `campaigns/` is git-ignored).
 - **Invariant tests** (§5.6) run over every fixture and over the full build of each fixture log.
-- **Attribution**: a scripted fake `Labeler` covering a valid reply, an invalid reply then a valid retry, two invalid replies then fallback, a `new:` label reused across events, a PC label producing `dm_wrote_pc`, and `none`.
+- **Attribution**: a scripted fake `Labeler` covering a valid reply, an invalid reply then a valid retry, two invalid replies then fallback, a `new:` label reused across events, a PC label producing `dmWrotePc`, and `none`.
 - **Cache**: hit, miss, and `--refresh`.
 - **`speakers.json`**: rename, merge, and each error case.
 - **CLI**: a small fixture session end to end, checking both files and a `script.md` snapshot.
