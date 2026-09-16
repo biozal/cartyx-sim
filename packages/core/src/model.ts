@@ -10,6 +10,8 @@ export type ToolCall = z.infer<typeof ToolCall>;
 export const ModelResponse = z.object({
   text: z.string().default(''),
   toolCalls: z.array(ToolCall).default([]),
+  /** The model that produced this reply (a fallback's id when the primary failed), when known. */
+  model: z.string().optional(),
 });
 export type ModelResponse = z.output<typeof ModelResponse>;
 

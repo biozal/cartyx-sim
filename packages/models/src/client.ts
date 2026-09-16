@@ -95,7 +95,11 @@ export class OpenAICompatibleModelClient implements ModelClient {
       abortSignal: request.signal ? AbortSignal.any([timeout, request.signal]) : timeout,
     });
     return {
-      response: { text: result.text, toolCalls: toToolCalls(result.toolCalls) },
+      response: {
+        text: result.text,
+        toolCalls: toToolCalls(result.toolCalls),
+        model: target.model,
+      },
       finishReason: result.finishReason,
     };
   }

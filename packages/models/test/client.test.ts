@@ -80,6 +80,7 @@ describe('OpenAICompatibleModelClient', () => {
     expect(response).toEqual({
       text: 'thinking',
       toolCalls: [{ id: 'call_1', name: 'narrate', args: { text: 'The lab hums.' } }],
+      model: 'qwen-dm',
     });
     const sent = fake.requests[0]!;
     expect(sent).toMatchObject({
@@ -122,6 +123,7 @@ describe('OpenAICompatibleModelClient', () => {
     expect(await client.complete(request({ toolChoice: 'auto' }))).toEqual({
       text: 'The lab hums.',
       toolCalls: [],
+      model: 'm',
     });
   });
 
@@ -165,6 +167,7 @@ describe('OpenAICompatibleModelClient', () => {
     });
     expect(await client.complete(request())).toMatchObject({
       toolCalls: [{ name: 'narrate', args: { text: 'From the backup.' } }],
+      model: 'small',
     });
     expect(primary.requests).toHaveLength(1);
     expect(backup.requests[0]?.model).toBe('small');
@@ -363,6 +366,7 @@ describe('OpenAICompatibleModelClient', () => {
     expect(await client.complete(request({ toolChoice: 'auto' }))).toEqual({
       text: '',
       toolCalls: [],
+      model: 'm',
     });
     expect(fake.requests).toHaveLength(1);
   });

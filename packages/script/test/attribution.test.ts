@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildLabelMessages,
   fallbackLabels,
+  LABEL_PROMPT_VERSION,
   labelCacheKey,
   ModelLabeler,
   parseLabelReply,
@@ -52,6 +53,12 @@ describe('buildLabelMessages', () => {
     const content = user && 'content' in user ? user.content : '';
     expect(content).toContain('Known NPCs:\n(none)');
     expect(content).toContain('Earlier new: labels this session:\n(none)');
+  });
+
+  it('tells the model that a quote inside reported speech is not speech', () => {
+    const [system] = buildLabelMessages(REQUEST);
+    expect(system && 'content' in system ? system.content : '').toMatch(/reported speech/i);
+    expect(LABEL_PROMPT_VERSION).toBe(3);
   });
 });
 
@@ -278,5 +285,16 @@ describe('ModelLabeler', () => {
       labels: [{ kind: 'new', label: 'faceless creature' }, { kind: 'none' }],
       source: 'model',
     });
+  });
+
+  it('caches a fallback model reply under that model, not the primary', async () => {
+    const cache = new MemoryCache();
+    const model = {
+      complete: async () => ({ ...reply(good), model: 'fallback-model' }),
+    };
+    const labeler = new ModelLabeler({ model, seat: 'script', modelId: 'primary-model', cache });
+    await labeler.label(REQUEST);
+    expect(await cache.get(await labelCacheKey('fallback-model', REQUEST))).toBeDefined();
+    expect(await cache.get(await labelCacheKey('primary-model', REQUEST))).toBeUndefined();
   });
 });

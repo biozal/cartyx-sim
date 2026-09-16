@@ -1,8 +1,14 @@
-import { countWords, findJsonReply, type ChatMessage, type ModelClient } from '@cartyx-sim/core';
+import {
+  countWords,
+  findJsonReply,
+  type ChatMessage,
+  type ModelClient,
+  type ModelResponse,
+} from '@cartyx-sim/core';
 import { z } from 'zod';
 
 /** Part of every cache key: bump it whenever the prompt or the label rules change. */
-export const LABEL_PROMPT_VERSION = 2;
+export const LABEL_PROMPT_VERSION = 3;
 
 /** The `new:` label the rules fallback gives a speaker it cannot name. */
 export const UNNAMED_LABEL = 'unnamed';
@@ -53,6 +59,7 @@ const SYSTEM_PROMPT = [
   '- "new:<short description>" when a character with no id says it, such as "new:faceless creature"; reuse an earlier new: label when it is the same character;',
   '- the id of a player character, when the narration has that player character say it;',
   '- "none" when it is not speech: a sign, an inscription, a name, a sound, or an emphasized word.',
+  '- "none" also for words the narration only reports, such as "mutters something about "bad luck"" or "says that "the gate is shut"": reported speech is part of the narration, not a line of dialogue.',
   'Reply with only a JSON object: {"labels": [{"quote": 1, "speaker": "..."}]}, with one entry per quotation.',
 ].join('\n');
 
@@ -149,7 +156,12 @@ export function fallbackLabels(request: LabelRequest, sceneNpcIds: readonly stri
   });
 }
 
-/** The cache key for a request: a SHA-256 hex digest of the prompt version, model id, and request. */
+/**
+ * The cache key for a request: a SHA-256 hex digest of the prompt version, model id, and request.
+ * A lookup uses the primary model's key; a write uses the key of the model that answered (the
+ * primary, or a fallback when it answered instead), so a fallback's reply is never served as the
+ * primary's.
+ */
 export async function labelCacheKey(modelId: string, request: LabelRequest): Promise<string> {
   const data = new TextEncoder().encode(
     JSON.stringify({ version: LABEL_PROMPT_VERSION, model: modelId, request })
@@ -167,7 +179,7 @@ export interface LabelCache {
 export interface ModelLabelerOptions {
   model: ModelClient;
   seat: string;
-  /** The seat's model id, part of the cache key. */
+  /** The seat's primary model id: cache lookups use its key, even when a fallback answers. */
   modelId: string;
   cache?: LabelCache;
   /** Ignore cached replies (new replies are still cached). */
@@ -195,9 +207,9 @@ export class ModelLabeler implements Labeler {
     const messages = buildLabelMessages(request);
     let problem = '';
     for (let attempt = 0; attempt < REPLY_ATTEMPTS; attempt++) {
-      let text: string;
+      let response: ModelResponse;
       try {
-        const response = await model.complete({
+        response = await model.complete({
           seat,
           turnId: `script-${request.seq}`,
           messages,
@@ -205,17 +217,20 @@ export class ModelLabeler implements Labeler {
           toolChoice: 'auto',
           incompleteReplyAttempts: INCOMPLETE_REPLY_ATTEMPTS,
         });
-        text = response.text;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { labels: null, reason: `seat "${seat}" unavailable (${message})` };
       }
-      const parsed = parseLabelReply(text, request);
+      const parsed = parseLabelReply(response.text, request);
       if ('labels' in parsed) {
+        // Cache under the model that actually answered: a fallback's reply must never be served
+        // back as the primary's on a later lookup.
+        const answeredBy = response.model ?? modelId;
+        const writeKey = answeredBy === modelId ? key : await labelCacheKey(answeredBy, request);
         // A cache write failure should not fail the run: the labels are still good, and the next
         // run will simply ask the model again instead of getting a hit.
         try {
-          await cache?.set(key, parsed.reply);
+          await cache?.set(writeKey, parsed.reply);
         } catch {
           // Ignored; see above.
         }
@@ -223,7 +238,7 @@ export class ModelLabeler implements Labeler {
       }
       problem = parsed.error;
       messages.push(
-        { role: 'assistant', content: text, toolCalls: [] },
+        { role: 'assistant', content: response.text, toolCalls: [] },
         {
           role: 'user',
           content: `That reply could not be used: ${problem}. Reply again with only the JSON object.`,
