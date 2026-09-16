@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { benchSeat, type BenchResult } from '@cartyx-sim/models';
-import { CHECKER_SEAT, loadCampaign } from './campaign';
+import { CHECKER_SEAT, loadCampaign, SCRIPT_SEAT } from './campaign';
 
 export interface BenchOptions {
   campaignsDir: string;
@@ -62,8 +62,8 @@ export async function runBench(options: BenchOptions): Promise<BenchReport> {
   const results: BenchResult[] = [];
   for (const [seat, model] of Object.entries(campaign.models)) {
     log(`Benchmarking ${seat} (${model.model} at ${model.endpoint.baseURL})...`);
-    // The checker answers in JSON without tools, so it gets no tool-call trials.
-    const trials = seat === CHECKER_SEAT ? 0 : options.trials;
+    // The checker and script seats answer in JSON without tools, so they get no tool-call trials.
+    const trials = seat === CHECKER_SEAT || seat === SCRIPT_SEAT ? 0 : options.trials;
     results.push(await benchSeat(seat, model, { trials }));
   }
   for (const line of formatBenchTable(results)) log(line);

@@ -158,6 +158,42 @@ describe('runBench', () => {
     expect(benchPassed(report.results)).toBe(true);
     expect(lines.find((line) => line.startsWith('checker'))).toMatch(/\s0\/0$/);
   });
+
+  it('benchmarks a script seat without tool-call trials', async () => {
+    const dir = join(campaignsDir, 'scripted');
+    await mkdir(join(dir, 'characters'), { recursive: true });
+    await writeFile(
+      join(dir, 'campaign.json'),
+      JSON.stringify({
+        name: 'Scripted',
+        targetMinutes: 30,
+        endpoints: { local: { baseURL: fake.baseURL } },
+        seats: {
+          dm: { endpoint: 'local', model: 'dm-model' },
+          script: { endpoint: 'local', model: 'player-model', reasoningEffort: 'none' },
+          players: { kira: { endpoint: 'local', model: 'player-model' } },
+        },
+      })
+    );
+    await writeFile(join(dir, 'characters', 'kira.json'), KIRA);
+    const lines: string[] = [];
+
+    const report = await runBench({
+      campaignsDir,
+      campaign: 'scripted',
+      trials: 2,
+      log: (line) => lines.push(line),
+    });
+
+    expect(report.results.map((result) => [result.seat, result.toolCallTrials])).toEqual([
+      ['dm', 2],
+      ['script', 0],
+      ['player-kira', 2],
+    ]);
+    expect(report.results[1]).toMatchObject({ reachable: true, modelListed: true });
+    expect(benchPassed(report.results)).toBe(true);
+    expect(lines.find((line) => line.startsWith('script'))).toMatch(/\s0\/0$/);
+  });
 });
 
 describe('formatBenchTable', () => {
