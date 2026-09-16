@@ -1,6 +1,6 @@
 # cartyx-sim status
 
-_Last updated: 2026-09-14_
+_Last updated: 2026-09-16_
 
 cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on local models) built to test the Cartyx lore in `cartyx-lore`. It records a session as an event log, and later plans add voices, art, and a video-call-style playback page for recording. See the spec (`docs/superpowers/specs/2026-09-13-cartyx-sim-v1-design.md`) and the roadmap (`docs/superpowers/plans/2026-09-13-cartyx-sim-v1-roadmap.md`).
 
@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `main`:** `npm run typecheck`, `npm test` (36 files, 545 tests), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (54 files, 788 tests), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -27,6 +27,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 - **`sim bench --campaign <id>`**: checks each seat's reachability, whether the server lists the model, tokens per second, and tool-call reliability; saves a report under `campaigns/<id>/bench/` and exits 1 on failure.
 - **Pause and resume**: seat failures and the runaway-loop backstop pause the session (exit code 2) with a logged `session_paused` event; `--resume` continues from the log with a fresh backstop budget.
 - **Campaign config**: `campaign.json` (endpoints, seats) plus `characters/*.json`; an example lives in `apps/cli/examples/local-campaign/`.
+- **`sim script --campaign <id> --session <n>`**: turns an event log into `script.json` (speaker-attributed, TTS-ready lines and cues) and `script.md` (a readable script); see `docs/running-a-session.md` §8.
 
 Operator guide: `docs/running-a-session.md`.
 
@@ -71,12 +72,11 @@ Lore lookups always report a gap until Plan 2B, so the DM invents and records de
 
 ## Next steps
 
-1. Build the post-processing stage: turn an event log into a readable script and a TTS-friendly one. The engine-level problems are fixed, so what remains is presentation — stage directions and doubled quotes inside `speak` lines, markdown in DM narration, NPC dialogue embedded in narration.
-2. Test a 1-hour session end to end (the runs so far are 10 minutes) and watch for drift, repetition, and context growth over a longer arc.
-3. Write Plan 2B (lore: ingest `cartyx-lore`, embeddings, `sim index`, `sim audit`).
-4. Start the Avalon Artificers Academy lore expansion (in `cartyx-lore`) before Plan 2C, since chargen drafts the party from it. It can run alongside Plan 2B.
-5. Write Plan 2C (SRD import, production prompts, scribe, `sim chargen`, `sim prep`, 5-minute smoke run), using the real-run findings above.
-6. Optionally run the Plan 3 Ampere ARM64 spike (ComfyUI and TTS) early; it needs no code from Plans 1–2.
+1. Test a 1-hour session end to end (the runs so far are 10 minutes) and watch for drift, repetition, and context growth over a longer arc.
+2. Write Plan 2B (lore: ingest `cartyx-lore`, embeddings, `sim index`, `sim audit`).
+3. Start the Avalon Artificers Academy lore expansion (in `cartyx-lore`) before Plan 2C, since chargen drafts the party from it. It can run alongside Plan 2B.
+4. Write Plan 2C (SRD import, production prompts, scribe, `sim chargen`, `sim prep`, 5-minute smoke run), using the real-run findings above.
+5. Optionally run the Plan 3 Ampere ARM64 spike (ComfyUI and TTS) early; it needs no code from Plans 1–2.
 
 ## Open backlog
 

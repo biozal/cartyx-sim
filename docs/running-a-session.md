@@ -115,3 +115,48 @@ Add it under `seats` in `campaign.json`:
 ```
 
 The example leaves thinking on. Sessions are generated offline and the session clock counts spoken words, not wall time, so a slower check only makes the run take longer, and thinking checkers flag more precisely. Thinking counts against `maxOutputTokens`, so give the checker room. `timeoutMs` applies to the checker and to each fallback, so with a 5-minute timeout a hung checker can hold up one narration for up to 10 minutes; three failures in a row disable checking for the rest of the run. To trade precision for speed, add `"reasoningEffort": "none"` to turn thinking off; any seat accepts `reasoningEffort` (`none`, `low`, `medium`, or `high`). `sim bench` checks the checker seat's reachability and speed but runs no tool-call trials for it, so its tool-calls column shows `0/0`.
+
+## 8. Make a script
+
+`sim script` turns a finished session's event log into two files next to it:
+
+- `script.json`: every spoken line in order, with its speaker, cleaned for text-to-speech, plus silent cues for rolls, scenes, combat, and HP or condition changes. This is what the voice and playback stages read.
+- `script.md`: the same session as a readable script.
+
+```bash
+npm run sim -- script --campaign avalon --session 3
+```
+
+The event log is never changed, and the script never adds words: it only drops, splits, and attributes text from the log.
+
+- **Player lines:** a stage direction between quotes (`"…" I keep my voice low. "…"`) is dropped from the spoken line and shown as an aside in `script.md`. Stray quote marks and markdown are removed. Slips such as "Kira's — I mean, my — take" stay as spoken.
+- **Actions** are spoken in the player's voice.
+- **DM narration:** `DM:` prefixes, hand-off lines, and markdown are removed, and each paragraph (and each heading or list item) becomes its own line.
+- **NPC speech inside narration** becomes its own line. A model decides who speaks each quote: a known NPC, a new NPC (given an id like `npc-faceless-creature` and listed as unlisted), a player character, or no one (a sign, a name, a single word). The model only returns these labels, never text. A quote the DM wrote for a player character stays in the DM's voice and is marked `DM (as Kira Vale)`.
+
+The labeling seat is `seats.script` in `campaign.json` when present, otherwise `seats.checker`; with neither, or with `--no-model`, rules decide: a quote of fewer than three words is not speech, and any other goes to the only NPC introduced in the current scene, or to `npc-unnamed`. A failed or unusable model reply is retried once, then rules decide for that narration and a note says why. `sim bench` checks a `script` seat like any other.
+
+```json
+"script": {
+  "endpoint": "ampere",
+  "model": "glm-4.7-flash:latest",
+  "temperature": 0.2,
+  "maxOutputTokens": 4000,
+  "timeoutMs": 300000
+}
+```
+
+Model answers are cached in `sessions/NNN/.script-cache/`, so re-running is free and gives the same result. `--refresh` asks the model again.
+
+To rename or merge speakers, add `sessions/NNN/speakers.json` and re-run:
+
+```json
+{
+  "npc-faceless-creature": { "name": "The Faceless One" },
+  "npc-thing": { "id": "npc-faceless-creature" }
+}
+```
+
+`name` renames a speaker; `id` merges one NPC into another. Unknown speakers and merges into a player character or the DM are errors.
+
+`sim script` refuses to run while the session is being played (it takes the same lock as `sim run`) and prints a summary: lines by kind, spoken words, how quotes were labeled, dropped stage directions, unlisted speakers, and notes.
