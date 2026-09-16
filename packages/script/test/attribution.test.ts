@@ -262,4 +262,21 @@ describe('ModelLabeler', () => {
     );
     expect(result.labels && result.source).toBe('model');
   });
+
+  it('still returns the labels when the cache write fails', async () => {
+    const cache: LabelCache = {
+      get: async () => undefined,
+      set: async () => {
+        throw new Error('disk full');
+      },
+    };
+    const model = new ScriptedModelClient({ script: [reply(good)] });
+    const result = await new ModelLabeler({ model, seat: 'script', modelId: 'glm', cache }).label(
+      REQUEST
+    );
+    expect(result).toEqual({
+      labels: [{ kind: 'new', label: 'faceless creature' }, { kind: 'none' }],
+      source: 'model',
+    });
+  });
 });

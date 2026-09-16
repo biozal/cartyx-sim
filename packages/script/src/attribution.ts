@@ -210,7 +210,13 @@ export class ModelLabeler implements Labeler {
       }
       const parsed = parseLabelReply(text, request);
       if ('labels' in parsed) {
-        await cache?.set(key, parsed.reply);
+        // A cache write failure should not fail the run: the labels are still good, and the next
+        // run will simply ask the model again instead of getting a hit.
+        try {
+          await cache?.set(key, parsed.reply);
+        } catch {
+          // Ignored; see above.
+        }
         return { labels: parsed.labels, source: 'model' };
       }
       problem = parsed.error;
