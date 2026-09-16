@@ -48,7 +48,7 @@ What the runs taught us:
 - **LM Studio does not enforce `tool_choice: required`.** After a tool result, Qwen often narrates in plain text, so the DM seat uses `auto` (text becomes narration). Players stay on `required`, so Gemma's occasional garbled tool call is retried rather than spoken.
 - **Rejected on the Ampere:** Gemma-4-31B-Storymaxxed (spills past 24 GB, ~4 tok/s), Cydonia-24B-v4 (writes Mistral tool calls Ollama cannot parse; no license), and Muse Glimmer (thinks past its limit on real turns unless `reasoning_effort` is `none`). GLM-4.7-Flash thinks briefly and calls tools reliably.
 - **Engine fixes from the runs:** DM prose that arrives alongside tool calls is narrated (after those calls, before `hand_off`) instead of dropped; identical narration within one beat is skipped and flagged `duplicate_narration`; quote marks wrapped around a whole spoken line are removed; a "Hand off to …" line written in DM narration is removed and, when the DM made no hand_off call, treated as one.
-- **The DM plays the players.** Session 001's DM wrote dialogue for three player characters; the verb-list validator missed it. An optional checker seat now reviews each narration (`docs/running-a-session.md` §7), and the verb-list rule yields to the checker once one is configured.
+- **The DM plays the players.** Session 001's DM wrote dialogue for three player characters; the verb-list validator missed it. An optional checker seat now reviews each narration (`docs/running-a-session.md` §7), and the verb-list rule yields to the checker once one is configured. Across three 10-minute sessions with the checker on (002–004) no narration wrote a player character's dialogue and every checker catch was a real violation; a checker-off control run reproduced the original failure, with the DM writing lines for three PCs and four later player turns building on them.
 
 Lore lookups always report a gap until Plan 2B, so the DM invents and records details.
 
@@ -71,11 +71,12 @@ Lore lookups always report a gap until Plan 2B, so the DM invents and records de
 
 ## Next steps
 
-1. Play a full 10-minute session (`--resume` session 001) and read the transcript for lore gaps and character voice.
-2. Write Plan 2B (lore: ingest `cartyx-lore`, embeddings, `sim index`, `sim audit`).
-3. Start the Avalon Artificers Academy lore expansion (in `cartyx-lore`) before Plan 2C, since chargen drafts the party from it. It can run alongside Plan 2B.
-4. Write Plan 2C (SRD import, production prompts, scribe, `sim chargen`, `sim prep`, 5-minute smoke run), using the real-run findings above.
-5. Optionally run the Plan 3 Ampere ARM64 spike (ComfyUI and TTS) early; it needs no code from Plans 1–2.
+1. Build the post-processing stage: turn an event log into a readable script and a TTS-friendly one. The engine-level problems are fixed, so what remains is presentation — stage directions and doubled quotes inside `speak` lines, markdown in DM narration, NPC dialogue embedded in narration.
+2. Test a 1-hour session end to end (the runs so far are 10 minutes) and watch for drift, repetition, and context growth over a longer arc.
+3. Write Plan 2B (lore: ingest `cartyx-lore`, embeddings, `sim index`, `sim audit`).
+4. Start the Avalon Artificers Academy lore expansion (in `cartyx-lore`) before Plan 2C, since chargen drafts the party from it. It can run alongside Plan 2B.
+5. Write Plan 2C (SRD import, production prompts, scribe, `sim chargen`, `sim prep`, 5-minute smoke run), using the real-run findings above.
+6. Optionally run the Plan 3 Ampere ARM64 spike (ComfyUI and TTS) early; it needs no code from Plans 1–2.
 
 ## Open backlog
 
