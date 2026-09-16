@@ -314,6 +314,22 @@ describe('cutSentences', () => {
     );
   });
 
+  it('keeps the line break between two kept lines when the line between them is cut', () => {
+    const narration = 'Line one.\nLine two.\nLine three.';
+    expect(cutSentences(narration, [finding('Line two.')])).toBe('Line one.\nLine three.');
+  });
+
+  it('keeps line breaks and no leading whitespace when the first line is cut', () => {
+    const narration = 'Line one.\nLine two.\nLine three.';
+    expect(cutSentences(narration, [finding('Line one.')])).toBe('Line two.\nLine three.');
+  });
+
+  it('preserves line breaks inside a paragraph and blank lines between paragraphs', () => {
+    const narration = 'Alpha one. Alpha two.\n\nBeta one.\nBeta two.\nBeta three.';
+    const cut = cutSentences(narration, [finding('Alpha one.'), finding('Beta two.')]);
+    expect(cut).toBe('Alpha two.\n\nBeta one.\nBeta three.');
+  });
+
   it("cuts only the PC's line when an NPC says the same words", () => {
     expect(
       cutSentences('"Run!" the guard shouts. Kira says "Run!"', [finding('Kira says "Run!"')])

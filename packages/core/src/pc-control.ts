@@ -52,9 +52,8 @@ const THINK_BLOCK = /<think>[\s\S]*?<\/think>/gi;
 // degenerate reply is read as unreadable quickly instead of exhaustively.
 const MAX_PARSE_ATTEMPTS = 2000;
 
-// Each attempt still slices and parses a candidate up to the length of the whole reply, so
-// MAX_PARSE_ATTEMPTS alone bounds worst-case work at about MAX_PARSE_ATTEMPTS x reply length; this
-// caps the total number of characters handed to JSON.parse across all attempts instead.
+// Caps the total characters handed to JSON.parse across all attempts, since each attempt alone can
+// be as long as the whole reply.
 const MAX_PARSE_CHARS = 20_000_000;
 
 const WHITESPACE = /\s/;
@@ -95,8 +94,9 @@ function readCandidate(candidate: string): PcControlFinding[] | null {
  * each later "}" from last to first, so code fences, surrounding text, stray braces, and a second
  * object are all fine, and the first (leftmost, then widest) candidate that parses as JSON of the
  * reply's shape wins. A start that could not possibly open JSON is skipped without trying any "}"
- * against it at all, and at most `MAX_PARSE_ATTEMPTS` candidates are ever parsed in total, so a
- * degenerate brace-heavy reply returns null quickly instead of trying every pair.
+ * against it at all, and at most `MAX_PARSE_ATTEMPTS` candidates, totaling at most
+ * `MAX_PARSE_CHARS` characters parsed, are ever tried, so a degenerate brace-heavy reply returns
+ * null quickly instead of trying every pair.
  */
 export function parseCheckerReply(text: string): PcControlFinding[] | null {
   const reply = text.replace(THINK_BLOCK, '');
@@ -145,18 +145,35 @@ function matchText(text: string): string {
     .trim();
 }
 
-/** Splits a paragraph after sentence-ending punctuation and any closing quotes or brackets. */
-function splitSentences(paragraph: string): string[] {
-  return paragraph
-    .split(/(?<=[.!?…]["“”‘’')\]]*)\s+/)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length > 0);
+/** A sentence and the original whitespace that followed it, before the next sentence (or ''). */
+interface SplitSentence {
+  sentence: string;
+  separator: string;
+}
+
+/**
+ * Splits a paragraph after sentence-ending punctuation and any closing quotes or brackets,
+ * keeping the original separator (a space, a newline, several newlines, …) that followed each
+ * sentence, so a caller that rejoins sentences can reproduce the original line breaks instead of
+ * always using a single space.
+ */
+function splitSentences(paragraph: string): SplitSentence[] {
+  const parts = paragraph.split(/(?<=[.!?…]["“”‘’')\]]*)(\s+)/);
+  const result: SplitSentence[] = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    const sentence = parts[i]!.trim();
+    if (sentence.length === 0) continue;
+    result.push({ sentence, separator: parts[i + 1] ?? '' });
+  }
+  return result;
 }
 
 /** A narration sentence and where its normalized text sits in the normalized narration. */
 interface SentenceSpan {
   paragraph: number;
   sentence: string;
+  /** The original whitespace that followed this sentence in the narration, or '' when none did. */
+  separator: string;
   start: number;
   end: number;
   /** The span without the sentence's leading and trailing quote marks. */
@@ -176,7 +193,7 @@ function layOut(narration: string): NarrationLayout {
   const sentences: SentenceSpan[] = [];
   let haystack = '';
   paragraphs.forEach((paragraph, index) => {
-    for (const sentence of splitSentences(paragraph)) {
+    for (const { sentence, separator } of splitSentences(paragraph)) {
       const text = normalize(sentence);
       if (haystack.length > 0) haystack += ' ';
       const start = haystack.length;
@@ -186,6 +203,7 @@ function layOut(narration: string): NarrationLayout {
       sentences.push({
         paragraph: index,
         sentence,
+        separator,
         start,
         end: haystack.length,
         coreStart: start + leading,
@@ -257,19 +275,21 @@ export function verifyFindings(
  * The narration without the sentences a finding's text overlaps (wherever that full text occurs),
  * so a finding spanning several sentences removes all of them, a finding that is one clause
  * removes its whole sentence, and sentences it does not touch stay. Findings are matched as in
- * `verifyFindings`, so one that would not be kept cuts nothing. Paragraph breaks are kept; returns
- * "" when nothing remains.
+ * `verifyFindings`, so one that would not be kept cuts nothing. A kept sentence keeps the original
+ * whitespace that followed it (a space, a line break, …), so line breaks inside a paragraph
+ * survive around a cut sentence; the last kept sentence in a paragraph has its trailing whitespace
+ * trimmed. Paragraph breaks are kept; returns "" when nothing remains.
  */
 export function cutSentences(narration: string, findings: readonly PcControlFinding[]): string {
   const layout = layOut(narration);
   const ranges = findings.flatMap((finding) => findingRanges(layout, finding));
-  const paragraphs: string[][] = Array.from({ length: layout.paragraphCount }, () => []);
+  const paragraphs: string[] = Array.from({ length: layout.paragraphCount }, () => '');
   for (const span of layout.sentences) {
     const cut = ranges.some(([start, end]) => start < span.end && end > span.start);
-    if (!cut) paragraphs[span.paragraph]!.push(span.sentence);
+    if (!cut) paragraphs[span.paragraph] += span.sentence + span.separator;
   }
   return paragraphs
-    .map((sentences) => sentences.join(' '))
+    .map((paragraph) => paragraph.trimEnd())
     .filter((paragraph) => paragraph.length > 0)
     .join('\n\n');
 }

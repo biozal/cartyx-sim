@@ -251,9 +251,11 @@ function matchHandOff(
 /**
  * Finds every whole line in `text` that reads as a hand-off to a recognized target ("Hand off to
  * the party.", "DM: Hand off to Kira.", "**Handing off to Kira and Tomas!**"), maps the last one's
- * phrase to a `HandOffTarget`, and returns the narration with those lines removed. A narrative
- * sentence merely containing the phrase (more text before or after it on the line, or a name the
- * party does not have) does not match: only a whole line naming a recognized target does.
+ * phrase to a `HandOffTarget`, and returns the narration with those lines removed. A bare
+ * hand-off line with no target phrase at all ("Hand off.", "Handing off!") also matches, and
+ * resolves to the party. A narrative sentence merely containing the phrase (more text before or
+ * after it on the line, or a name the party does not have) does not match: only a whole line
+ * naming a recognized target, or a bare hand-off line, does.
  */
 export function extractHandOffProse(
   text: string,

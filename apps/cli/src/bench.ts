@@ -37,10 +37,8 @@ export function formatBenchTable(results: readonly BenchResult[]): string[] {
     result.modelListed === null ? '?' : result.modelListed ? 'yes' : 'NO',
     result.tokensPerSecond === null ? '-' : String(result.tokensPerSecond),
     result.latencyMs === null ? '-' : String(result.latencyMs),
-    result.toolCallTrials === 0
-      ? '-'
-      : `${result.toolCallSuccesses}/${result.toolCallTrials}` +
-        (result.textReplies > 0 ? ` (+${result.textReplies} text)` : ''),
+    `${result.toolCallSuccesses}/${result.toolCallTrials}` +
+      (result.textReplies > 0 ? ` (+${result.textReplies} text)` : ''),
   ]);
   const widths = header.map((_, column) =>
     Math.max(...[header, ...rows].map((row) => row[column]!.length))

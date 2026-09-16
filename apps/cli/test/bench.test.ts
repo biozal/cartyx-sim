@@ -156,7 +156,7 @@ describe('runBench', () => {
     ]);
     expect(report.results[1]).toMatchObject({ reachable: true, modelListed: true });
     expect(benchPassed(report.results)).toBe(true);
-    expect(lines.find((line) => line.startsWith('checker'))).toMatch(/\s-$/);
+    expect(lines.find((line) => line.startsWith('checker'))).toMatch(/\s0\/0$/);
   });
 });
 
