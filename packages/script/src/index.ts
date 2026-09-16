@@ -1,3 +1,4 @@
+export * from './attribution';
 export * from './narration';
 export * from './normalize';
 export * from './schema';
