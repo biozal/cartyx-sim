@@ -33,4 +33,18 @@ describe('writeFileAtomic', () => {
     await expect(writeFileAtomic(path, 'content')).rejects.toThrow();
     expect(await readdir(dir)).toEqual([]);
   });
+
+  it('rethrows the original error, not one from a failed cleanup unlink', async () => {
+    const path = join(dir, 'file.txt');
+    await expect(
+      writeFileAtomic(path, 'content', {
+        rename: async () => {
+          throw new Error('rename failed: disk full');
+        },
+        unlink: async () => {
+          throw new Error('unlink failed: permission denied');
+        },
+      })
+    ).rejects.toThrow('rename failed: disk full');
+  });
 });
