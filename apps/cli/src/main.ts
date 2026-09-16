@@ -103,14 +103,21 @@ program
   .option('--refresh', 'ignore cached model answers', false)
   .option('--campaigns-dir <path>', 'campaigns directory', 'campaigns')
   .action(async (options: ScriptCommandOptions) => {
-    const result = await makeScript({
-      campaignsDir: options.campaignsDir,
-      campaign: options.campaign,
-      session: options.session,
-      useModel: options.model,
-      refresh: options.refresh,
-      log: (line) => console.log(line),
-    });
+    let result;
+    try {
+      result = await makeScript({
+        campaignsDir: options.campaignsDir,
+        campaign: options.campaign,
+        session: options.session,
+        useModel: options.model,
+        refresh: options.refresh,
+        log: (line) => console.log(line),
+      });
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+      return;
+    }
     for (const line of formatScriptSummary(result)) console.log(line);
   });
 
