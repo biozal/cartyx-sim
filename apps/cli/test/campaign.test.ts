@@ -237,4 +237,38 @@ describe('loadCampaign', () => {
     );
     await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow('invalid campaign');
   });
+
+  it('uses a script seat for quote labels when one is configured', async () => {
+    const campaign = config();
+    Object.assign(campaign.seats, {
+      checker: { endpoint: 'ampere', model: 'checker-model' },
+      script: { endpoint: 'studio', model: 'script-model' },
+    });
+    await writeCampaign(campaign, { 'kira.json': character({}) });
+    const loaded = await loadCampaign(campaignsDir, 'test');
+    expect(loaded.scriptSeat).toBe('script');
+    expect(loaded.models.script).toMatchObject({ model: 'script-model' });
+    expect(loaded.seats).not.toHaveProperty('script');
+  });
+
+  it('falls back to the checker seat for quote labels', async () => {
+    const campaign = config();
+    Object.assign(campaign.seats, { checker: { endpoint: 'ampere', model: 'checker-model' } });
+    await writeCampaign(campaign, { 'kira.json': character({}) });
+    expect((await loadCampaign(campaignsDir, 'test')).scriptSeat).toBe('checker');
+  });
+
+  it('has no quote-label seat without a script or checker seat', async () => {
+    await writeCampaign(config(), { 'kira.json': character({}) });
+    expect((await loadCampaign(campaignsDir, 'test')).scriptSeat).toBeUndefined();
+  });
+
+  it('rejects a script seat with an unknown endpoint', async () => {
+    const campaign = config();
+    Object.assign(campaign.seats, { script: { endpoint: 'nowhere', model: 'x' } });
+    await writeCampaign(campaign, { 'kira.json': character({}) });
+    await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
+      'seats.script uses unknown endpoint "nowhere"'
+    );
+  });
 });

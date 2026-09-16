@@ -4,6 +4,7 @@ import { benchPassed, runBench } from './bench';
 import { releaseHeldLocks } from './jsonl-sink';
 import { formatPauseMessage } from './pause-message';
 import { runSession } from './run';
+import { formatScriptSummary, makeScript } from './script';
 
 // An exit by signal skips `finally`, so release any session lock first; otherwise the lock stays
 // behind. Exit codes follow the shell convention of 128 + the signal number.
@@ -28,6 +29,15 @@ interface RunCommandOptions {
 interface BenchCommandOptions {
   campaign: string;
   trials: number;
+  campaignsDir: string;
+}
+
+interface ScriptCommandOptions {
+  campaign: string;
+  session: number;
+  /** False with --no-model. */
+  model: boolean;
+  refresh: boolean;
   campaignsDir: string;
 }
 
@@ -80,6 +90,28 @@ program
     });
     console.log(`\nBench report: ${report.reportPath}`);
     if (!benchPassed(report.results)) process.exitCode = 1;
+  });
+
+program
+  .command('script')
+  .description(
+    'Turn a session event log into script.json (for voicing) and script.md (for reading)'
+  )
+  .requiredOption('--campaign <id>', 'campaign id (a folder under the campaigns directory)')
+  .option('--session <n>', 'session number', parseNumber('integer'), 1)
+  .option('--no-model', 'attribute quotes in DM narration by rules only')
+  .option('--refresh', 'ignore cached model answers', false)
+  .option('--campaigns-dir <path>', 'campaigns directory', 'campaigns')
+  .action(async (options: ScriptCommandOptions) => {
+    const result = await makeScript({
+      campaignsDir: options.campaignsDir,
+      campaign: options.campaign,
+      session: options.session,
+      useModel: options.model,
+      refresh: options.refresh,
+      log: (line) => console.log(line),
+    });
+    for (const line of formatScriptSummary(result)) console.log(line);
   });
 
 await program.parseAsync(process.argv);

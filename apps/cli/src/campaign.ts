@@ -32,6 +32,8 @@ export const CampaignFile = z.object({
     dm: SeatRef,
     /** Optional: reviews DM narration for playing the player characters. */
     checker: SeatRef.optional(),
+    /** Optional: labels who speaks quotes in DM narration for `sim script`. Defaults to `checker`. */
+    script: SeatRef.optional(),
     /** Keyed by party member id. */
     players: z.record(z.string(), SeatRef),
   }),
@@ -39,6 +41,7 @@ export const CampaignFile = z.object({
 
 export const DM_SEAT = 'dm';
 export const CHECKER_SEAT = 'checker';
+export const SCRIPT_SEAT = 'script';
 
 export function playerSeat(pcId: string): string {
   return `player-${pcId}`;
@@ -55,6 +58,8 @@ export interface Campaign {
   seats: { dm: string; players: Record<string, string>; checker?: string };
   /** Model configuration per seat id, for the model client and `sim bench`. */
   models: Record<string, SeatConfigInput>;
+  /** The seat `sim script` labels quotes with: `script`, else `checker`, else none. */
+  scriptSeat?: string;
 }
 
 function isNotFound(error: unknown): boolean {
@@ -162,6 +167,12 @@ export async function loadCampaign(campaignsDir: string, campaignId: string): Pr
     [DM_SEAT]: resolve(file.seats.dm, 'seats.dm'),
   };
   if (file.seats.checker) models[CHECKER_SEAT] = resolve(file.seats.checker, 'seats.checker');
+  if (file.seats.script) models[SCRIPT_SEAT] = resolve(file.seats.script, 'seats.script');
+  const scriptSeat = file.seats.script
+    ? SCRIPT_SEAT
+    : file.seats.checker
+      ? CHECKER_SEAT
+      : undefined;
   // Built as entries and turned into an object at the end, rather than assigning `players[pc.id]
   // = seat` in the loop: a party member id of "__proto__" would silently be dropped by that plain
   // assignment (the inherited `__proto__` setter ignores a non-object value) instead of becoming a
@@ -186,5 +197,6 @@ export async function loadCampaign(campaignsDir: string, campaignId: string): Pr
     party,
     seats: { dm: DM_SEAT, players, ...(file.seats.checker ? { checker: CHECKER_SEAT } : {}) },
     models,
+    ...(scriptSeat ? { scriptSeat } : {}),
   };
 }
