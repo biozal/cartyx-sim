@@ -60,6 +60,7 @@ function listOrNone(items: readonly string[]): string {
   return items.length > 0 ? items.join('\n') : '(none)';
 }
 
+/** The system and user chat messages that ask a labeling seat to answer a `LabelRequest`. */
 export function buildLabelMessages(request: LabelRequest): ChatMessage[] {
   const count = request.quotes.length;
   const user = [
@@ -148,6 +149,7 @@ export function fallbackLabels(request: LabelRequest, sceneNpcIds: readonly stri
   });
 }
 
+/** The cache key for a request: a SHA-256 hex digest of the prompt version, model id, and request. */
 export async function labelCacheKey(modelId: string, request: LabelRequest): Promise<string> {
   const data = new TextEncoder().encode(
     JSON.stringify({ version: LABEL_PROMPT_VERSION, model: modelId, request })

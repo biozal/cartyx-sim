@@ -21,6 +21,7 @@ export class SpeakerTable {
     return this.add({ id, name: id, kind: 'pc' });
   }
 
+  /** An NPC introduced by an `npc_introduced` event. */
   npc(id: string, name: string): string {
     return this.add({ id, name, kind: 'npc' });
   }

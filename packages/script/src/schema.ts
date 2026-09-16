@@ -141,8 +141,10 @@ export type ScriptLine = z.infer<typeof ScriptLine>;
 export type LineKind = ScriptLine['kind'];
 export type LineDraft = DistributiveOmit<ScriptLine, 'id'>;
 
+/** The line kinds that carry spoken `text` and a `speaker`, as opposed to a silent cue. */
 export const VOICED_KINDS: readonly LineKind[] = ['narration', 'dialogue', 'action'];
 
+/** Whether `line` is one of the voiced kinds (`VOICED_KINDS`), narrowing it to `VoicedLine`. */
 export function isVoiced(line: ScriptLine): line is VoicedLine {
   return VOICED_KINDS.includes(line.kind);
 }

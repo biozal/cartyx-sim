@@ -93,6 +93,7 @@ const HEADING = /^[ \t]*#{1,6}[ \t]+/;
 export const BULLET = /^[ \t]*(?:[-*+]|\d{1,3}[.)])[ \t]+/;
 const RULE = /^[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*$/;
 
+/** Whether `char` is a straight or curly double quote mark. */
 export function isQuoteMark(char: string | undefined): boolean {
   return char !== undefined && QUOTE_MARK.test(char);
 }

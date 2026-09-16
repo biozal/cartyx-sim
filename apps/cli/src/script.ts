@@ -148,6 +148,7 @@ export async function makeScript(options: ScriptOptions): Promise<ScriptResult> 
   };
 }
 
+/** The lines to print after `makeScript` finishes: counts by kind, labeling stats, and notes. */
 export function formatScriptSummary(result: ScriptResult): string[] {
   const { stats } = result;
   const kinds = Object.entries(stats.lines)
