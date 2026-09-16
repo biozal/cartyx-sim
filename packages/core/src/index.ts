@@ -3,6 +3,7 @@ export * from './director';
 export * from './errors';
 export * from './events';
 export * from './hand-off-prose';
+export * from './json-reply';
 export * from './model';
 export * from './pc-control';
 export * from './prompts';
