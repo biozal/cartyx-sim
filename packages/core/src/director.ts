@@ -117,6 +117,11 @@ function callsFromResponse(response: ModelResponse, fallbackTool: string, id: st
 // useful; retrying the same target once usually gets a real reply before falling back.
 const CHECKER_REPLY_ATTEMPTS = 2;
 
+// The checker's own flags, notes, and tool results use this label instead of the verb-list rule's
+// `dm_controls_pc`, so a log can tell which one caught a given case without reading the events
+// around it.
+const DM_CONTROLS_PC_CHECKER_RULE = 'dm_controls_pc_checker';
+
 /** Multi-word DM tool names, which only turn up in prose when the model talks about its calls. */
 const DM_TOOL_NAMES_IN_PROSE = DM_TOOLS.map((tool) => tool.name).filter((name) =>
   name.includes('_')
@@ -565,7 +570,11 @@ export class Director {
           continue;
         }
         const violation = text
-          ? validateDmText(text, { pcNames, mechanicsToolCalled: mechanicsCalled })
+          ? validateDmText(text, {
+              pcNames,
+              mechanicsToolCalled: mechanicsCalled,
+              skipPcControl: Boolean(this.config.seats.checker),
+            })
           : null;
         if (violation && call.id === proseCallId) {
           // Prose the engine turned into narration is dropped on a violation, without costing a
@@ -608,15 +617,21 @@ export class Director {
               messages.push(
                 toolMessage(
                   call,
-                  `Rejected (dm_controls_pc): these sentences play player characters: ${listed}. Rewrite the narration without them and call narrate again.`
+                  `Rejected (${DM_CONTROLS_PC_CHECKER_RULE}): these sentences play player characters: ${listed}. Rewrite the narration without them and call narrate again.`
                 )
               );
-              this.flag(recorder, seat, 'dm_controls_pc', pcControlRetried ? 1 : 0, 're_prompted');
+              this.flag(
+                recorder,
+                seat,
+                DM_CONTROLS_PC_CHECKER_RULE,
+                pcControlRetried ? 1 : 0,
+                're_prompted'
+              );
               // Kept for review: the DM's rejected draft and the checker's raw reply, DM-only.
               recorder.emit({
                 type: 'ooc_note',
                 visibility: 'dm',
-                text: `Rejected DM draft (dm_controls_pc): ${text}`,
+                text: `Rejected DM draft (${DM_CONTROLS_PC_CHECKER_RULE}): ${text}`,
               });
               this.logCheckerReply(recorder, reply);
               skipRest = true;
@@ -630,11 +645,17 @@ export class Director {
               rejectDuplicateNarration(call, ALREADY_NARRATED);
               continue;
             }
-            this.flag(recorder, seat, 'dm_controls_pc', pcControlRetried ? 1 : 0, 'trimmed');
+            this.flag(
+              recorder,
+              seat,
+              DM_CONTROLS_PC_CHECKER_RULE,
+              pcControlRetried ? 1 : 0,
+              'trimmed'
+            );
             recorder.emit({
               type: 'ooc_note',
               visibility: 'dm',
-              text: `Cut from DM narration (dm_controls_pc): ${listed}`,
+              text: `Cut from DM narration (${DM_CONTROLS_PC_CHECKER_RULE}): ${listed}`,
             });
             this.logCheckerReply(recorder, reply);
             if (!kept) {

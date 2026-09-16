@@ -90,10 +90,10 @@ Without `seats.checker`, the engine behaves exactly as it does today (fixtures, 
 
 Applies both to the DM's own `narrate` calls and to prose the engine turns into a narrate call.
 
-1. **Existing checks first.** The duplicate-narration check and `validateDmText` run as today. If either rejects the call (asks the DM to retry, or drops engine-made prose), the checker is not called. A narration `validateDmText` flags after its retries are used up is accepted with a flag and still goes through the checker; its `accepted_with_flag` flag is emitted only if the narration is then executed.
+1. **Existing checks first.** The duplicate-narration check and `validateDmText` run as today, except that with a checker seat configured, `validateDmText` skips its verb-list `dm_controls_pc` rule — the checker replaces it — while its `mechanics_without_tool` rule still runs and still rejects. If either check rejects the call (asks the DM to retry, or drops engine-made prose), the checker is not called. A narration `validateDmText` flags (only `mechanics_without_tool` can still fire here) after its retries are used up is accepted with a flag and still goes through the checker; its `accepted_with_flag` flag is emitted only if the narration is then executed.
 2. **Check.** If a checker seat is configured and not disabled for this run, send `pcControlCheck` with the party names, `declarationsSinceDm(history, state)`, and the narration text.
 3. **Verify.** Parse the reply and keep verified findings. With none, the narration proceeds unchanged.
-4. **First offense in the beat (the DM's own call only) → retry.** Nothing is narrated. The tool result names each verified sentence, its character, and the reason, and asks the DM to rewrite without them and call `narrate` again. Emit `validator_flag` (`seat: dm`, `rule: dm_controls_pc`, `resolution: re_prompted`). Later calls in the same response are not executed ("an earlier call was rejected"), as with other rejections. Each beat allows one such retry.
+4. **First offense in the beat (the DM's own call only) → retry.** Nothing is narrated. The tool result names each verified sentence, its character, and the reason, and asks the DM to rewrite without them and call `narrate` again. Emit `validator_flag` (`seat: dm`, `rule: dm_controls_pc_checker`, `resolution: re_prompted`). Later calls in the same response are not executed ("an earlier call was rejected"), as with other rejections. Each beat allows one such retry.
 5. **Second offense in the beat, or engine-made prose → cut.** Narrate `cutSentences(narration, findings)` if it is not empty. Emit `validator_flag` with `resolution: trimmed` and a DM-only `ooc_note` listing each cut sentence with its character and reason. The tool result tells the DM what was removed. Later calls in the response still run.
 
 The DM's rewrite is a new `narrate` call and goes through the whole flow again.
@@ -112,8 +112,8 @@ The checker never pauses a session. When it cannot give a verdict, the narration
 
 ## 8. Logging and state
 
-- `validator_flag` `dm_controls_pc` with `re_prompted` (retry) or `trimmed` (cut), plus the DM-only `ooc_note` for cuts and checker failures. Clean checks are not logged.
-- A retry also logs the DM's rejected draft in full, right after the `re_prompted` flag: `Rejected DM draft (dm_controls_pc): <the full narration text the DM sent>`. Retries, cuts, and unreadable replies also log the checker's raw reply text right after their existing note — `Checker reply: <raw reply text>` — so the checker's exact wording is kept for review even though only verified findings drive the outcome. A checker error with no reply (every target down or timed out) logs nothing beyond the existing `Checker unavailable (…)` note. A blank reply (`reply.trim() === ''`) is not logged as `Checker reply:` — there is nothing to review.
+- `validator_flag` `dm_controls_pc_checker` with `re_prompted` (retry) or `trimmed` (cut), plus the DM-only `ooc_note` for cuts and checker failures. Clean checks are not logged.
+- A retry also logs the DM's rejected draft in full, right after the `re_prompted` flag: `Rejected DM draft (dm_controls_pc_checker): <the full narration text the DM sent>`. Retries, cuts, and unreadable replies also log the checker's raw reply text right after their existing note — `Checker reply: <raw reply text>` — so the checker's exact wording is kept for review even though only verified findings drive the outcome. A checker error with no reply (every target down or timed out) logs nothing beyond the existing `Checker unavailable (…)` note. A blank reply (`reply.trim() === ''`) is not logged as `Checker reply:` — there is nothing to review.
 - All of it is DM-only: none of it reaches player prompts or playback, and it does not count as progress for the stalled-turn backstop.
 - The one-retry budget is per beat and beats commit atomically, so resume needs no new state. The failure count and disabled flag live only in the running director.
 - **Event schema version stays 1.** `session_start.schemaVersion` is `z.literal(1)`, so a bump would make every existing log unreadable. Adding `trimmed` is additive, as adding `re_prompted` was in Plan 2A: all existing logs stay valid. Only an older build reading a new log would fail, which is acceptable.
@@ -130,7 +130,7 @@ The checker never pauses a session. When it cannot give a verdict, the narration
 - Prompt: `pcControlCheck` includes the party names, declarations, and narration.
 - Director:
   - Clean narration passes with no flags.
-  - A violation then a clean rewrite gives one `re_prompted` and one narration.
+  - A violation then a clean rewrite gives one `dm_controls_pc_checker` `re_prompted` and one narration.
   - A second violation is `trimmed`: the remainder is narrated and a note lists the cut sentences.
   - A later offense in the same beat skips the retry.
   - Engine-made prose is cut without a retry, and the DM's real calls still run.
@@ -138,7 +138,7 @@ The checker never pauses a session. When it cannot give a verdict, the narration
   - A checker error or unreadable reply leaves the narration unchecked with a note, and no pause.
   - `maxCheckerFailures` consecutive failures disable the checker with one note.
   - An unverified finding is ignored.
-  - A `validateDmText` rejection skips the checker.
+  - With a checker seat configured, `validateDmText`'s verb-list `dm_controls_pc` rule is skipped, so a narration it would have rejected reaches the checker instead; the `mechanics_without_tool` rule still runs and, when it rejects, skips the checker.
   - With no checker seat, behavior is unchanged and every existing test passes untouched.
 - `models`: `reasoningEffort` is sent as `reasoning_effort` and omitted when unset; a no-tools request sends no `tools` or `tool_choice`.
 - `cli`:

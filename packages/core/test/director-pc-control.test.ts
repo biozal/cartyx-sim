@@ -103,12 +103,12 @@ describe('DM player-character control checker', () => {
       'The runes pulse softly.',
     ]);
     expect(ofType(sink.events, 'validator_flag')).toMatchObject([
-      { seat: 'dm', rule: 'dm_controls_pc', resolution: 're_prompted', retries: 1 },
+      { seat: 'dm', rule: 'dm_controls_pc_checker', resolution: 're_prompted', retries: 1 },
     ]);
     const dmRequests = model.requests.filter((request) => request.seat === 'dm');
     expect(dmRequests[1]!.messages.at(-1)).toMatchObject({
       role: 'tool',
-      content: expect.stringContaining('Rejected (dm_controls_pc)'),
+      content: expect.stringContaining('Rejected (dm_controls_pc_checker)'),
     });
     expect(dmRequests[1]!.messages.at(-1)!.content).toContain('These runes are old.');
 
@@ -117,7 +117,7 @@ describe('DM player-character control checker', () => {
     expect(notes).toEqual([
       expect.objectContaining({
         visibility: 'dm',
-        text: `Rejected DM draft (dm_controls_pc): ${BAD}`,
+        text: `Rejected DM draft (dm_controls_pc_checker): ${BAD}`,
       }),
       expect.objectContaining({
         visibility: 'dm',
@@ -143,10 +143,10 @@ describe('DM player-character control checker', () => {
     const notes = ofType(sink.events, 'ooc_note');
     expect(notes.every((n) => n.visibility === 'dm')).toBe(true);
     // First offense: rejected draft, then the checker's raw reply.
-    expect(notes[0]!.text).toBe(`Rejected DM draft (dm_controls_pc): ${BAD}`);
+    expect(notes[0]!.text).toBe(`Rejected DM draft (dm_controls_pc_checker): ${BAD}`);
     expect(notes[1]!.text).toBe(`Checker reply: ${flaggedText(BAD_SENTENCE)}`);
     // Second offense: the cut note, then the checker's raw reply again.
-    expect(notes[2]!.text).toContain('Cut from DM narration (dm_controls_pc)');
+    expect(notes[2]!.text).toContain('Cut from DM narration (dm_controls_pc_checker)');
     expect(notes[2]!.text).toContain('These runes are old.');
     expect(notes[3]!.text).toBe(`Checker reply: ${flaggedText(BAD_SENTENCE)}`);
     expect(notes).toHaveLength(4);
@@ -206,7 +206,7 @@ describe('DM player-character control checker', () => {
     // No retry happens for engine-made prose, so only the cut note and the checker's raw reply
     // are logged (no "Rejected DM draft" note, which is only for the DM's own re-prompted call).
     const notes = ofType(sink.events, 'ooc_note');
-    expect(notes[0]!.text).toContain('Cut from DM narration (dm_controls_pc)');
+    expect(notes[0]!.text).toContain('Cut from DM narration (dm_controls_pc_checker)');
     expect(notes[1]!.text).toBe(
       `Checker reply: ${flaggedText('Kira turns to the others, eyes bright.')}`
     );
@@ -317,7 +317,7 @@ describe('DM player-character control checker', () => {
     ]);
     expect(
       ofType(sink.events, 'validator_flag')
-        .filter((e) => e.rule === 'dm_controls_pc')
+        .filter((e) => e.rule === 'dm_controls_pc_checker')
         .map((e) => e.resolution)
     ).toEqual(['re_prompted', 'trimmed']);
     expect(
@@ -353,7 +353,7 @@ describe('DM player-character control checker', () => {
     expect(ofType(sink.events, 'narration')).toEqual([]);
     expect(
       ofType(sink.events, 'validator_flag')
-        .filter((e) => e.rule === 'dm_controls_pc')
+        .filter((e) => e.rule === 'dm_controls_pc_checker')
         .map((e) => e.resolution)
     ).toEqual(['re_prompted', 'trimmed']);
     expect(
@@ -389,10 +389,10 @@ describe('DM player-character control checker', () => {
     expect(ofType(sink.events, 'session_paused')).toEqual([]);
   });
 
-  it('does not call the checker when the rule check already rejected the narration', async () => {
+  it('does not call the checker when the mechanics rule already rejected the narration', async () => {
     const { director, model } = setup({
       dm: [
-        respond(narrate('Kira decides to open the door.')),
+        respond(narrate('Kira takes 5 damage.')),
         respond(narrate('The door creaks.'), handOffTomas()),
       ],
       checker: [CLEAN],
@@ -404,14 +404,11 @@ describe('DM player-character control checker', () => {
     expect(checks[0]!.messages[1]!.content).toMatch(/DM narration to check:\nThe door creaks\.$/);
   });
 
-  it('checks a narration the rule check accepted with a flag once retries are used up', async () => {
-    const { director, model, sink } = setup(
-      {
-        dm: [respond(narrate('Kira decides to open the door.'), handOffTomas())],
-        checker: [CLEAN],
-      },
-      { maxValidatorRetries: 0 }
-    );
+  it('reaches the checker with a checker seat configured, for a narration the verb list would have rejected', async () => {
+    const { director, model, sink } = setup({
+      dm: [respond(narrate('Kira decides to open the door.'), handOffTomas())],
+      checker: [CLEAN],
+    });
     await playDmBeat(director);
 
     const checks = model.requests.filter((request) => request.seat === 'checker');
@@ -422,12 +419,31 @@ describe('DM player-character control checker', () => {
     expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual([
       'Kira decides to open the door.',
     ]);
+    expect(ofType(sink.events, 'validator_flag')).toEqual([]);
+  });
+
+  it('checks a narration the mechanics rule accepted with a flag once retries are used up', async () => {
+    const { director, model, sink } = setup(
+      {
+        dm: [respond(narrate('Kira takes 5 damage.'), handOffTomas())],
+        checker: [CLEAN],
+      },
+      { maxValidatorRetries: 0 }
+    );
+    await playDmBeat(director);
+
+    const checks = model.requests.filter((request) => request.seat === 'checker');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]!.messages[1]!.content).toMatch(
+      /DM narration to check:\nKira takes 5 damage\.$/
+    );
+    expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual(['Kira takes 5 damage.']);
     expect(ofType(sink.events, 'validator_flag')).toMatchObject([
-      { seat: 'dm', rule: 'dm_controls_pc', resolution: 'accepted_with_flag' },
+      { seat: 'dm', rule: 'mechanics_without_tool', resolution: 'accepted_with_flag' },
     ]);
   });
 
-  it('asks for a rewrite when the checker flags a narration the rule check accepted with a flag', async () => {
+  it('asks for a rewrite when the checker flags a narration the verb list no longer rejects', async () => {
     const { director, model, sink } = setup(
       {
         dm: [
@@ -443,7 +459,7 @@ describe('DM player-character control checker', () => {
     expect(model.requests.filter((request) => request.seat === 'checker')).toHaveLength(2);
     expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual(['The door creaks.']);
     expect(ofType(sink.events, 'validator_flag')).toMatchObject([
-      { seat: 'dm', rule: 'dm_controls_pc', resolution: 're_prompted', retries: 1 },
+      { seat: 'dm', rule: 'dm_controls_pc_checker', resolution: 're_prompted', retries: 1 },
     ]);
   });
 

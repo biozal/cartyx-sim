@@ -39,6 +39,42 @@ describe('validateDmText', () => {
     expect(validateDmText(text, { pcNames, mechanicsToolCalled: false })).toBeNull();
   });
 
+  describe('skipPcControl', () => {
+    it('skips the verb-list rule when true', () => {
+      expect(
+        validateDmText('Kira decides to open the door.', {
+          pcNames,
+          mechanicsToolCalled: false,
+          skipPcControl: true,
+        })
+      ).toBeNull();
+    });
+
+    it('still runs the mechanics rule when true', () => {
+      expect(
+        validateDmText('Kira takes 5 damage.', {
+          pcNames,
+          mechanicsToolCalled: false,
+          skipPcControl: true,
+        })?.rule
+      ).toBe('mechanics_without_tool');
+    });
+
+    it('behaves exactly as today when absent or false', () => {
+      expect(
+        validateDmText('Kira decides to open the door.', { pcNames, mechanicsToolCalled: false })
+          ?.rule
+      ).toBe('dm_controls_pc');
+      expect(
+        validateDmText('Kira decides to open the door.', {
+          pcNames,
+          mechanicsToolCalled: false,
+          skipPcControl: false,
+        })?.rule
+      ).toBe('dm_controls_pc');
+    });
+  });
+
   it('stays linear on adversarial input instead of matching quadratically', () => {
     const text = 'hp '.repeat(40_000);
     const start = performance.now();

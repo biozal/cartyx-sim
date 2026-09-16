@@ -142,9 +142,14 @@ function controlledCharacter(text: string, names: readonly string[]): string | n
 
 export function validateDmText(
   text: string,
-  context: { pcNames: readonly string[]; mechanicsToolCalled: boolean }
+  context: {
+    pcNames: readonly string[];
+    mechanicsToolCalled: boolean;
+    /** True when a checker seat is configured: it replaces this verb-list rule. Default false. */
+    skipPcControl?: boolean;
+  }
 ): Violation | null {
-  const pc = controlledCharacter(text, context.pcNames);
+  const pc = context.skipPcControl ? null : controlledCharacter(text, context.pcNames);
   if (pc) {
     return {
       rule: 'dm_controls_pc',
