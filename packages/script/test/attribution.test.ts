@@ -121,6 +121,37 @@ describe('parseLabelReply', () => {
   });
 });
 
+describe('toSpanLabel via parseLabelReply, `new:` labels', () => {
+  const ONE_QUOTE: LabelRequest = { ...REQUEST, narration: '[[1]]"x"', quotes: ['x'] };
+  const label = (speaker: string) =>
+    parseLabelReply(JSON.stringify({ labels: [{ quote: 1, speaker }] }), ONE_QUOTE);
+
+  it.each([
+    ['a newline and a heading', 'new:guard\n## Injected heading'],
+    ['markdown bold', 'new:**bold** guard'],
+    ['a 61-character label', `new:${'a'.repeat(61)}`],
+    ['a punctuation-only label', 'new:!!!'],
+  ])('rejects %s', (_name, speaker) => {
+    const parsed = label(speaker);
+    expect('error' in parsed).toBe(true);
+  });
+
+  it('accepts a 60-character label', () => {
+    const parsed = label(`new:${'a'.repeat(60)}`);
+    expect('labels' in parsed && parsed.labels).toEqual([{ kind: 'new', label: 'a'.repeat(60) }]);
+  });
+
+  it('collapses whitespace, trims, and lowercases', () => {
+    const parsed = label('new:  Old   Man ');
+    expect('labels' in parsed && parsed.labels).toEqual([{ kind: 'new', label: 'old man' }]);
+  });
+
+  it('accepts straight and curly apostrophes', () => {
+    const parsed = label("new:O'Brien’s dog");
+    expect('labels' in parsed && parsed.labels).toEqual([{ kind: 'new', label: "o'brien’s dog" }]);
+  });
+});
+
 describe('fallbackLabels', () => {
   it('labels short quotes as not speech and others as the only scene NPC', () => {
     expect(fallbackLabels(REQUEST, ['npc-warden'])).toEqual([

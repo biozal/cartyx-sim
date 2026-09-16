@@ -1,19 +1,15 @@
-import {
-  countWords,
-  findJsonReply,
-  slugify,
-  type ChatMessage,
-  type ModelClient,
-} from '@cartyx-sim/core';
+import { countWords, findJsonReply, type ChatMessage, type ModelClient } from '@cartyx-sim/core';
 import { z } from 'zod';
 
 /** Part of every cache key: bump it whenever the prompt or the label rules change. */
-export const LABEL_PROMPT_VERSION = 1;
+export const LABEL_PROMPT_VERSION = 2;
 
 /** The `new:` label the rules fallback gives a speaker it cannot name. */
 export const UNNAMED_LABEL = 'unnamed';
 
 const MAX_NEW_LABEL = 60;
+/** A `new:` label, after whitespace is collapsed and it is lowercased: letters or digits only. */
+const NEW_LABEL_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N} '’-]*$/u;
 const REPLY_ATTEMPTS = 2;
 // A thinking model sometimes spends its whole budget thinking; retry that once on the same target.
 const INCOMPLETE_REPLY_ATTEMPTS = 2;
@@ -90,8 +86,8 @@ function toSpanLabel(speaker: string, request: LabelRequest): SpanLabel | null {
   if (value.toLowerCase() === 'none') return { kind: 'none' };
   const created = /^new:([\s\S]*)$/i.exec(value);
   if (created) {
-    const label = created[1]!.trim().toLowerCase();
-    const usable = label.length > 0 && label.length <= MAX_NEW_LABEL && slugify(label) !== '';
+    const label = created[1]!.replace(/\s+/g, ' ').trim().toLowerCase();
+    const usable = label.length <= MAX_NEW_LABEL && NEW_LABEL_PATTERN.test(label);
     return usable ? { kind: 'new', label } : null;
   }
   if (request.npcs.some((npc) => npc.id === value)) return { kind: 'npc', id: value };
