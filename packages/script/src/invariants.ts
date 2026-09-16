@@ -2,7 +2,7 @@ import type { SimEvent } from '@cartyx-sim/core';
 import { BULLET, finishLine, sourceLines } from './normalize';
 import { isVoiced, type ScriptFile } from './schema';
 
-const IGNORABLE = /[\s\p{P}\p{S}]/u;
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 
 /** The text a voiced line's sources point into, or undefined for any other event. */
 function sourceText(event: SimEvent | undefined): string | undefined {
@@ -81,7 +81,7 @@ export function invariantViolations(script: ScriptFile, events: readonly SimEven
     const marks = covered.get(event.seq);
     const markers = markerOffsets(text);
     for (let i = 0; i < text.length; i++) {
-      if (marks?.[i] === 1 || markers.has(i) || IGNORABLE.test(text[i]!)) continue;
+      if (marks?.[i] === 1 || markers.has(i) || !LETTER_OR_DIGIT.test(text[i]!)) continue;
       const context = JSON.stringify(text.slice(Math.max(0, i - 10), i + 10));
       problems.push(`seq ${event.seq}: ${context} is in no line and was not dropped`);
       break;

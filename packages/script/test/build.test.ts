@@ -332,4 +332,73 @@ describe('buildScript', () => {
     const { script } = await build(eventLog([], [TOMAS, KIRA]));
     expect(script.speakers.map((speaker) => speaker.id)).toEqual(['dm', 'tomas', 'kira']);
   });
+
+  it('shows conditions and a death cue, but not a reversal back to alive', async () => {
+    const events = eventLog([
+      {
+        type: 'state_change',
+        entity: 'kira',
+        field: 'conditions',
+        before: [],
+        after: ['prone'],
+        cause: 'trip',
+      },
+      {
+        type: 'state_change',
+        entity: 'kira',
+        field: 'dead',
+        before: false,
+        after: true,
+        cause: 'defeated',
+      },
+      {
+        type: 'state_change',
+        entity: 'kira',
+        field: 'dead',
+        before: true,
+        after: false,
+        cause: 'revived',
+      },
+    ]);
+    const { script } = await build(events);
+    expect(script.lines).toEqual([
+      {
+        id: 'L0001',
+        kind: 'state',
+        sources: [{ seq: 1 }],
+        state: {
+          entity: 'kira',
+          name: 'Kira Vale',
+          field: 'conditions',
+          before: [],
+          after: ['prone'],
+          hidden: false,
+        },
+      },
+      {
+        id: 'L0002',
+        kind: 'state',
+        sources: [{ seq: 2 }],
+        state: {
+          entity: 'kira',
+          name: 'Kira Vale',
+          field: 'dead',
+          before: false,
+          after: true,
+          hidden: false,
+        },
+      },
+    ]);
+  });
+
+  it('does not choke on emoji-only text that has no letters or digits', async () => {
+    const dice = await build(eventLog([narration('The door opens.\n\n🎲')]));
+    expect(summary(dice.script)).toEqual([['L0001', 'narration', 'dm', 'The door opens.']]);
+
+    const swords = await build(eventLog([narration('The door opens.\n\n⚔️')]));
+    expect(summary(swords.script)).toEqual([['L0001', 'narration', 'dm', 'The door opens.']]);
+
+    const dagger = await build(eventLog([{ type: 'action', actor: 'kira', intent: '🗡️' }]));
+    expect(dagger.script.lines).toEqual([]);
+  });
 });
