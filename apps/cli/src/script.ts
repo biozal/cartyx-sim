@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { OpenAICompatibleModelClient } from '@cartyx-sim/models';
 import {
@@ -12,6 +12,7 @@ import {
   type Note,
 } from '@cartyx-sim/script';
 import { z } from 'zod';
+import { writeFileAtomic } from './atomic-write';
 import { loadCampaign } from './campaign';
 import { JsonlFileSink } from './jsonl-sink';
 import { FileLabelCache } from './label-cache';
@@ -85,12 +86,6 @@ async function campaignLabeler(
   return { labeler, seat };
 }
 
-async function writeAtomic(path: string, content: string): Promise<void> {
-  const temp = `${path}.tmp-${process.pid}`;
-  await writeFile(temp, content);
-  await rename(temp, path);
-}
-
 /**
  * Builds `script.json` and `script.md` for one session from its event log, which it never
  * modifies. Holds the session lock while it reads and builds, so it cannot run against a session
@@ -135,8 +130,8 @@ export async function makeScript(options: ScriptOptions): Promise<ScriptResult> 
     });
     const scriptPath = join(dir, 'script.json');
     const markdownPath = join(dir, 'script.md');
-    await writeAtomic(scriptPath, `${JSON.stringify(script, null, 2)}\n`);
-    await writeAtomic(markdownPath, renderScriptMarkdown(script));
+    await writeFileAtomic(scriptPath, `${JSON.stringify(script, null, 2)}\n`);
+    await writeFileAtomic(markdownPath, renderScriptMarkdown(script));
     return {
       scriptPath,
       markdownPath,

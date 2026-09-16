@@ -1,6 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { LabelCache } from '@cartyx-sim/script';
+import { writeFileAtomic } from './atomic-write';
 
 const KEY = /^[0-9a-f]{64}$/;
 
@@ -19,9 +20,7 @@ export class FileLabelCache implements LabelCache {
   async set(key: string, value: unknown): Promise<void> {
     const path = this.path(key);
     await mkdir(this.dir, { recursive: true });
-    const temp = `${path}.tmp-${process.pid}`;
-    await writeFile(temp, `${JSON.stringify(value)}\n`);
-    await rename(temp, path);
+    await writeFileAtomic(path, `${JSON.stringify(value)}\n`);
   }
 
   private path(key: string): string {
