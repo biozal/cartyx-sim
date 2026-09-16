@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SimEvent } from '@cartyx-sim/core';
@@ -13,7 +12,7 @@ import {
   type Note,
 } from '@cartyx-sim/script';
 import { z } from 'zod';
-import { writeFileAtomic } from './atomic-write';
+import { writeFilesAtomic } from './atomic-write';
 import { loadCampaign } from './campaign';
 import { JsonlFileSink } from './jsonl-sink';
 import { FileLabelCache } from './label-cache';
@@ -103,6 +102,9 @@ export async function makeScript(options: ScriptOptions): Promise<ScriptResult> 
   const labeling: { labeler?: Labeler; seat?: string } = options.useModel
     ? await campaignLabeler(options, dir, log)
     : {};
+  if (options.refresh && !labeling.labeler) {
+    log('--refresh has no effect: no model labels quotes in this run.');
+  }
   const speakers = await loadSpeakerOverrides(join(dir, 'speakers.json'));
 
   const stalePid = await sink.acquireLock();
@@ -114,9 +116,8 @@ export async function makeScript(options: ScriptOptions): Promise<ScriptResult> 
   let events: SimEvent[];
   let eventsSha256: string;
   try {
-    const bytes = await readFile(eventsPath);
-    eventsSha256 = createHash('sha256').update(bytes).digest('hex');
     events = await sink.readAll();
+    eventsSha256 = sink.lastReadSha256!;
     if (sink.tornTail) {
       log(
         `Ignoring an incomplete final line (line ${sink.tornTail.line}) left by an interrupted ` +
@@ -137,8 +138,11 @@ export async function makeScript(options: ScriptOptions): Promise<ScriptResult> 
   });
   const scriptPath = join(dir, 'script.json');
   const markdownPath = join(dir, 'script.md');
-  await writeFileAtomic(scriptPath, `${JSON.stringify(script, null, 2)}\n`);
-  await writeFileAtomic(markdownPath, renderScriptMarkdown(script));
+  // script.json last, so its rename is the durable signal that both outputs are complete.
+  await writeFilesAtomic([
+    { path: markdownPath, content: renderScriptMarkdown(script) },
+    { path: scriptPath, content: `${JSON.stringify(script, null, 2)}\n` },
+  ]);
   return {
     scriptPath,
     markdownPath,

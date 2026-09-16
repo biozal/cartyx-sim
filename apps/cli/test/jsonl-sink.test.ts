@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import type { FileHandle } from 'node:fs/promises';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -95,6 +96,39 @@ describe('JsonlFileSink', () => {
     const path = join(dir, 'events.jsonl');
     await writeFile(path, `${JSON.stringify(event(0))}\n{"seq": "oops"}\n`);
     await expect(new JsonlFileSink(path).readAll()).rejects.toThrow(`${path}:2: invalid event`);
+  });
+
+  describe('lastReadSha256', () => {
+    it('is undefined after reading a missing file', async () => {
+      const sink = new JsonlFileSink(join(dir, 'missing.jsonl'));
+      await sink.readAll();
+      expect(sink.lastReadSha256).toBeUndefined();
+    });
+
+    it('is the sha256 of the exact bytes read', async () => {
+      const path = join(dir, 'events.jsonl');
+      await writeFile(path, `${JSON.stringify(event(0))}\n${JSON.stringify(event(1))}\n`);
+      const sink = new JsonlFileSink(path);
+
+      await sink.readAll();
+
+      const bytes = await readFile(path);
+      expect(sink.lastReadSha256).toBe(createHash('sha256').update(bytes).digest('hex'));
+    });
+
+    it('is the sha256 of the exact bytes read even with a torn tail', async () => {
+      const path = join(dir, 'events.jsonl');
+      const torn = `${JSON.stringify(event(0))}\n{"seq":1,"ts":"2026-09-13T12:0`;
+      await writeFile(path, torn);
+      const sink = new JsonlFileSink(path);
+
+      await sink.readAll();
+
+      expect(sink.tornTail).toBeDefined();
+      expect(sink.lastReadSha256).toBe(
+        createHash('sha256').update(Buffer.from(torn)).digest('hex')
+      );
+    });
   });
 
   describe('seq continuity', () => {
@@ -236,9 +270,9 @@ describe('JsonlFileSink', () => {
           calls.push('mkdir');
           return real.mkdir(path, options);
         },
-        readFile: (path, encoding) => {
+        readFile: (path) => {
           calls.push('readFile');
-          return real.readFile(path, encoding);
+          return real.readFile(path);
         },
         stat: (path) => {
           calls.push('stat');

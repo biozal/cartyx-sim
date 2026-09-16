@@ -179,6 +179,19 @@ describe('makeScript', () => {
     expect(result.stats.labels.fallback).toBe(1);
   });
 
+  it('warns that --refresh has no effect with --no-model', async () => {
+    const lines: string[] = [];
+    await makeScript(options({ useModel: false, refresh: true, log: (line) => lines.push(line) }));
+    expect(lines).toContain('--refresh has no effect: no model labels quotes in this run.');
+  });
+
+  it('warns that --refresh has no effect when the campaign has no seat to label with', async () => {
+    await writeCampaignJson({});
+    const lines: string[] = [];
+    await makeScript(options({ refresh: true, log: (line) => lines.push(line) }));
+    expect(lines).toContain('--refresh has no effect: no model labels quotes in this run.');
+  });
+
   it('falls back to rules with a note when the seat fails', async () => {
     reply = () => ({ status: 500 });
     const result = await makeScript(options());

@@ -84,6 +84,7 @@ export function renderScriptMarkdown(script: ScriptFile): string {
     '',
     `- Lines: ${spoken.length} spoken, ${script.lines.length - spoken.length} cues · ` +
       `spoken words: ${words} (~${minutes} min)`,
+    `- Events: \`${script.eventsSha256.slice(0, 12)}\``,
   ];
   const unlisted = script.speakers.filter((speaker) => speaker.unlisted);
   if (unlisted.length > 0) {

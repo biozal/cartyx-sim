@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { parseNumber } from './args';
 import { benchPassed, runBench } from './bench';
+import { formatCommandError } from './command-errors';
 import { releaseHeldLocks } from './jsonl-sink';
 import { formatPauseMessage } from './pause-message';
 import { runSession } from './run';
@@ -41,6 +42,21 @@ interface ScriptCommandOptions {
   campaignsDir: string;
 }
 
+/**
+ * Wraps a command action so a thrown error becomes a clean message on stderr and exit code 1,
+ * instead of commander's raw stack trace. Set `SIM_DEBUG=1` to print the stack instead.
+ */
+function action<T>(body: (options: T) => Promise<void>): (options: T) => Promise<void> {
+  return async (options: T) => {
+    try {
+      await body(options);
+    } catch (error) {
+      console.error(formatCommandError(error, process.env.SIM_DEBUG === '1'));
+      process.exitCode = 1;
+    }
+  };
+}
+
 const program = new Command().name('sim').description('Cartyx AI D&D session simulator');
 
 program
@@ -57,23 +73,25 @@ program
   .option('--seed <n>', 'seed for reproducible dice', parseNumber('integer'))
   .option('--campaigns-dir <path>', 'campaigns directory', 'campaigns')
   .option('--resume', 'continue an existing session log', false)
-  .action(async (options: RunCommandOptions) => {
-    const result = await runSession({
-      campaignsDir: options.campaignsDir,
-      campaign: options.campaign,
-      session: options.session,
-      fixturePath: options.fixture,
-      targetMinutes: options.targetMinutes,
-      seed: options.seed,
-      resume: options.resume,
-      log: (line) => console.log(line),
-    });
-    console.log(`\nSession ${result.status}. Event log: ${result.eventsPath}`);
-    if (result.status === 'paused') {
-      console.error(formatPauseMessage(result));
-      process.exitCode = 2;
-    }
-  });
+  .action(
+    action<RunCommandOptions>(async (options) => {
+      const result = await runSession({
+        campaignsDir: options.campaignsDir,
+        campaign: options.campaign,
+        session: options.session,
+        fixturePath: options.fixture,
+        targetMinutes: options.targetMinutes,
+        seed: options.seed,
+        resume: options.resume,
+        log: (line) => console.log(line),
+      });
+      console.log(`\nSession ${result.status}. Event log: ${result.eventsPath}`);
+      if (result.status === 'paused') {
+        console.error(formatPauseMessage(result));
+        process.exitCode = 2;
+      }
+    })
+  );
 
 program
   .command('bench')
@@ -81,16 +99,18 @@ program
   .requiredOption('--campaign <id>', 'campaign id (a folder under the campaigns directory)')
   .option('--trials <n>', 'tool-call trials per seat', parseNumber('integer'), 5)
   .option('--campaigns-dir <path>', 'campaigns directory', 'campaigns')
-  .action(async (options: BenchCommandOptions) => {
-    const report = await runBench({
-      campaignsDir: options.campaignsDir,
-      campaign: options.campaign,
-      trials: options.trials,
-      log: (line) => console.log(line),
-    });
-    console.log(`\nBench report: ${report.reportPath}`);
-    if (!benchPassed(report.results)) process.exitCode = 1;
-  });
+  .action(
+    action<BenchCommandOptions>(async (options) => {
+      const report = await runBench({
+        campaignsDir: options.campaignsDir,
+        campaign: options.campaign,
+        trials: options.trials,
+        log: (line) => console.log(line),
+      });
+      console.log(`\nBench report: ${report.reportPath}`);
+      if (!benchPassed(report.results)) process.exitCode = 1;
+    })
+  );
 
 program
   .command('script')
@@ -102,10 +122,9 @@ program
   .option('--no-model', 'attribute quotes in DM narration by rules only')
   .option('--refresh', 'ignore cached model answers', false)
   .option('--campaigns-dir <path>', 'campaigns directory', 'campaigns')
-  .action(async (options: ScriptCommandOptions) => {
-    let result;
-    try {
-      result = await makeScript({
+  .action(
+    action<ScriptCommandOptions>(async (options) => {
+      const result = await makeScript({
         campaignsDir: options.campaignsDir,
         campaign: options.campaign,
         session: options.session,
@@ -113,12 +132,8 @@ program
         refresh: options.refresh,
         log: (line) => console.log(line),
       });
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error));
-      process.exitCode = 1;
-      return;
-    }
-    for (const line of formatScriptSummary(result)) console.log(line);
-  });
+      for (const line of formatScriptSummary(result)) console.log(line);
+    })
+  );
 
 await program.parseAsync(process.argv);

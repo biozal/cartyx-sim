@@ -93,6 +93,8 @@ Fix the cause, then continue with the same command plus `--resume`: the log is t
 
 Ctrl-C releases the session lock before exiting. If a run was killed without releasing it, the next run replaces a lock whose process is no longer running and says so.
 
+Any other error prints its message and exits 1, without a stack trace. Set `SIM_DEBUG=1` to print the stack instead.
+
 ## 7. Keep the DM from playing the players (optional)
 
 Models acting as DM tend to write dialogue, thoughts, and actions for the player characters. An optional checker seat reviews every DM narration against what the players declared since the DM last spoke. The DM may describe a character carrying out the action its player declared; it may not write that character's dialogue, thoughts, feelings, or choices, or have them do anything undeclared.
@@ -146,7 +148,9 @@ The labeling seat is `seats.script` in `campaign.json` when present, otherwise `
 }
 ```
 
-Model answers are cached in `sessions/NNN/.script-cache/`, so re-running is free and gives the same result. `--refresh` asks the model again.
+Model answers are cached in `sessions/NNN/.script-cache/`, so re-running is free and gives the same result. `--refresh` asks the model again. With `--no-model`, or a campaign with no `script` or `checker` seat, nothing labels quotes, so `--refresh` has no effect; it prints a line saying so rather than silently doing nothing.
+
+`script.md`'s header names the event log it was built from: `` - Events: `<first 12 hex chars of eventsSha256>` ``, matching `script.json`'s `eventsSha256`. A script rebuilt from the same log always shows the same hash; a different one means the log changed underneath it.
 
 To rename or merge speakers, add `sessions/NNN/speakers.json` and re-run:
 
@@ -159,4 +163,6 @@ To rename or merge speakers, add `sessions/NNN/speakers.json` and re-run:
 
 `name` renames a speaker; `id` merges one NPC into another. Unknown speakers and merges into a player character or the DM are errors.
 
-`sim script` refuses to start while the session is being played: it takes the same lock as `sim run`, but only while it reads and hashes the log, releasing it before labeling and writing the outputs. It prints a summary: lines by kind, spoken words, how quotes were labeled, dropped stage directions, unlisted speakers, and notes.
+`sim script` refuses to start while the session is being played: it takes the same lock as `sim run`, but only while it reads and hashes the log, releasing it before labeling and writing the outputs. It prints a summary: lines by kind, spoken words, how quotes were labeled, dropped stage directions, unlisted speakers, and notes. `script.md` and `script.json` are written as a pair, with `script.json` last, so a reader never finds one without the other.
+
+Like `sim run`, any other error prints its message and exits 1; set `SIM_DEBUG=1` to print the stack instead.

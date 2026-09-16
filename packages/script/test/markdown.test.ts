@@ -201,6 +201,7 @@ describe('renderScriptMarkdown', () => {
         '# avalon — Session 3',
         '',
         '- Lines: 8 spoken, 11 cues · spoken words: 22 (~0.1 min)',
+        '- Events: `aaaaaaaaaaaa`',
         '- Unlisted NPC speakers: Faceless creature (npc-faceless-creature)',
         '- Notes: 1 (listed at the end)',
         '',

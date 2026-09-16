@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { FileHandle } from 'node:fs/promises';
 import { mkdir, open, readFile, stat, truncate, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -36,7 +37,7 @@ function lockPid(content: string): number | undefined {
 export interface JsonlFileSinkFs {
   open: (path: string, flags: string) => Promise<FileHandle>;
   mkdir: (path: string, options: { recursive: true }) => Promise<string | undefined>;
-  readFile: (path: string, encoding: BufferEncoding) => Promise<string>;
+  readFile: (path: string) => Promise<Buffer>;
   stat: (path: string) => Promise<unknown>;
   unlink: (path: string) => Promise<void>;
   truncate: (path: string, length: number) => Promise<void>;
@@ -74,6 +75,11 @@ export class JsonlFileSink implements EventSink {
    * before the next append.
    */
   tornTail: { line: number; text: string } | undefined;
+  /**
+   * SHA-256 hex digest of the exact bytes `readAll` last parsed (so a caller can stamp an output
+   * with the log version it was built from), or undefined when the file did not exist.
+   */
+  lastReadSha256: string | undefined;
 
   constructor(
     readonly path: string,
@@ -94,16 +100,19 @@ export class JsonlFileSink implements EventSink {
   }
 
   async readAll(): Promise<SimEvent[]> {
-    let content: string;
+    let bytes: Buffer;
     try {
-      content = await this.fs.readFile(this.path, 'utf8');
+      bytes = await this.fs.readFile(this.path);
     } catch (error) {
       if (isNotFound(error)) {
         this.lastSeq = -1;
+        this.lastReadSha256 = undefined;
         return [];
       }
       throw error;
     }
+    this.lastReadSha256 = createHash('sha256').update(bytes).digest('hex');
+    const content = bytes.toString('utf8');
     const events: SimEvent[] = [];
     const lines = content.split('\n');
     const terminated = content === '' || content.endsWith('\n');
@@ -215,7 +224,7 @@ export class JsonlFileSink implements EventSink {
 
   private async readLock(): Promise<string | undefined> {
     try {
-      return await this.fs.readFile(this.lockPath, 'utf8');
+      return (await this.fs.readFile(this.lockPath)).toString('utf8');
     } catch (error) {
       if (isNotFound(error)) return undefined;
       throw error;

@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (54 files, 788 tests), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (55 files, 833 tests), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -72,6 +72,21 @@ What the scripts show:
 - **Rules only:** without a model, every quote of three or more words goes to `npc-unnamed`, including the control session's DM-written player lines. The model is needed to catch those.
 - **One awkward split:** "She mutters something about "outsiders bringing bad luck" and pulls her shawl tight" was labeled as the elderly woman's speech, so the sentence splits around a reported-speech fragment. The labeling prompt could treat a quote inside reported speech as `none`.
 
+### Fixes after review
+
+Before the 1-hour run, review of the script stage above turned up ten issues, now fixed:
+
+1. The labeling prompt labels a quote inside reported speech as `none`, and `LABEL_PROMPT_VERSION` is now 3.
+2. PC speech also splits when every quote is a full sentence and every outside sentence is a speech tag (I/he/she/they/the PC's name + a say-verb) or an `I <body-language verb>` sentence.
+3. An NPC the model named with `new:` before its `npc_introduced` event is promoted to the introduced NPC.
+4. A hidden HP change uses core's `hpTrend`: equal values print no markdown line, and non-numbers read "condition changes".
+5. Each `session_paused` event gets its own pause cue.
+6. The invariants check that a voiced line's source event is public and that each dropped span's offsets and text match its source.
+7. A label is cached under the key of the model that answered (`ModelResponse.model`).
+8. `sim script --refresh` with no model labeling quotes (`--no-model`, or no `script`/`checker` seat) says so instead of doing nothing silently.
+9. `sim script` reads the event log once, hashing the exact bytes it parses for `eventsSha256`, and writes `script.md` and `script.json` as a pair, with `script.json` last.
+10. `sim run`, `sim bench`, and `sim script` print a clean error message and exit 1 on any other failure, with `SIM_DEBUG=1` for the stack.
+
 ## What Plan 2A added
 
 - **Engine hardening:** a runaway-loop backstop (12 stalled turns, 3 idle hand-offs, 24 DM tool calls per beat), a validator flag for every DM outcome, a player-safe `PlayerView` for prompts, downed PCs kept in initiative, turn ids and tool choice on model requests, an event schema version, a Node-free typecheck for `core` and `rules`, and recovery from a torn final log line.
@@ -115,5 +130,4 @@ The full list is in the roadmap's Backlog section. Highlights:
   - `ModelRequest.signal` is never set;
   - a seeded run's dice restart on resume;
   - kira's 8-bit Qwen3.8 is the slowest seat; a 4-bit build would roughly halve its turns;
-  - the script labeling prompt should label a quote inside reported speech ("mutters something about "…"") as `none`; bump `LABEL_PROMPT_VERSION` when it changes;
   - plus the older cleanup items.
