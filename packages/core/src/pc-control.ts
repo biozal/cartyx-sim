@@ -275,10 +275,12 @@ export function verifyFindings(
  * The narration without the sentences a finding's text overlaps (wherever that full text occurs),
  * so a finding spanning several sentences removes all of them, a finding that is one clause
  * removes its whole sentence, and sentences it does not touch stay. Findings are matched as in
- * `verifyFindings`, so one that would not be kept cuts nothing. A kept sentence keeps the original
- * whitespace that followed it (a space, a line break, …), so line breaks inside a paragraph
- * survive around a cut sentence; the last kept sentence in a paragraph has its trailing whitespace
- * trimmed. Paragraph breaks are kept; returns "" when nothing remains.
+ * `verifyFindings`, so one that would not be kept cuts nothing. The contract on whitespace: a kept
+ * sentence keeps the exact whitespace that followed it in the original narration — a single space,
+ * a line break, a tab, several spaces, whatever was actually there — so cutting a sentence never
+ * reflows the ones around it; the last kept sentence in each paragraph is trimmed of its trailing
+ * whitespace; and paragraphs (kept or not) are rejoined with "\n\n", not whatever separated them
+ * originally. Returns "" when nothing remains.
  */
 export function cutSentences(narration: string, findings: readonly PcControlFinding[]): string {
   const layout = layOut(narration);

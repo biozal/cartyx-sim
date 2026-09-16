@@ -573,7 +573,9 @@ export class Director {
           ? validateDmText(text, {
               pcNames,
               mechanicsToolCalled: mechanicsCalled,
-              skipPcControl: Boolean(this.config.seats.checker),
+              // The checker replaces this rule only while it is still working; once it has
+              // disabled itself for the run, the verb list resumes so something is still watching.
+              skipPcControl: Boolean(this.config.seats.checker) && !this.checkerDisabled,
             })
           : null;
         if (violation && call.id === proseCallId) {
@@ -620,13 +622,7 @@ export class Director {
                   `Rejected (${DM_CONTROLS_PC_CHECKER_RULE}): these sentences play player characters: ${listed}. Rewrite the narration without them and call narrate again.`
                 )
               );
-              this.flag(
-                recorder,
-                seat,
-                DM_CONTROLS_PC_CHECKER_RULE,
-                pcControlRetried ? 1 : 0,
-                're_prompted'
-              );
+              this.flag(recorder, seat, DM_CONTROLS_PC_CHECKER_RULE, 1, 're_prompted');
               // Kept for review: the DM's rejected draft and the checker's raw reply, DM-only.
               recorder.emit({
                 type: 'ooc_note',

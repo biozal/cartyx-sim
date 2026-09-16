@@ -278,6 +278,36 @@ describe('DM player-character control checker', () => {
     );
   });
 
+  it('falls back to the verb-list rule once the checker disables itself', async () => {
+    const { director, model, sink } = setup(
+      {
+        dm: [
+          respond(
+            narrate('The wind rises.'),
+            narrate('Kira decides to open the door.'),
+            handOffTomas()
+          ),
+          respond(handOffTomas()),
+        ],
+        checker: [{ throw: 'down' }],
+      },
+      { maxCheckerFailures: 1 }
+    );
+    await playDmBeat(director);
+
+    expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual(['The wind rises.']);
+    expect(
+      ofType(sink.events, 'validator_flag').filter((e) => e.rule === 'dm_controls_pc')
+    ).toMatchObject([{ resolution: 're_prompted', retries: 1 }]);
+    expect(
+      ofType(sink.events, 'ooc_note').some((note) =>
+        note.text.includes('Checker failed 1 times in a row')
+      )
+    ).toBe(true);
+    expect(model.requests.filter((request) => request.seat === 'checker')).toHaveLength(1);
+    expect(ofType(sink.events, 'hand_off')).toHaveLength(1);
+  });
+
   it('resets the failure count after a successful check', async () => {
     const { director, model, sink } = setup({
       dm: [
