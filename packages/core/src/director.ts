@@ -220,6 +220,16 @@ function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+/** `text` with every line in `lines` removed, trimmed. Returns '' when nothing remains. */
+function stripLeakedLines(text: string, lines: readonly string[]): string {
+  const drop = new Set(lines);
+  return text
+    .split('\n')
+    .filter((line) => !drop.has(line))
+    .join('\n')
+    .trim();
+}
+
 /** True when this beat already narrated the same words: some models repeat a line verbatim. */
 function narratedThisBeat(recorder: TurnRecorder, text: string): boolean {
   const words = collapseWhitespace(text);
@@ -378,6 +388,7 @@ export class Director {
     }
     if (!this.state.ended && clockPhase(this.state, this.targetMinutes) === 'hard_stop') {
       const recorder = this.newRecorder();
+      this.closeCombatIfRunning(recorder);
       recorder.emit({ type: 'session_end', reason: 'hard_stop' });
       await this.commit(recorder);
       return 'ended';
@@ -402,6 +413,7 @@ export class Director {
 
     if (!this.state.ended && clockPhase(this.state, this.targetMinutes) === 'hard_stop') {
       const recorder = this.newRecorder();
+      this.closeCombatIfRunning(recorder);
       recorder.emit({ type: 'session_end', reason: 'hard_stop' });
       await this.commit(recorder);
     }
@@ -564,12 +576,10 @@ export class Director {
           skipRest = true;
           continue;
         }
-        const text = prepared.def.narrativeText?.(prepared.args);
-        if (call.name === 'narrate' && text && narratedThisBeat(recorder, text)) {
-          rejectDuplicateNarration(call, ALREADY_NARRATED);
-          continue;
-        }
-        const violation = text
+        let text = prepared.def.narrativeText?.(prepared.args);
+        let args = prepared.args;
+        let removed = '';
+        let violation = text
           ? validateDmText(text, {
               pcNames,
               mechanicsToolCalled: mechanicsCalled,
@@ -578,6 +588,40 @@ export class Director {
               skipPcControl: Boolean(this.config.seats.checker) && !this.checkerDisabled,
             })
           : null;
+        // A leak is mechanical (prompt state such as ids, HP blocks, or turn-order lines), so it
+        // is stripped on sight instead of costing a rejection/retry: the good prose around it
+        // survives. Only narrate calls are trimmed this way, matching the checker's trim path
+        // below; a leak in another DM text path falls through to the ordinary violation handling.
+        if (call.name === 'narrate' && violation?.rule === 'dm_state_leak') {
+          const leaked = violation.strip ?? [];
+          const listed = leaked.join(' | ');
+          const stripped = stripLeakedLines(text!, leaked);
+          this.flag(recorder, seat, 'dm_state_leak', 0, 'trimmed');
+          recorder.emit({
+            type: 'ooc_note',
+            visibility: 'dm',
+            text: `Cut from DM narration (dm_state_leak): ${listed}`,
+          });
+          if (!stripped) {
+            fullyCutNarrations.add(collapseWhitespace(text!));
+            messages.push(
+              toolMessage(call, `Not narrated: every line leaked prompt state. ${listed}`)
+            );
+            continue;
+          }
+          args = { ...(prepared.args as Record<string, unknown>), text: stripped };
+          removed = ` Removed lines that leaked prompt state: ${listed}`;
+          text = stripped;
+          violation = validateDmText(text, {
+            pcNames,
+            mechanicsToolCalled: mechanicsCalled,
+            skipPcControl: Boolean(this.config.seats.checker) && !this.checkerDisabled,
+          });
+        }
+        if (call.name === 'narrate' && text && narratedThisBeat(recorder, text)) {
+          rejectDuplicateNarration(call, ALREADY_NARRATED);
+          continue;
+        }
         if (violation && call.id === proseCallId) {
           // Prose the engine turned into narration is dropped on a violation, without costing a
           // retry or blocking the calls the model actually made. A DM-only note keeps a record.
@@ -603,8 +647,6 @@ export class Director {
           skipRest = true;
           continue;
         }
-        let args = prepared.args;
-        let removed = '';
         if (call.name === 'narrate' && text) {
           if (fullyCutNarrations.has(collapseWhitespace(text))) {
             // This exact narration was already cut to nothing this beat: nothing new to check.
@@ -716,6 +758,7 @@ export class Director {
     const phase = clockPhase(recorder.state, this.targetMinutes);
     const sceneBreak = recorder.events.some((event) => event.type === 'scene_change');
     if (sceneBreak && (phase === 'end_at_scene_break' || phase === 'hard_stop')) {
+      this.closeCombatIfRunning(recorder);
       recorder.emit({ type: 'session_end', reason: 'target_reached' });
     }
     await this.commit(recorder);
@@ -824,6 +867,11 @@ export class Director {
 
     recorder.emit({ type: 'turn_end', actor: pcId });
     await this.commit(recorder);
+  }
+
+  /** Closes combat before the session ends, so a fight is never left running across the cut. */
+  private closeCombatIfRunning(recorder: TurnRecorder): void {
+    if (recorder.state.combat) recorder.emit({ type: 'combat_end' });
   }
 
   /** Records a validator outcome for the lore audit and review (spec §5.6: every case is flagged). */

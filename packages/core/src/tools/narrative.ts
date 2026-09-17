@@ -103,6 +103,9 @@ export const sceneChange = defineTool({
     loreEntityId: z.string().min(1).max(200).optional(),
   }),
   run(args, { recorder }) {
+    if (recorder.state.combat) {
+      throw new ToolError('Combat is still running. Call end_combat first, then scene_change.');
+    }
     recorder.emit({ type: 'scene_change', ...args });
     return { result: `The scene is now ${args.location}.` };
   },

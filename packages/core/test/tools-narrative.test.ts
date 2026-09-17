@@ -1,3 +1,4 @@
+import { scriptedRng } from '@cartyx-sim/rules';
 import { makeCombatant } from '@cartyx-sim/rules/testing';
 import { describe, expect, it } from 'vitest';
 import {
@@ -9,6 +10,7 @@ import {
   recordInvention,
   sceneChange,
 } from '../src/tools/narrative';
+import { startCombat } from '../src/tools/combat';
 import type { LoreIndex } from '../src/model';
 import { toToolSchema } from '../src/tools/types';
 import { renderTranscript } from '../src/transcript';
@@ -194,6 +196,27 @@ describe('scene_change', () => {
     const harness = toolHarness();
     await harness.run(sceneChange, { location: "Dean's Office", artPrompt: 'A polished office' });
     expect(harness.recorder.state.scene?.location).toBe("Dean's Office");
+  });
+
+  it('throws while combat is still running', async () => {
+    const harness = toolHarness({ rng: scriptedRng([10, 5, 17]) });
+    await harness.run(startCombat, {
+      monsters: [
+        {
+          name: 'Clockwork Sentry',
+          ac: 13,
+          maxHp: 11,
+          attacks: [{ name: 'Slam', bonus: 4, damage: '1d6+2', damageType: 'bludgeoning' }],
+        },
+      ],
+    });
+    expect(
+      await harness.run(sceneChange, { location: "Dean's Office", artPrompt: 'A polished office' })
+    ).toEqual({
+      ok: false,
+      error: 'Combat is still running. Call end_combat first, then scene_change.',
+    });
+    expect(harness.recorder.state.scene).toBeNull();
   });
 
   it('G5.15: records a loreEntityId on the event and in state.scene', async () => {

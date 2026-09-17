@@ -23,4 +23,12 @@ describe('session clock', () => {
     expect(clockInstruction('wrap_up')).toContain('nearing its time limit');
     expect(clockInstruction('end_at_scene_break')).toContain('call scene_change');
   });
+
+  it.each(['end_at_scene_break', 'hard_stop'] as const)(
+    'tells the DM to close combat before the scene cut in %s',
+    (phase) => {
+      expect(clockInstruction(phase)).toContain('end_combat');
+      expect(clockInstruction(phase)).toContain('call scene_change');
+    }
+  );
 });

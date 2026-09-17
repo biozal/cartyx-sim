@@ -29,6 +29,6 @@ export function clockInstruction(phase: ClockPhase): string {
       return 'The session is nearing its time limit: start steering toward a satisfying cliffhanger.';
     case 'end_at_scene_break':
     case 'hard_stop':
-      return 'Time is up: close the current scene now and call scene_change to cut to the cliffhanger.';
+      return 'Time is up: end combat with end_combat if a fight is running, close the current scene now, and call scene_change to cut to the cliffhanger.';
   }
 }

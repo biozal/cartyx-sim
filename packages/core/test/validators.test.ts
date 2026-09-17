@@ -82,6 +82,48 @@ describe('validateDmText', () => {
     expect(performance.now() - start).toBeLessThan(100);
   });
 
+  describe('dm_state_leak', () => {
+    it.each([
+      'Kira Vale (id: kira) | HP 24/24, AC 15',
+      'Bram Holloway (id: bram) | HP 28/28, AC 16',
+      "It is Kira's turn.",
+    ])('flags a leaked prompt-state line: "%s"', (text) => {
+      const violation = validateDmText(text, { pcNames, mechanicsToolCalled: false });
+      expect(violation?.rule).toBe('dm_state_leak');
+      expect(violation?.strip).toEqual([text]);
+    });
+
+    it('names only the leaked lines in strip, leaving surrounding prose out of it', () => {
+      const text = [
+        'The mercenaries fall back into the alley.',
+        'Kira Vale (id: kira) | HP 24/24, AC 15',
+        'Bram Holloway (id: bram) | HP 28/28, AC 16',
+        "It is Kira's turn.",
+      ].join('\n');
+      const violation = validateDmText(text, { pcNames, mechanicsToolCalled: false });
+      expect(violation?.rule).toBe('dm_state_leak');
+      expect(violation?.strip).toEqual([
+        'Kira Vale (id: kira) | HP 24/24, AC 15',
+        'Bram Holloway (id: bram) | HP 28/28, AC 16',
+        "It is Kira's turn.",
+      ]);
+    });
+
+    it('takes priority over the mechanics rule for a leaked HP block', () => {
+      expect(
+        validateDmText('Kira Vale HP 24/24, AC 15', { pcNames, mechanicsToolCalled: false })?.rule
+      ).toBe('dm_state_leak');
+    });
+
+    it.each([
+      'Kira mentions her HP is fine.',
+      'Bram takes his turn at the wheel.',
+      'The old ledger lists an id number for every crate.',
+    ])('leaves ordinary narration alone: "%s"', (text) => {
+      expect(validateDmText(text, { pcNames, mechanicsToolCalled: false })).toBeNull();
+    });
+  });
+
   describe('G4.2: catches past-tense, adverb, vocative, and Unicode PC control', () => {
     const elodieParty = [...pcNames, 'Élodie Marsh'];
 

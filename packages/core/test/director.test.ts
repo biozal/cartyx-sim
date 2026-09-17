@@ -477,6 +477,50 @@ describe('Director', () => {
     });
   });
 
+  it('strips a leaked combatant block from DM narration, keeping the prose before it', async () => {
+    const leak = 'Kira Vale (id: kira) | HP 24/24, AC 15';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(
+          toolCall('narrate', { text: `The mercenaries fall back into the alley.\n${leak}` }),
+          toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })
+        ),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration')).toMatchObject([
+      { text: 'The mercenaries fall back into the alley.' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'dm_state_leak', resolution: 'trimmed', retries: 0 },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'ooc_note')).toMatchObject([
+      { visibility: 'dm', text: `Cut from DM narration (dm_state_leak): ${leak}` },
+    ]);
+  });
+
+  it('rejects a narration that leaks prompt state on every line, and the beat still hands off', async () => {
+    const leak = 'Kira Vale (id: kira) | HP 24/24, AC 15';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(
+          toolCall('narrate', { text: leak }),
+          toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })
+        ),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.some((e) => e.type === 'narration')).toBe(false);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'dm_state_leak', resolution: 'trimmed' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'hand_off')).toHaveLength(1);
+  });
+
   it('does not speak player prose that arrives alongside a tool call', async () => {
     const { deps: built, sink } = deps({
       dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } }))],
@@ -526,6 +570,37 @@ describe('Director', () => {
     const director = await Director.create(config({ targetMinutes: 0.02 }), built);
     expect((await director.run()).status).toBe('ended');
     expect(sink.events.at(-1)).toMatchObject({ type: 'session_end', reason: 'hard_stop' });
+  });
+
+  it('closes combat before the session ends mid-fight, at the hard stop', async () => {
+    const { deps: built, sink } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('narrate', { text: 'The engines roar to life all around you.' }),
+            toolCall('start_combat', {
+              monsters: [
+                {
+                  name: 'Clockwork Sentry',
+                  ac: 13,
+                  maxHp: 11,
+                  attacks: [{ name: 'Slam', bonus: 4, damage: '1d6+2', damageType: 'bludgeoning' }],
+                },
+              ],
+            }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      { rolls: [10, 5, 17] }
+    );
+    const director = await Director.create(config({ targetMinutes: 0.02 }), built);
+    expect((await director.run()).status).toBe('ended');
+    expect(sink.events.slice(-2)).toMatchObject([
+      { type: 'combat_end' },
+      { type: 'session_end', reason: 'hard_stop' },
+    ]);
+    expect(director.currentState.combat).toBeNull();
   });
 
   it('pauses when a seat keeps failing and resumes from the log', async () => {

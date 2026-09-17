@@ -1,11 +1,17 @@
 import { escapeRegExp } from './text';
 
 export type ViolationRule =
-  'dm_controls_pc' | 'mechanics_without_tool' | 'player_controls_other' | 'player_narrates_outcome';
+  | 'dm_controls_pc'
+  | 'dm_state_leak'
+  | 'mechanics_without_tool'
+  | 'player_controls_other'
+  | 'player_narrates_outcome';
 
 export interface Violation {
   rule: ViolationRule;
   message: string;
+  /** Only for `dm_state_leak`: the narration's offending lines, verbatim, for the caller to strip. */
+  strip?: string[];
 }
 
 // Present and past tense, so "Kira draws" and "Kira drew" both count.
@@ -140,6 +146,22 @@ function controlledCharacter(text: string, names: readonly string[]): string | n
   return null;
 }
 
+// Lines of prompt state that must never reach narration: a combatant's id parenthetical, an HP
+// block, or a bald "whose turn" statement. Checked one line at a time, so surrounding prose that
+// does not match survives.
+const STATE_LEAK_PATTERNS = [
+  /\(id:\s*[a-z0-9-]+\)/i,
+  /\bHP\s+\d+\s*\/\s*\d+/i,
+  /\bIt is [^.]{1,40}'s turn\b/i,
+];
+
+/** The lines of `text` that leak prompt state, in order, or `[]` when none do. */
+function stateLeakLines(text: string): string[] {
+  return text
+    .split('\n')
+    .filter((line) => STATE_LEAK_PATTERNS.some((pattern) => pattern.test(line)));
+}
+
 export function validateDmText(
   text: string,
   context: {
@@ -149,6 +171,15 @@ export function validateDmText(
     skipPcControl?: boolean;
   }
 ): Violation | null {
+  const leaked = stateLeakLines(text);
+  if (leaked.length > 0) {
+    return {
+      rule: 'dm_state_leak',
+      message:
+        'Narration must not include prompt state such as combatant ids, HP blocks, or whose-turn lines; describe the scene in prose instead.',
+      strip: leaked,
+    };
+  }
   const pc = context.skipPcControl ? null : controlledCharacter(text, context.pcNames);
   if (pc) {
     return {
