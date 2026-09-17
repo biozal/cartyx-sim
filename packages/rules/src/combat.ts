@@ -42,7 +42,7 @@ export function rollAttack(
   const base = { attack, d20, total, targetAc: target.ac, hit, critical };
   if (!hit) return { ...base, damage: null, target };
   const damage = rollDice(attack.damage, rng, { critical });
-  return { ...base, damage, target: applyDamage(target, damage.total) };
+  return { ...base, damage, target: applyDamage(target, damage.total, { critical }) };
 }
 
 export function resolveAttack(

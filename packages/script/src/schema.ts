@@ -112,7 +112,7 @@ export const StateLine = z.object({
   state: z.object({
     entity: z.string(),
     name: z.string(),
-    field: z.enum(['hp', 'conditions', 'dead']),
+    field: z.enum(['hp', 'conditions', 'dead', 'deathSaves', 'stable']),
     before: z.unknown(),
     after: z.unknown(),
     /** True for anyone but a player character: the book hides their HP numbers. */

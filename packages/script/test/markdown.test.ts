@@ -257,6 +257,31 @@ describe('renderScriptMarkdown', () => {
     );
   });
 
+  it('cues a death save tally and stabilization, and stays silent when stability is lost', () => {
+    const cue = (field: 'deathSaves' | 'stable', before: unknown, after: unknown) =>
+      renderScriptMarkdown({
+        ...SCRIPT,
+        speakers: [],
+        notes: [],
+        lines: [
+          {
+            id: 'L0001',
+            kind: 'state',
+            sources: [{ seq: 1 }],
+            state: { entity: 'kira', name: 'Kira Vale', field, before, after, hidden: false },
+          },
+        ],
+      });
+    expect(
+      cue('deathSaves', { successes: 1, failures: 1 }, { successes: 2, failures: 1 })
+    ).toContain('*Kira Vale: 2 death save successes, 1 failure.*');
+    expect(
+      cue('deathSaves', { successes: 0, failures: 0 }, { successes: 1, failures: 0 })
+    ).toContain('*Kira Vale: 1 death save success, 0 failures.*');
+    expect(cue('stable', false, true)).toContain('*Kira Vale is stable.*');
+    expect(cue('stable', true, false)).not.toContain('Kira Vale');
+  });
+
   it('shows a downed or recovering hidden entity without numbers', () => {
     const state = (before: number, after: number) =>
       renderScriptMarkdown({

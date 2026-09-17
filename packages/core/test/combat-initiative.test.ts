@@ -19,7 +19,7 @@ const goblins = {
 };
 
 describe('start_combat initiative', () => {
-  it('adds a living party member at 0 HP to the order but never gives them a turn while down', async () => {
+  it('adds a living party member at 0 HP to the order and gives them a death-save turn', async () => {
     const { state, history } = startedState([
       { ...kira, hp: 0, conditions: ['unconscious'] },
       tomas,
@@ -31,7 +31,23 @@ describe('start_combat initiative', () => {
     expect(order).toContain('kira');
     expect(order).toEqual(['kira', 'tomas', 'goblin-1']);
 
-    // The director moves past a downed first combatant; the pure helper it uses skips Kira.
+    // A dying PC keeps their place in the order: their turn is a death saving throw.
+    expect(advanceCombat(harness.recorder.state, { inclusive: true })).toMatchObject({
+      combatantId: 'kira',
+    });
+    expect(nextActor(harness.recorder.state)).toEqual({
+      kind: 'death_save',
+      combatantId: 'kira',
+    });
+  });
+
+  it('skips a stabilized party member at 0 HP', async () => {
+    const { state, history } = startedState([
+      { ...kira, hp: 0, conditions: ['unconscious'], stable: true },
+      tomas,
+    ]);
+    const harness = toolHarness({ state, history, rng: scriptedRng([15, 10, 5]) });
+    await harness.run(startCombat, goblins);
     expect(advanceCombat(harness.recorder.state, { inclusive: true })).toMatchObject({
       combatantId: 'tomas',
     });

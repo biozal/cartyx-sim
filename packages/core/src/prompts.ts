@@ -1,4 +1,4 @@
-import type { Combatant } from '@cartyx-sim/rules';
+import type { Combatant, DeathSaves } from '@cartyx-sim/rules';
 import type { ChatMessage } from './model';
 import type { GameState, NpcRecord } from './state';
 import type { PlayerView } from './view';
@@ -49,10 +49,28 @@ const PC_CONTROL_SYSTEM = [
   'Reply with JSON only: {"violations": [{"pc": "<name>", "sentence": "<exact sentence>", "why": "<short reason>"}]}. Reply {"violations": []} when there are none.',
 ].join('\n');
 
+/**
+ * A combatant's health in one phrase: dead, dying with its death save tally, stable at 0 HP, or
+ * plain hit points. Only a player character is ever dying or stable (spec §6).
+ */
+function describeHealth(vitals: {
+  hp: number;
+  maxHp: number;
+  dead: boolean;
+  deathSaves: DeathSaves;
+  stable: boolean;
+}): string {
+  if (vitals.dead) return 'DEAD';
+  if (vitals.stable) return 'STABLE at 0 HP';
+  if (vitals.hp === 0) {
+    return `DYING (death saves ${vitals.deathSaves.successes}/${vitals.deathSaves.failures})`;
+  }
+  return `HP ${vitals.hp}/${vitals.maxHp}`;
+}
+
 function describeCombatant(combatant: Combatant): string {
-  const health = combatant.dead ? 'DEAD' : `HP ${combatant.hp}/${combatant.maxHp}`;
   const conditions = combatant.conditions.length > 0 ? `, ${combatant.conditions.join(', ')}` : '';
-  return `- ${combatant.name} (id: ${combatant.id}) ${health}, AC ${combatant.ac}${conditions}`;
+  return `- ${combatant.name} (id: ${combatant.id}) ${describeHealth(combatant)}, AC ${combatant.ac}${conditions}`;
 }
 
 // So a description that scrolled out of the transcript window still fits one prompt line.
@@ -97,9 +115,8 @@ export const basicPrompts: PromptBuilder = {
   },
   player({ view, transcript, instruction }) {
     const allies = view.allies.map((ally) => {
-      const health = ally.dead ? 'DEAD' : `HP ${ally.hp}/${ally.maxHp}`;
       const conditions = ally.conditions.length > 0 ? `, ${ally.conditions.join(', ')}` : '';
-      return `- ${ally.name} (id: ${ally.id}) ${health}${conditions}`;
+      return `- ${ally.name} (id: ${ally.id}) ${describeHealth(ally)}${conditions}`;
     });
     const others = view.others.map((other) => `- ${other.name} (id: ${other.id}): ${other.status}`);
     return [

@@ -45,6 +45,14 @@ function combat({ combat }: CombatLine): string {
   }
 }
 
+/** A death save tally as "2 death save successes, 1 failure"; `after` comes from the log as-is. */
+function deathSaves(after: unknown): string {
+  const tally = after as { successes?: unknown; failures?: unknown } | null;
+  const successes = Number(tally?.successes) || 0;
+  const failures = Number(tally?.failures) || 0;
+  return `${successes} death save success${successes === 1 ? '' : 'es'}, ${failures} failure${failures === 1 ? '' : 's'}`;
+}
+
 /**
  * Spec §5.5 of the v1 design: a non-PC's HP numbers never appear, only how it is doing. Returns
  * null for a hidden entity whose HP did not change, so `renderScriptMarkdown` adds no block.
@@ -55,6 +63,9 @@ function stateChange({ state }: StateLine): string | null {
     const list = Array.isArray(state.after) ? state.after.map(String).join(', ') : '';
     return `*${state.name} conditions: ${list || 'none'}.*`;
   }
+  if (state.field === 'deathSaves') return `*${state.name}: ${deathSaves(state.after)}.*`;
+  // Losing stability always comes with a death save failure, which cues itself.
+  if (state.field === 'stable') return state.after === true ? `*${state.name} is stable.*` : null;
   if (state.hidden) {
     switch (hpTrend(state.before, state.after)) {
       case 'down':

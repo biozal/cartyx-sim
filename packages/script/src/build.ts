@@ -23,6 +23,7 @@ import {
   type Note,
   type ScriptLine,
   type SpeakerOverrides,
+  type StateLine,
   type VoicedLine,
 } from './schema';
 import { applySpeakerOverrides, SpeakerTable } from './speakers';
@@ -61,6 +62,21 @@ interface Draft {
 }
 
 const NO_LINE_NOTE = 'Dropped text from an event that produced no line.';
+
+type CuedStateField = StateLine['state']['field'];
+
+/** The `state_change` fields the book cues; the rest (temp HP, slots, inventory) stay bookkeeping. */
+const CUED_STATE_FIELDS = new Set<string>([
+  'hp',
+  'conditions',
+  'dead',
+  'deathSaves',
+  'stable',
+] satisfies CuedStateField[]);
+
+function isCuedStateField(field: string): field is CuedStateField {
+  return CUED_STATE_FIELDS.has(field);
+}
 
 function nameOf(state: GameState, id: string): string {
   return ownEntry(state.combatants, id)?.name ?? ownEntry(state.npcs, id)?.name ?? id;
@@ -217,9 +233,7 @@ class ScriptBuilder {
       case 'combat_end':
         return this.push({ kind: 'combat', sources: [{ seq }], combat: { phase: 'end' } });
       case 'state_change': {
-        if (event.field !== 'hp' && event.field !== 'conditions' && event.field !== 'dead') {
-          return;
-        }
+        if (!isCuedStateField(event.field)) return;
         if (event.field === 'dead' && event.after !== true) return;
         return this.push({
           kind: 'state',

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { SimEvent } from '../src/events';
 import { TurnRecorder } from '../src/recorder';
 import { describeEvent, hpTrend, renderTranscript } from '../src/transcript';
-import { now, startedState } from './helpers';
+import { kira, now, startedState, tomas } from './helpers';
 
 function sampleSession() {
   const { state, history } = startedState();
@@ -103,6 +103,80 @@ describe('describeEvent', () => {
       actor: 'constructor',
     });
     expect(describeEvent(event, state, 'dm')).toBe('constructor holds back.');
+  });
+
+  it('shows a death save tally and stabilization to the DM and the players', () => {
+    const { state, history } = startedState([{ ...kira, hp: 0 }, tomas]);
+    const recorder = new TurnRecorder(state, 'turn', now);
+    recorder.emit({
+      type: 'roll',
+      actor: 'kira',
+      kind: 'save',
+      label: 'Kira Vale death saving throw',
+      expr: '1d20',
+      rolls: [12],
+      modifier: 0,
+      total: 12,
+      target: 10,
+      outcome: 'success',
+      mode: 'normal',
+    });
+    recorder.emit({
+      type: 'state_change',
+      entity: 'kira',
+      field: 'deathSaves',
+      before: { successes: 1, failures: 1 },
+      after: { successes: 2, failures: 1 },
+      cause: 'death_save',
+    });
+    recorder.emit({
+      type: 'state_change',
+      entity: 'kira',
+      field: 'stable',
+      before: false,
+      after: true,
+      cause: 'death_save',
+    });
+    const events = [...history, ...recorder.events];
+    for (const audience of ['dm', 'player'] as const) {
+      expect(renderTranscript(events, recorder.state, audience, 3)).toBe(
+        [
+          '[roll] Kira Vale death saving throw: 12 vs 10 — success',
+          '[state] Kira Vale death saves: 2 successes, 1 failure',
+          '[state] Kira Vale is stable',
+        ].join('\n')
+      );
+    }
+  });
+
+  it('counts a single death save success or failure in the singular', () => {
+    const { state } = startedState([{ ...kira, hp: 0 }, tomas]);
+    const recorder = new TurnRecorder(state, 'turn', now);
+    const event = recorder.emit({
+      type: 'state_change',
+      entity: 'kira',
+      field: 'deathSaves',
+      before: { successes: 0, failures: 0 },
+      after: { successes: 1, failures: 0 },
+      cause: 'death_save',
+    });
+    expect(describeEvent(event, recorder.state, 'dm')).toBe(
+      '[state] Kira Vale death saves: 1 success, 0 failures'
+    );
+  });
+
+  it('says nothing when a struck PC stops being stable', () => {
+    const { state } = startedState([{ ...kira, hp: 0, stable: true }, tomas]);
+    const recorder = new TurnRecorder(state, 'turn', now);
+    const event = recorder.emit({
+      type: 'state_change',
+      entity: 'kira',
+      field: 'stable',
+      before: true,
+      after: false,
+      cause: 'attack:goblin-1',
+    });
+    expect(describeEvent(event, recorder.state, 'dm')).toBeNull();
   });
 
   it('defaults to the DM audience when none is given', () => {

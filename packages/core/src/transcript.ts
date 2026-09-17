@@ -55,6 +55,17 @@ function describeHpChange(name: string, before: unknown, after: unknown): string
   }
 }
 
+/**
+ * A death save tally as "2 successes, 1 failure". Both seats see it: the table can see how a
+ * dying friend is doing. Takes the raw `after` value, which an old log could hold anything in.
+ */
+function countDeathSaves(after: unknown): string {
+  const tally = after as { successes?: unknown; failures?: unknown } | null;
+  const successes = asNumber(tally?.successes) ?? 0;
+  const failures = asNumber(tally?.failures) ?? 0;
+  return `${successes} success${successes === 1 ? '' : 'es'}, ${failures} failure${failures === 1 ? '' : 's'}`;
+}
+
 /** One human-readable transcript line for an event, or null if the event is not shown. */
 export function describeEvent(
   event: SimEvent,
@@ -90,6 +101,13 @@ export function describeEvent(
       }
       if (event.field === 'dead' && event.after === true) {
         return `[state] ${nameOf(event.entity, state)} dies`;
+      }
+      if (event.field === 'deathSaves') {
+        return `[state] ${nameOf(event.entity, state)} death saves: ${countDeathSaves(event.after)}`;
+      }
+      // Becoming unstable always comes with a death save failure, which says it on its own line.
+      if (event.field === 'stable' && event.after === true) {
+        return `[state] ${nameOf(event.entity, state)} is stable`;
       }
       return null;
     case 'scene_change':

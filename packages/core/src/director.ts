@@ -1,4 +1,4 @@
-import type { Combatant, Rng } from '@cartyx-sim/rules';
+import { DEATH_SAVE_DC, rollD20, rollDeathSave, type Combatant, type Rng } from '@cartyx-sim/rules';
 import { clockInstruction, clockPhase } from './clock';
 import { SessionPausedError } from './errors';
 import { EVENT_SCHEMA_VERSION, type HandOffTarget, type SimEvent } from './events';
@@ -24,7 +24,8 @@ import type { PromptBuilder } from './prompts';
 import { TurnRecorder } from './recorder';
 import { cutRepeats } from './repeats';
 import type { EventSink } from './sink';
-import { advanceCombat, foldEvents, isUp, nextActor, ownEntry, type GameState } from './state';
+import { advanceCombat, foldEvents, nextActor, ownEntry, takesTurn, type GameState } from './state';
+import { emitCombatantChanges } from './tools/mechanics';
 import {
   DM_TOOLS,
   MECHANICS_TOOL_NAMES,
@@ -415,7 +416,9 @@ export class Director {
     const next = nextActor(this.state);
     if (next.kind === 'ended') return 'ended';
 
-    if (next.kind === 'pc') {
+    if (next.kind === 'death_save') {
+      await this.deathSaveTurn(next.combatantId);
+    } else if (next.kind === 'pc') {
       if (!this.state.combat && this.state.silentTurns >= this.silentTurnLimit) {
         await this.dmBeat(
           'beat',
@@ -810,7 +813,7 @@ export class Director {
       const { combat } = recorder.state;
       const current = combat.order[combat.turnIndex];
       const combatant = current && recorder.state.combatants[current.combatantId];
-      if (!isUp(combatant)) {
+      if (!takesTurn(combatant)) {
         const found = advanceCombat(recorder.state, { inclusive: true });
         if (found) recorder.emit({ type: 'combat_turn', ...found });
         else recorder.emit({ type: 'combat_end' });
@@ -940,6 +943,38 @@ export class Director {
     }
 
     recorder.emit({ type: 'turn_end', actor: pcId });
+    await this.commit(recorder);
+  }
+
+  /**
+   * A dying PC's turn (spec §5): the engine rolls the death saving throw itself, with no model
+   * call, records the roll and whatever it changed, then advances the combat turn as any turn
+   * does. It writes no prose — the DM sees the roll in its transcript and narrates it next beat.
+   */
+  private async deathSaveTurn(combatantId: string): Promise<void> {
+    const recorder = this.newRecorder();
+    const combatant = ownEntry(this.state.combatants, combatantId);
+    if (!combatant) throw new Error(`No combatant "${combatantId}" to roll a death save for`);
+    const d20 = rollD20(this.deps.rng);
+    const { combatant: after } = rollDeathSave(combatant, d20.natural);
+    recorder.emit({
+      type: 'roll',
+      actor: combatant.id,
+      kind: 'save',
+      label: `${combatant.name} death saving throw`,
+      expr: '1d20',
+      rolls: d20.rolls,
+      modifier: 0,
+      total: d20.natural,
+      target: DEATH_SAVE_DC,
+      outcome: d20.natural >= DEATH_SAVE_DC ? 'success' : 'failure',
+      mode: d20.mode,
+    });
+    emitCombatantChanges(recorder, combatant, after, 'death_save');
+    recorder.emit({ type: 'turn_end', actor: combatant.id });
+    const advance = advanceCombat(recorder.state);
+    if (advance) recorder.emit({ type: 'combat_turn', ...advance });
+    else recorder.emit({ type: 'combat_end' });
     await this.commit(recorder);
   }
 

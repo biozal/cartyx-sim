@@ -103,6 +103,13 @@ export const SpellSlot = z.object({
 });
 export type SpellSlot = z.infer<typeof SpellSlot>;
 
+/** A downed player character's 5e death saving throws, three of either ending the count. */
+export const DeathSaves = z.object({
+  successes: z.number().int().min(0).max(3),
+  failures: z.number().int().min(0).max(3),
+});
+export type DeathSaves = z.infer<typeof DeathSaves>;
+
 export const InventoryItem = z.object({
   name: z.string().min(1),
   quantity: z.number().int().min(1),
@@ -125,6 +132,10 @@ export const Combatant = z.object({
   tempHp: z.number().int().min(0).default(0),
   conditions: z.array(Condition).default([]),
   dead: z.boolean().default(false),
+  /** Only ever non-zero for a dying player character; the rules keep it at zero otherwise. */
+  deathSaves: DeathSaves.default({ successes: 0, failures: 0 }),
+  /** A player character held at 0 HP without dying; true only while `hp === 0 && !dead`. */
+  stable: z.boolean().default(false),
   spellSlots: z.array(SpellSlot).default([]),
   attacks: z.array(Attack).default([]),
   inventory: z.array(InventoryItem).default([]),

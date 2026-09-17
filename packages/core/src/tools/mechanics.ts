@@ -22,7 +22,11 @@ import { defineTool, getCombatant, ToolError } from './types';
 
 export const RollModeArg = z.enum(['normal', 'advantage', 'disadvantage']).default('normal');
 
+// `deathSaves` leads so a downed PC's tally is on the record before whatever it caused
+// (stabilization, death, or waking on a natural 20).
 const DIFF_FIELDS = [
+  'deathSaves',
+  'stable',
   'hp',
   'tempHp',
   'maxHp',

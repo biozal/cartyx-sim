@@ -27,6 +27,8 @@ export const StateField = z.enum([
   'maxHp',
   'conditions',
   'dead',
+  'deathSaves',
+  'stable',
   'spellSlots',
   'inventory',
   'level',

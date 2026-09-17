@@ -22,7 +22,7 @@ const MonsterSpec = z.object({
 export const startCombat = defineTool({
   name: 'start_combat',
   description:
-    'Start combat with the given monsters. The engine adds them, rolls initiative for every living combatant (a party member at 0 HP joins the order but is skipped until healed), and fixes turn order.',
+    'Start combat with the given monsters. The engine adds them, rolls initiative for every living combatant (a party member at 0 HP joins the order and spends their turns rolling death saving throws), and fixes turn order.',
   parameters: z.object({ monsters: z.array(MonsterSpec).min(1) }),
   run(args, { recorder, rng }) {
     const { state } = recorder;
@@ -61,8 +61,8 @@ export const startCombat = defineTool({
       }
     }
 
-    // Every living party member joins initiative, even at 0 HP: the turn loop skips anyone who
-    // cannot act, so a PC healed mid-fight gets turns again.
+    // Every living party member joins initiative, even at 0 HP: a dying PC's turn is a death
+    // saving throw, and a PC healed mid-fight acts again on their next one.
     const party = state.partyIds
       .map((id) => ownEntry(state.combatants, id))
       .filter((pc): pc is Combatant => pc !== undefined && !pc.dead);

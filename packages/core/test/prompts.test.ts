@@ -4,7 +4,7 @@ import { basicPrompts } from '../src/prompts';
 import { TurnRecorder } from '../src/recorder';
 import type { NpcRecord } from '../src/state';
 import { playerView } from '../src/view';
-import { now, startedState } from './helpers';
+import { kira, now, startedState, tomas } from './helpers';
 
 describe('basicPrompts.pcControlCheck', () => {
   it('sends the rule, the party, what players declared, and the narration', () => {
@@ -64,6 +64,20 @@ describe('basicPrompts.dm', () => {
     const truncated = `${collapsed.slice(0, 200)}…`;
     expect(user!.content).toContain(`- Sella Vaunt (npcId: npc-sella-vaunt): ${truncated}`);
     expect(user!.content).not.toContain('\nprofessor');
+  });
+
+  it('marks a dying, a stable, and a dead player character in the party block', () => {
+    const { state } = startedState([
+      { ...kira, hp: 0, deathSaves: { successes: 2, failures: 1 } },
+      { ...tomas, hp: 0, stable: true },
+    ]);
+    const [, user] = basicPrompts.dm({ state, transcript: '', instruction: 'Begin.' });
+    expect(user!.content).toContain('- Kira Vale (id: kira) DYING (death saves 2/1), AC 15');
+    expect(user!.content).toContain('- Tomas Reed (id: tomas) STABLE at 0 HP, AC 16');
+
+    const dead = startedState([{ ...kira, hp: 0, dead: true }, tomas]).state;
+    const [, deadUser] = basicPrompts.dm({ state: dead, transcript: '', instruction: 'Begin.' });
+    expect(deadUser!.content).toContain('- Kira Vale (id: kira) DEAD, AC 15');
   });
 
   it("keeps today's line for an NPC with no description", () => {

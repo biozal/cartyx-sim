@@ -892,6 +892,190 @@ describe('Director', () => {
     attacks: [{ name: 'Scimitar', bonus: 4, damage: '1d6+2', damageType: 'slashing' }],
   });
 
+  /**
+   * A solo Kira, dropped to 0 HP in the beat that starts combat, with the only monster killed in
+   * the same beat: every step after the DM's beat is one of her death-saving-throw turns.
+   */
+  function dyingSolo(deathSaveRolls: number[]) {
+    return deps(
+      {
+        dm: [
+          respond(
+            toolCall('start_combat', { monsters: [monsterSpec('Goblin')] }),
+            toolCall('apply_damage', {
+              targetId: 'kira',
+              amount: 10,
+              damageType: 'fire',
+              reason: 'a collapsing rafter',
+            }),
+            toolCall('apply_damage', {
+              targetId: 'goblin-1',
+              amount: 20,
+              damageType: 'fire',
+              reason: 'a collapsing rafter',
+            }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      // initiative: kira 20+2=22, goblin 1 -> Kira first, and down before her turn comes round.
+      { rolls: [20, 1, ...deathSaveRolls] }
+    );
+  }
+
+  const soloConfig = () =>
+    config({ party: [kira], seats: { dm: 'dm', players: { kira: 'player-kira' } } });
+
+  /** The events of the last turn in the log. */
+  const lastTurn = (sink: MemorySink) =>
+    sink.events.filter((event) => event.turnId === sink.events.at(-1)!.turnId);
+
+  it('rolls a dying PC death saving throw itself, with no model call', async () => {
+    const { deps: built, model, sink } = dyingSolo([12]);
+    const director = await Director.create(soloConfig(), built);
+    await director.run(2);
+    const callsBefore = model.requests.length;
+
+    await director.step();
+
+    expect(model.requests.length).toBe(callsBefore);
+    expect(lastTurn(sink).map((event) => event.type)).toEqual([
+      'roll',
+      'state_change',
+      'turn_end',
+      'combat_turn',
+    ]);
+    expect(lastTurn(sink)[0]).toMatchObject({
+      type: 'roll',
+      actor: 'kira',
+      kind: 'save',
+      label: 'Kira Vale death saving throw',
+      expr: '1d20',
+      rolls: [12],
+      modifier: 0,
+      total: 12,
+      target: 10,
+      outcome: 'success',
+      visibility: 'public',
+    });
+    expect(lastTurn(sink)[1]).toMatchObject({
+      type: 'state_change',
+      entity: 'kira',
+      field: 'deathSaves',
+      after: { successes: 1, failures: 0 },
+      cause: 'death_save',
+    });
+    expect(lastTurn(sink)[2]).toMatchObject({ type: 'turn_end', actor: 'kira' });
+    expect(director.currentState.combat).toMatchObject({ round: 2, turnIndex: 0 });
+    expect(nextActor(director.currentState)).toEqual({ kind: 'death_save', combatantId: 'kira' });
+    expectWellFormedLog(sink.events);
+  });
+
+  it('stabilizes a dying PC on the third success and stops giving them turns', async () => {
+    const { deps: built, sink } = dyingSolo([10, 11, 12]);
+    const director = await Director.create(soloConfig(), built);
+
+    await director.run(5);
+
+    const state = director.currentState;
+    expect(state.combatants.kira).toMatchObject({
+      hp: 0,
+      dead: false,
+      stable: true,
+      deathSaves: { successes: 0, failures: 0 },
+    });
+    expect(state.combatants.kira?.conditions).toContain('unconscious');
+    expect(lastTurn(sink).map((event) => event.type)).toEqual([
+      'roll',
+      'state_change',
+      'state_change',
+      'turn_end',
+      'combat_end',
+    ]);
+    expect(lastTurn(sink)[1]).toMatchObject({ field: 'deathSaves', cause: 'death_save' });
+    expect(lastTurn(sink)[2]).toMatchObject({ field: 'stable', after: true, cause: 'death_save' });
+  });
+
+  it('wakes a dying PC at 1 HP on a natural 20, so their next turn is their own', async () => {
+    const { deps: built, sink } = dyingSolo([20]);
+    const director = await Director.create(soloConfig(), built);
+
+    await director.run(3);
+
+    const state = director.currentState;
+    expect(state.combatants.kira).toMatchObject({ hp: 1, dead: false, stable: false });
+    expect(state.combatants.kira?.conditions).not.toContain('unconscious');
+    expect(lastTurn(sink)[0]).toMatchObject({ total: 20, outcome: 'success' });
+    expect(nextActor(state)).toEqual({ kind: 'pc', pcId: 'kira', reason: 'combat_turn' });
+  });
+
+  it('kills a dying PC on the third failure and closes the fight', async () => {
+    const { deps: built, sink } = dyingSolo([5, 5, 5]);
+    const director = await Director.create(soloConfig(), built);
+
+    await director.run(5);
+
+    const state = director.currentState;
+    expect(state.combatants.kira).toMatchObject({
+      dead: true,
+      deathSaves: { successes: 0, failures: 3 },
+    });
+    expect(lastTurn(sink)[0]).toMatchObject({ total: 5, outcome: 'failure' });
+    expect(lastTurn(sink).map((event) => event.type)).toEqual([
+      'roll',
+      'state_change',
+      'state_change',
+      'turn_end',
+      'combat_end',
+    ]);
+    expect(lastTurn(sink)[2]).toMatchObject({ field: 'dead', after: true, cause: 'death_save' });
+    expect(state.combat).toBeNull();
+    expect(foldEvents(sink.events)).toEqual(state);
+  });
+
+  it('counts a natural 1 as two failures and a hit at 0 HP as another', async () => {
+    const { deps: built, sink } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('start_combat', { monsters: [monsterSpec('Goblin')] }),
+            toolCall('apply_damage', {
+              targetId: 'kira',
+              amount: 10,
+              damageType: 'fire',
+              reason: 'a collapsing rafter',
+            }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+          respond(
+            toolCall('apply_damage', {
+              targetId: 'kira',
+              amount: 4,
+              damageType: 'slashing',
+              reason: 'the goblin stabs the fallen',
+            }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      // initiative: kira 22, goblin 1; then Kira's death save rolls a natural 1.
+      { rolls: [20, 1, 1] }
+    );
+    const director = await Director.create(soloConfig(), built);
+
+    await director.run(4);
+
+    expect(director.currentState.combatants.kira).toMatchObject({
+      dead: true,
+      deathSaves: { successes: 0, failures: 3 },
+    });
+    expect(
+      sink.events.some(
+        (event) => event.type === 'state_change' && event.field === 'dead' && event.after === true
+      )
+    ).toBe(true);
+  });
+
   it("G2.1: keeps the new fight's own initiative when combat ends and restarts in one beat", async () => {
     const { deps: built, sink } = deps(
       {
@@ -986,7 +1170,7 @@ describe('Director', () => {
     expect(lastUserMessage(dmRequests[0]!)).not.toContain("Keep this turn's narration");
   });
 
-  it('G2.2: skips a PC downed in the same beat that started combat', async () => {
+  it('G2.2: leaves a PC downed in the same beat that started combat on their turn', async () => {
     const { deps: built, sink } = deps(
       {
         dm: [
@@ -1012,12 +1196,9 @@ describe('Director', () => {
     const state = director.currentState;
     expect(state.combatants.kira).toMatchObject({ hp: 0 });
     expect(state.combat!.order[0]).toMatchObject({ combatantId: 'kira' });
-    expect(state.combat!.turnIndex).toBe(1);
-    expect(nextActor(state)).toMatchObject({
-      kind: 'pc',
-      pcId: 'tomas',
-      reason: 'combat_turn',
-    });
+    // She keeps her place: a dying PC's turn is a death saving throw, not a skipped turn.
+    expect(state.combat!.turnIndex).toBe(0);
+    expect(nextActor(state)).toMatchObject({ kind: 'death_save', combatantId: 'kira' });
     expect(foldEvents(sink.events)).toEqual(state);
   });
 
@@ -1531,9 +1712,11 @@ describe('Director', () => {
             toolCall('hand_off', { target: { kind: 'party' } })
           ),
           respond(
+            // Enough to kill Kira outright (massive damage): a PC merely downed would keep
+            // taking turns, rolling death saves.
             toolCall('apply_damage', {
               targetId: 'kira',
-              amount: 10,
+              amount: 20,
               damageType: 'fire',
               reason: 'a shared blast',
             }),

@@ -1,4 +1,4 @@
-import type { Combatant, Condition } from '@cartyx-sim/rules';
+import type { Combatant, Condition, DeathSaves } from '@cartyx-sim/rules';
 import { ownEntry, type GameState } from './state';
 
 /** How a non-PC combatant looks to the players: a coarse status, never numbers. */
@@ -11,6 +11,9 @@ export interface VisibleAlly {
   maxHp: number;
   conditions: Condition[];
   dead: boolean;
+  /** Shown to every player: the table can see how a dying friend is doing. */
+  deathSaves: DeathSaves;
+  stable: boolean;
 }
 
 export interface VisibleCombatant {
@@ -51,13 +54,15 @@ export function playerView(state: GameState, pcId: string): PlayerView {
     .filter((id) => id !== pcId)
     .map((id) => ownEntry(state.combatants, id))
     .filter((ally) => ally !== undefined)
-    .map(({ id, name, hp, maxHp, conditions, dead }) => ({
+    .map(({ id, name, hp, maxHp, conditions, dead, deathSaves, stable }) => ({
       id,
       name,
       hp,
       maxHp,
       conditions: [...conditions],
       dead,
+      deathSaves: { ...deathSaves },
+      stable,
     }));
   const others = Object.values(state.combatants)
     .filter((combatant) => combatant.kind !== 'pc')
