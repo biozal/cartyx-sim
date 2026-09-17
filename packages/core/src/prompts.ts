@@ -1,6 +1,6 @@
 import type { Combatant } from '@cartyx-sim/rules';
 import type { ChatMessage } from './model';
-import type { GameState } from './state';
+import type { GameState, NpcRecord } from './state';
 import type { PlayerView } from './view';
 
 export interface PromptInput {
@@ -55,6 +55,21 @@ function describeCombatant(combatant: Combatant): string {
   return `- ${combatant.name} (id: ${combatant.id}) ${health}, AC ${combatant.ac}${conditions}`;
 }
 
+// So a description that scrolled out of the transcript window still fits one prompt line.
+const NPC_DESCRIPTION_MAX_CHARS = 200;
+
+/** An NPC's DM-facing line: name, id, and its description (if any), collapsed to one line and truncated. */
+function describeNpc(npc: NpcRecord): string {
+  const base = `- ${npc.name} (npcId: ${npc.npcId})`;
+  if (!npc.description) return base;
+  const collapsed = npc.description.replace(/\s+/g, ' ').trim();
+  const description =
+    collapsed.length > NPC_DESCRIPTION_MAX_CHARS
+      ? `${collapsed.slice(0, NPC_DESCRIPTION_MAX_CHARS)}…`
+      : collapsed;
+  return `${base}: ${description}`;
+}
+
 export const basicPrompts: PromptBuilder = {
   dm({ state, transcript, instruction }) {
     const party = state.partyIds
@@ -64,7 +79,7 @@ export const basicPrompts: PromptBuilder = {
     const others = Object.values(state.combatants)
       .filter((combatant) => combatant.kind !== 'pc')
       .map(describeCombatant);
-    const npcs = Object.values(state.npcs).map((npc) => `- ${npc.name} (npcId: ${npc.npcId})`);
+    const npcs = Object.values(state.npcs).map(describeNpc);
     return [
       { role: 'system', content: DM_SYSTEM },
       {
@@ -94,6 +109,9 @@ export const basicPrompts: PromptBuilder = {
           `You are playing ${view.pc.name} (id: ${view.pc.id}) in a Dungeons & Dragons 5e session.`,
           'Stay in character. Use speak for dialogue and act to declare what you attempt; use pass if your character does nothing.',
           'Only ever control your own character, and never describe the outcome of your actions: the DM decides what happens.',
+          ...(view.inCombat && view.yourTurn
+            ? ['Say one short line in character as you act, unless silence fits the moment better.']
+            : []),
         ].join('\n'),
       },
       {

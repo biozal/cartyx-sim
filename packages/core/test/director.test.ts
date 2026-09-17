@@ -15,7 +15,7 @@ import {
   toolCall,
   type ScriptedResponse,
 } from '../src/testing';
-import { kira, now, tomas } from './helpers';
+import { kira, now, startedState, tomas } from './helpers';
 import { SELLA_CHUNK } from './tool-harness';
 
 function config(overrides: Partial<DirectorConfig> = {}): DirectorConfig {
@@ -926,6 +926,64 @@ describe('Director', () => {
       combatantId: 'orc-1',
     });
     expect(foldEvents(sink.events)).toEqual(state);
+  });
+
+  it("caps a monster turn's instruction at three sentences of narration", async () => {
+    const goblin = makeCombatant({
+      id: 'goblin-1',
+      name: 'Goblin',
+      kind: 'monster',
+      hp: 7,
+      maxHp: 7,
+    });
+    const sink = new MemorySink();
+    const { state, history } = startedState();
+    const recorder = new TurnRecorder(state, 'setup-combat', now);
+    recorder.emit({ type: 'combatant_added', combatant: goblin });
+    recorder.emit({
+      type: 'combat_start',
+      order: [
+        { combatantId: 'goblin-1', roll: 20, dexMod: 0, total: 20 },
+        { combatantId: 'kira', roll: 10, dexMod: 2, total: 12 },
+        { combatantId: 'tomas', roll: 5, dexMod: 1, total: 6 },
+      ],
+    });
+    await sink.append([...history, ...recorder.events]);
+
+    const { deps: built, model } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('narrate', { text: 'The goblin lunges.' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      { sink }
+    );
+    const director = await Director.create(config({ loreCommit: 'test' }), built);
+    await director.run(1);
+
+    const dmRequests = model.requests.filter((request) => request.seat === 'dm');
+    expect(lastUserMessage(dmRequests[0]!)).toContain(
+      "Keep this turn's narration to at most three sentences: what the creature does and what it costs. Save detail for scene beats."
+    );
+  });
+
+  it('does not cap narration length outside a monster turn', async () => {
+    const { deps: built, model } = deps({
+      dm: [
+        respond(
+          toolCall('narrate', { text: 'The tavern hums.' }),
+          toolCall('hand_off', { target: { kind: 'party' } })
+        ),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(2); // step 1 is session_start; step 2 is the DM's first beat.
+
+    const dmRequests = model.requests.filter((request) => request.seat === 'dm');
+    expect(lastUserMessage(dmRequests[0]!)).not.toContain("Keep this turn's narration");
   });
 
   it('G2.2: skips a PC downed in the same beat that started combat', async () => {

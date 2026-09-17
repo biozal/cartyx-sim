@@ -1014,7 +1014,9 @@ export class Director {
       reason === 'resolve'
         ? `${name} has declared their combat action (see recent events). Resolve it with tools, narrate the result, then call hand_off.`
         : reason === 'monster'
-          ? `It is ${name}'s turn (id: ${combatantId}). Act for it with tools, narrate, then call hand_off.`
+          ? `It is ${name}'s turn (id: ${combatantId}). Act for it with tools, narrate, then call hand_off. ` +
+            "Keep this turn's narration to at most three sentences: what the creature does and what it costs. " +
+            'Save detail for scene beats.'
           : 'Continue the story: narrate what happens next, resolve any declared actions with tools, then call hand_off.';
     const clock = clockInstruction(clockPhase(this.state, this.targetMinutes));
     return [nudge, base, clock].filter(Boolean).join(' ');

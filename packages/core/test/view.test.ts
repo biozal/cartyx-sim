@@ -40,6 +40,24 @@ describe('playerView', () => {
     expect(view.scene).toBe('Crystal Engine Lab');
     expect(view.npcs).toEqual([{ npcId: 'npc-sella-vaunt', name: 'Sella Vaunt' }]);
     expect(view.inCombat).toBe(false);
+    expect(view.yourTurn).toBe(false);
+  });
+
+  it('flags yourTurn when combat is running and it is this PC turn', () => {
+    const state = stateWithOgre();
+    const recorder = new TurnRecorder(state, 'turn', now);
+    recorder.emit({
+      type: 'combat_start',
+      order: [
+        { combatantId: 'kira', roll: 20, dexMod: 2, total: 22 },
+        { combatantId: 'ogre-1', roll: 10, dexMod: 0, total: 10 },
+        { combatantId: 'tomas', roll: 5, dexMod: 1, total: 6 },
+      ],
+    });
+    const combatState = recorder.state;
+
+    expect(playerView(combatState, 'kira').yourTurn).toBe(true);
+    expect(playerView(combatState, 'tomas').yourTurn).toBe(false);
   });
 
   it('shows monsters only by coarse status, with no stat block', () => {

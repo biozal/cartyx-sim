@@ -26,6 +26,8 @@ export interface NpcRecord {
   name: string;
   invented: boolean;
   loreEntityId?: string;
+  /** From `npc_introduced`. Kept on the record so the DM prompt still has it once the introduction scrolls out of the transcript window. */
+  description?: string;
 }
 
 export interface CombatState {
@@ -144,6 +146,7 @@ export function applyEvent(state: GameState, event: SimEvent): GameState {
         name: event.name,
         invented: event.invented,
         loreEntityId: event.loreEntityId,
+        description: event.description,
       };
       break;
     case 'scene_change':

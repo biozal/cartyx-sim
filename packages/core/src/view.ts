@@ -34,6 +34,8 @@ export interface PlayerView {
   npcs: { npcId: string; name: string }[];
   scene: string | null;
   inCombat: boolean;
+  /** Whether it is this PC's turn in the current combat. */
+  yourTurn: boolean;
 }
 
 function visibleStatus(combatant: Combatant): VisibleStatus {
@@ -73,5 +75,6 @@ export function playerView(state: GameState, pcId: string): PlayerView {
     npcs,
     scene: state.scene?.location ?? null,
     inCombat: state.combat !== null,
+    yourTurn: state.combat?.order[state.combat.turnIndex]?.combatantId === pcId,
   };
 }

@@ -41,6 +41,22 @@ describe('applyEvent', () => {
     expect(nextActor(state)).toEqual({ kind: 'dm', reason: 'beat' });
   });
 
+  it('keeps the description from npc_introduced on the NPC record', () => {
+    const recorder = recorderAfterStart();
+    recorder.emit({
+      type: 'npc_introduced',
+      npcId: 'sella',
+      name: 'Sella Vaunt',
+      description: 'Crystal engine professor',
+      invented: false,
+    });
+    expect(recorder.state.npcs.sella).toMatchObject({
+      npcId: 'sella',
+      name: 'Sella Vaunt',
+      description: 'Crystal engine professor',
+    });
+  });
+
   it('counts spoken words per speaker and tracks silent turns', () => {
     const recorder = recorderAfterStart();
     recorder.emit({
