@@ -219,13 +219,14 @@ const TARGET_PREPS = new Set(['at', 'toward', 'towards', 'to']);
 // PRONOUN, DET, PREP, and PARTICLE: the closed word lists the token grammar draws OBJECT and
 // GERUND_PHRASE from (see `OBJECT` and `GERUND_PHRASE`). The only two slots below that accept a
 // word not on a fixed list are `nounSlot` (one lowercase word after a DET) and `NAME_SLOT` (one
-// capitalized name); both reject a stopword. Every other word in a direction clause must come from
+// known name); both reject a stopword. Every other word in a direction clause must come from
 // one of these lists or `ADVERB_WORDS`/`GERUND_WORDS` above. `BARE_PRONOUNS` and `POSSESSIVE_DETS`
 // are the narrower lists allowed for an object with no preposition before it.
 const PRONOUNS = new Set(['him', 'her', 'them', 'you', 'it', 'me', 'us']);
 const BARE_PRONOUNS = new Set(['him', 'her', 'them', 'it', 'me', 'us']);
 const DETS = new Set(['the', 'my', 'his', 'her', 'their', 'a', 'an', 'our', 'your']);
 const POSSESSIVE_DETS = new Set(['my', 'his', 'her', 'their', 'our']);
+// `in` is deliberately a PARTICLE only, never a PREP: "stepping in your turn" is speech.
 const PREPS = new Set([
   'at',
   'toward',
@@ -238,7 +239,6 @@ const PREPS = new Set([
   'past',
   'behind',
   'into',
-  'in',
   'on',
 ]);
 const PARTICLES = new Set(['back', 'away', 'forward', 'still', 'down', 'up', 'out', 'in', 'aside']);
@@ -323,6 +323,12 @@ function parsesAll(parser: Parser, tokens: readonly string[]): boolean {
   return parser(tokens, 0).includes(tokens.length);
 }
 
+/**
+ * PRONOUN: one lowercase token from `pronouns`. Case-sensitive so a capitalized "You" or "Me" (an
+ * address or an interjection, as in "I nod to You.") is never read as an object.
+ */
+const pronoun = (pronouns: ReadonlySet<string>): Parser => token((value) => pronouns.has(value));
+
 const ADVERB = word(ADVERBS);
 const GERUND = word(GERUNDS);
 const PARTICLE = word(PARTICLES);
@@ -336,52 +342,68 @@ const nounSlot = (dets: ReadonlySet<string>): Parser =>
   );
 
 /**
- * NAME_SLOT = a single `[A-Z][a-z]+` token that is not (case-insensitively) a stopword. Matched
- * case-sensitively on purpose: a lowercase word must never pass as a name.
- */
-const NAME_SLOT = token((name) => /^[A-Z][a-z]+$/.test(name) && !STOPWORDS.has(name.toLowerCase()));
-
-/** OBJECT after a preposition = `NOUN_SLOT` (any DET) | `PRONOUN` | `NAME_SLOT`. */
-const OBJECT = alt(nounSlot(DETS), word(PRONOUNS), NAME_SLOT);
-
-/**
  * BARE_OBJECT, directly after a gerund with no preposition = a possessive `NOUN_SLOT` ("drawing my
  * blade") | `him`/`her`/`them`/`it`/`me`/`us`. No name, no `you`, and no `the`/`a`/`an`/`your`:
  * those read too easily as the start of speech ("keeping the peace", "looking back You").
  */
-const BARE_OBJECT = alt(nounSlot(POSSESSIVE_DETS), word(BARE_PRONOUNS));
+const BARE_OBJECT = alt(nounSlot(POSSESSIVE_DETS), pronoun(BARE_PRONOUNS));
 
-const PREP_OBJECT = seq(PREP, OBJECT);
+/** The parsers for the tails after a TAG's or ACTION's verb. */
+interface Grammar {
+  /** A TAG's tail after its verb: `(it)? (ADVERB)? (PARTICIPLE)?`. */
+  tagTail: Parser;
+  /** An ACTION's tail after `nod`/`glance`: `(ADVERB)? (TARGET)? (ADVERB)? (PARTICIPLE)?`. */
+  actionTailWithTarget: Parser;
+  /** An ACTION's tail after any other verb: `(ADVERB)? (PARTICIPLE)?`. */
+  actionTail: Parser;
+}
 
 /**
- * GERUND_PHRASE = `(ADVERB)? GERUND (PARTICLE (PREP OBJECT)? | PREP OBJECT | BARE_OBJECT)?
- * (ADVERB)?`. After a particle an object needs its preposition ("stepping back toward Bram").
+ * The token grammar, with NAME_SLOT drawn from `knownNames`: the only part of the grammar that
+ * depends on who is at the table.
  */
-const GERUND_PHRASE = seq(
-  opt(ADVERB),
-  GERUND,
-  opt(alt(seq(PARTICLE, opt(PREP_OBJECT)), PREP_OBJECT, BARE_OBJECT)),
-  opt(ADVERB)
-);
+function directionGrammar(knownNames: readonly string[]): Grammar {
+  const known = new Set(knownNames);
 
-/** PARTICIPLE = `, GERUND_PHRASE (and GERUND_PHRASE)?`; the callers require it to end the clause. */
-const PARTICIPLE = seq(
-  word(new Set([','])),
-  GERUND_PHRASE,
-  opt(seq(word(new Set(['and'])), GERUND_PHRASE))
-);
+  /**
+   * NAME_SLOT = one token that is exactly (case-sensitively) a known name word and not
+   * (case-insensitively) a stopword. With no known names it never matches, so a capitalized
+   * interjection ("at Once!", "to Everyone.") is never taken for a name.
+   */
+  const NAME_SLOT = token((name) => known.has(name) && !STOPWORDS.has(name.toLowerCase()));
 
-/** A TAG's tail after its verb: `(it)? (ADVERB)? (PARTICIPLE)?`. */
-const TAG_TAIL = seq(opt(word(new Set(['it']))), opt(ADVERB), opt(PARTICIPLE));
+  /** OBJECT after a preposition = `NOUN_SLOT` (any DET) | `PRONOUN` | `NAME_SLOT`. */
+  const OBJECT = alt(nounSlot(DETS), pronoun(PRONOUNS), NAME_SLOT);
 
-/** TARGET (only after `nod`/`glance`) = `at`/`toward`/`towards`/`to` plus one OBJECT. */
-const TARGET = seq(word(TARGET_PREPS), OBJECT);
+  const PREP_OBJECT = seq(PREP, OBJECT);
 
-/** An ACTION's tail after its verb: `(ADVERB)? (TARGET)? (ADVERB)? (PARTICIPLE)?`. */
-const actionTail = (target: boolean): Parser =>
-  seq(opt(ADVERB), ...(target ? [opt(TARGET)] : []), opt(ADVERB), opt(PARTICIPLE));
-const ACTION_TAIL_WITH_TARGET = actionTail(true);
-const ACTION_TAIL = actionTail(false);
+  /**
+   * GERUND_PHRASE = `(ADVERB)? GERUND (PARTICLE (PREP OBJECT)? | PREP OBJECT | BARE_OBJECT)?
+   * (ADVERB)?`. After a particle an object needs its preposition ("stepping back toward Bram").
+   */
+  const GERUND_PHRASE = seq(
+    opt(ADVERB),
+    GERUND,
+    opt(alt(seq(PARTICLE, opt(PREP_OBJECT)), PREP_OBJECT, BARE_OBJECT)),
+    opt(ADVERB)
+  );
+
+  /** PARTICIPLE = `, GERUND_PHRASE (and GERUND_PHRASE)?`; the callers require it to end the clause. */
+  const PARTICIPLE = seq(
+    word(new Set([','])),
+    GERUND_PHRASE,
+    opt(seq(word(new Set(['and'])), GERUND_PHRASE))
+  );
+
+  /** TARGET (only after `nod`/`glance`) = `at`/`toward`/`towards`/`to` plus one OBJECT. */
+  const TARGET = seq(word(TARGET_PREPS), OBJECT);
+
+  return {
+    tagTail: seq(opt(word(new Set(['it']))), opt(ADVERB), opt(PARTICIPLE)),
+    actionTailWithTarget: seq(opt(ADVERB), opt(TARGET), opt(ADVERB), opt(PARTICIPLE)),
+    actionTail: seq(opt(ADVERB), opt(ADVERB), opt(PARTICIPLE)),
+  };
+}
 
 /** Whether a quoted span's kept text reads as a whole sentence: capitalized, sentence-punctuated. */
 function isSentenceQuote(mask: Mask, range: Range): boolean {
@@ -404,16 +426,16 @@ function startsWithCapitalI(clause: string): string | null {
  * verb: an optional "it", one optional adverb, then at most one participle clause, ending the
  * clause. Nothing else may remain.
  */
-function matchTagTail(rest: string): boolean {
-  return parsesAll(TAG_TAIL, tokenize(rest));
+function matchTagTail(rest: string, grammar: Grammar): boolean {
+  return parsesAll(grammar.tagTail, tokenize(rest));
 }
 
 /** The `TAG` pattern for `I`, e.g. `I say, drawing my blade and stepping between them.` */
-function isFirstPersonTag(clause: string): boolean {
+function isFirstPersonTag(clause: string, grammar: Grammar): boolean {
   const afterI = startsWithCapitalI(clause);
   if (afterI === null) return false;
   const match = FIRST_PERSON_TAG_PREFIX.exec(afterI);
-  return match?.groups !== undefined && matchTagTail(match.groups.rest!);
+  return match?.groups !== undefined && matchTagTail(match.groups.rest!, grammar);
 }
 
 /** The `TAG` pattern for `he`/`she`/`they`/the speaker's own names, e.g. `she says.` */
@@ -425,9 +447,9 @@ function thirdPersonTagPattern(names: readonly string[]): RegExp {
   );
 }
 
-function matchesThirdPersonTag(clause: string, pattern: RegExp): boolean {
+function matchesThirdPersonTag(clause: string, pattern: RegExp, grammar: Grammar): boolean {
   const match = pattern.exec(clause);
-  return match?.groups !== undefined && matchTagTail(match.groups.rest!);
+  return match?.groups !== undefined && matchTagTail(match.groups.rest!, grammar);
 }
 
 /**
@@ -437,14 +459,14 @@ function matchesThirdPersonTag(clause: string, pattern: RegExp): boolean {
  * swallowed into it (`I glance at Bram quietly.` — "quietly" is the trailing `ADVERB`, not part of
  * the target).
  */
-function isAction(clause: string): boolean {
+function isAction(clause: string, grammar: Grammar): boolean {
   const afterI = startsWithCapitalI(clause);
   if (afterI === null) return false;
   const verbMatch = ACTION_VERB_PREFIX.exec(afterI);
   if (!verbMatch?.groups) return false;
   const tail = TARGET_VERBS.has(verbMatch.groups.verb!.toLowerCase())
-    ? ACTION_TAIL_WITH_TARGET
-    : ACTION_TAIL;
+    ? grammar.actionTailWithTarget
+    : grammar.actionTail;
   return parsesAll(tail, tokenize(verbMatch.groups.rest!));
 }
 
@@ -488,21 +510,21 @@ function clausesOf(text: string): Clause[] {
  * Whether every clause of a gap's masked kept text parses completely as a TAG or ACTION under the
  * fixed grammar above. A clause ending in `?` is never a direction. The only slots that accept
  * anything other than a listed word are `nounSlot` (one lowercase word after a determiner) and
- * `NAME_SLOT` (one capitalized name, only after a preposition) — and neither accepts a stopword.
+ * `NAME_SLOT` (one known name, only after a preposition) — and neither accepts a stopword.
  * This is a heuristic, not a proof, with two costs: a real direction that doesn't parse is voiced
  * whole, and speech that happens to parse is dropped. The grammar is kept narrow to make the second
  * case unlikely.
  */
-function isDirection(text: string, names: readonly string[]): boolean {
+function isDirection(text: string, names: readonly string[], grammar: Grammar): boolean {
   const clauses = clausesOf(text);
   if (clauses.length === 0) return false;
   const thirdPersonTag = thirdPersonTagPattern(names);
   return clauses.every(
     ({ text: clause, question }) =>
       !question &&
-      (isFirstPersonTag(clause) ||
-        matchesThirdPersonTag(clause, thirdPersonTag) ||
-        isAction(clause))
+      (isFirstPersonTag(clause, grammar) ||
+        matchesThirdPersonTag(clause, thirdPersonTag, grammar) ||
+        isAction(clause, grammar))
   );
 }
 
@@ -515,14 +537,16 @@ function directionSplit(
   mask: Mask,
   spans: readonly QuoteSpan[],
   outside: readonly Range[],
-  names: readonly string[]
+  names: readonly string[],
+  grammar: Grammar
 ): boolean {
   if (spans.length === 0 || spans.some((span) => span.close === null)) return false;
   const quoted = spans.map((span) => ({ start: span.open + 1, end: span.close! }));
   if (!quoted.every((range) => isSentenceQuote(mask, range))) return false;
   if (!hasWords(mask, outside)) return false;
   return outside.every(
-    (range) => !hasWords(mask, [range]) || isDirection(mask.keptText(range.start, range.end), names)
+    (range) =>
+      !hasWords(mask, [range]) || isDirection(mask.keptText(range.start, range.end), names, grammar)
   );
 }
 
@@ -536,13 +560,18 @@ function directionSplit(
  * (`I nod slowly.`, `I glance at Bram.`) under the fixed grammar in `isDirection` — `names` (the
  * speaker's own names, for PCs) counts as a tag subject alongside `he`/`she`/`they`. A clause is
  * dropped only when it parses completely under that grammar and doesn't end in `?`; its only open
- * slots are one lowercase noun after a determiner and one capitalized name after a preposition,
- * neither of which may be a stopword. This is a rules heuristic, not a proof: a real direction that
+ * slots are one lowercase noun after a determiner and one known name after a preposition,
+ * neither of which may be a stopword. `knownNames` holds the capitalized name words (party members
+ * and introduced NPCs) that may fill that name slot; with none, no name is ever accepted there. This is a rules heuristic, not a proof: a real direction that
  * doesn't parse is voiced whole, and speech that happens to parse is dropped — the grammar is kept
  * narrow to make that second case unlikely. Otherwise the whole text is one line. Emphasis and every
  * double quote mark are removed either way.
  */
-export function splitSpeech(raw: string, names: readonly string[] = []): SpeechSplit {
+export function splitSpeech(
+  raw: string,
+  names: readonly string[] = [],
+  knownNames: readonly string[] = []
+): SpeechSplit {
   const mask = new Mask(raw);
   removeEmphasis(mask);
   const spans = pairQuotes(mask, 0, raw.length);
@@ -556,7 +585,8 @@ export function splitSpeech(raw: string, names: readonly string[] = []): SpeechS
     opensWithQuote &&
     hasWords(mask, outside) &&
     countKept(mask, quoted) * 2 >= countKept(mask, [{ start: 0, end: raw.length }]);
-  const split = quoteRule || directionSplit(mask, spans, outside, names);
+  const split =
+    quoteRule || directionSplit(mask, spans, outside, names, directionGrammar(knownNames));
   if (!split) {
     return { mask, lines: hasWords(mask, whole) ? [whole] : [], directions: [] };
   }

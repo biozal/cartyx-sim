@@ -234,7 +234,7 @@ class ScriptBuilder {
     const pcName =
       event.speakerKind === 'pc' ? ownEntry(this.state.combatants, event.speaker)?.name : undefined;
     const names = pcName ? [pcName, pcName.split(/\s+/)[0]!] : [];
-    const split = splitSpeech(event.text, names);
+    const split = splitSpeech(event.text, names, this.knownNameWords());
     const speaker =
       event.speakerKind === 'pc'
         ? this.speakers.pc(event.speaker)
@@ -247,6 +247,18 @@ class ScriptBuilder {
     );
     this.counts.stageDirections += dropped.length;
     this.pushEvent(event.seq, lines, dropped, event.overlaps);
+  }
+
+  /**
+   * The capitalized words of every party member's and introduced NPC's name, which may fill a
+   * stage direction's name slot (`I glance at Tomas.`).
+   */
+  private knownNameWords(): string[] {
+    const names = [
+      ...this.party.map((pc) => pc.name),
+      ...Object.values(this.state.npcs).map((npc) => npc.name),
+    ];
+    return names.flatMap((name) => name.split(/\s+/)).filter((word) => /^[A-Z][a-z]+$/.test(word));
   }
 
   private addAction(event: Action): void {

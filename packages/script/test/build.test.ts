@@ -1,3 +1,4 @@
+import type { EventInput } from '@cartyx-sim/core';
 import { makeCombatant } from '@cartyx-sim/rules/testing';
 import { describe, expect, it } from 'vitest';
 import type { LabelResult } from '../src/attribution';
@@ -64,6 +65,11 @@ const creatureLabeler = () =>
 
 function build(events = TABLE_LOG, extra: Partial<Parameters<typeof buildScript>[0]> = {}) {
   return buildScript({ campaign: 'avalon', session: 3, eventsSha256: SHA, events, ...extra });
+}
+
+/** A neutral dialogue event spoken by Kira. */
+function pcSays(text: string): EventInput {
+  return { type: 'dialogue', speaker: 'kira', speakerKind: 'pc', emotion: 'neutral', text };
 }
 
 function summary(script: ScriptFile) {
@@ -408,6 +414,33 @@ describe('buildScript', () => {
   it('refuses a log that does not begin with session_start', async () => {
     const events = eventLog([narration('Mist.')]).slice(1);
     await expect(build(events)).rejects.toThrow(ScriptError);
+  });
+
+  it('lets party and introduced NPC names fill a stage-direction target', async () => {
+    const events = eventLog([
+      {
+        type: 'npc_introduced',
+        npcId: 'npc-sera',
+        name: 'Sera Moss',
+        description: 'A ferrywoman',
+        invented: true,
+      },
+      pcSays('"Over here." I glance at Tomas.'),
+      pcSays('"Wait." I nod to Sera.'),
+      pcSays('"Go." I glance at Once.'),
+    ]);
+    const { script } = await build(events);
+    expect(summary(script)).toEqual([
+      ['L0001', 'dialogue', 'kira', 'Over here.'],
+      ['L0002', 'dialogue', 'kira', 'Wait.'],
+      ['L0003', 'dialogue', 'kira', 'Go. I glance at Once.'],
+    ]);
+    expect(script.lines[0]).toMatchObject({
+      dropped: [{ seq: 2, reason: 'stage_direction', text: 'I glance at Tomas.' }],
+    });
+    expect(script.lines[1]).toMatchObject({
+      dropped: [{ seq: 3, reason: 'stage_direction', text: 'I nod to Sera.' }],
+    });
   });
 
   it('keeps party speakers in session_start order', async () => {

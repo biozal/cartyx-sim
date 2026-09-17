@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { finishLine, sliceText, type Range } from '../src/normalize';
 import { cleanAction, splitSpeech } from '../src/speech';
 
+/** Name words of a sample party (Kira Vale, Bram) that may fill a NAME_SLOT. */
+const KNOWN = ['Kira', 'Vale', 'Bram'];
+
 function spoken(
   raw: string,
-  names: readonly string[] = []
+  names: readonly string[] = [],
+  knownNames: readonly string[] = []
 ): { lines: string[]; directions: string[] } {
-  const split = splitSpeech(raw, names);
+  const split = splitSpeech(raw, names, knownNames);
   return {
     lines: split.lines.map((ranges) => finishLine(sliceText(raw, ranges))),
     directions: split.directions.map((range: Range) => raw.slice(range.start, range.end)),
@@ -125,7 +129,7 @@ describe('splitSpeech direction rule', () => {
 
   it('drops a short first-person action with a prepositional tail', () => {
     const raw = '"Over here." I glance at Bram.';
-    const split = splitSpeech(raw);
+    const split = splitSpeech(raw, [], KNOWN);
     expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual(['I glance at Bram.']);
   });
 
@@ -177,8 +181,8 @@ describe('splitSpeech direction rule', () => {
     '"Go." I nod to you and we should go now.',
     '"Wait." I glance at Bram, then we run.',
   ])('keeps %j whole (a clause that runs on into real speech)', (raw) => {
-    expect(spoken(raw).directions).toEqual([]);
-    expect(spoken(raw).lines).toHaveLength(1);
+    expect(spoken(raw, [], KNOWN).directions).toEqual([]);
+    expect(spoken(raw, [], KNOWN).lines).toHaveLength(1);
   });
 
   // "step" and "lean" are no longer action verbs (round 2): both take a direction word too
@@ -240,7 +244,7 @@ describe('splitSpeech direction rule', () => {
 
   it("doesn't swallow a trailing adverb into a TARGET (the round-2 greedy-TARGET bug)", () => {
     const raw = '"Now." I glance at Bram quietly.';
-    const split = splitSpeech(raw);
+    const split = splitSpeech(raw, [], KNOWN);
     expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual([
       'I glance at Bram quietly.',
     ]);
@@ -287,16 +291,50 @@ describe('splitSpeech direction rule', () => {
     '"Options?" I say, keeping the gold.',
     '"Why are the guards here?" They said, keeping the peace.',
   ])('keeps %j whole (round 4: open objects need a preposition; questions)', (raw) => {
-    expect(spoken(raw).directions).toEqual([]);
-    expect(spoken(raw).lines).toHaveLength(1);
+    expect(spoken(raw, [], KNOWN).directions).toEqual([]);
+    expect(spoken(raw, [], KNOWN).lines).toHaveLength(1);
   });
 
   it.each([
     ['"Go." I glance at her sword.', 'I glance at her sword.'],
-    ['"Go." I nod, stepping in her way.', 'I nod, stepping in her way.'],
     ['"Go." I nod, watching them.', 'I nod, watching them.'],
   ])('drops the direction in %j (round 4)', (raw, direction) => {
     expect(spoken(raw).directions).toEqual([direction]);
+  });
+
+  // Round 5: `in` is a particle only, never a preposition, and a NAME_SLOT takes only a known name.
+  it.each([
+    '"Go." I nod, stepping in her way.',
+    '"Go." I nod, stepping in your turn.',
+    '"Go." I nod, stepping in an ambush!',
+    '"Go." I nod, stepping in Wait!',
+    '"Go." I nod, looking back in Wait!',
+    '"Go." I nod, looking on Now!',
+    '"Go." I nod, looking at Once!',
+    '"Go." I nod to Ok.',
+    '"Go." I nod to Everyone.',
+    '"Go." I nod to You.',
+  ])('keeps %j whole (round 5: no `in` preposition; names must be known)', (raw) => {
+    expect(spoken(raw, [], KNOWN).directions).toEqual([]);
+    expect(spoken(raw, [], KNOWN).lines).toHaveLength(1);
+  });
+
+  // Known gap: the quote-majority path (half or more of the line quoted) splits this before the
+  // direction rule is consulted, so "I nod to You." is still dropped. The direction rule itself
+  // keeps it (see "I nod to You." above). `it.fails` flags the day this starts passing.
+  it.fails('keeps "Who\'s next?" I nod to You. whole (round 5, quote-majority gap)', () => {
+    const raw = '"Who\'s next?" I nod to You.';
+    expect(spoken(raw, [], KNOWN).directions).toEqual([]);
+  });
+
+  it('keeps a name target whole when no names are known (round 5)', () => {
+    const raw = '"Go." I glance at Bram.';
+    expect(spoken(raw).directions).toEqual([]);
+    expect(spoken(raw).lines).toHaveLength(1);
+  });
+
+  it('matches a known name case-sensitively (round 5)', () => {
+    expect(spoken('"Go." I glance at Bram.', [], ['bram']).directions).toEqual([]);
   });
 });
 
