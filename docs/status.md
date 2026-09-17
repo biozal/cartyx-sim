@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (55 files, 930 tests plus 1 expected failure), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1006 tests plus 1 expected failure), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -118,6 +118,21 @@ What went wrong, most serious first:
 What went well: the checker kept catching DM-written player lines and thoughts (13 catches; 4 more quotes were labeled `DM (as …)` in the script), the DM voiced its main NPC with `npc_say` for the first time, nothing drifted in the transcript size or latency, and the resume after the pause was seamless.
 
 Script output (`sim script`, labeling seat `checker`): 005 has 10,492 spoken words (the script also voices actions), 80 model labels, no rules fallbacks, and 22 dropped stage directions, all real (mostly Kira's parenthetical asides such as "(A small, steady smile.)"). The re-run scripts for 002–004 match the counts above; 003's unnamed speaker is now `npc-faceless-creature`, since the new prompt version missed the cache.
+
+### Fixes after the run
+
+All ten findings above are fixed on `feat/dm-pc-control-checker`:
+
+1. **Players go silent in combat.** A monster turn's narration is capped at three sentences ("Keep this turn's narration to at most three sentences..."), and a player's prompt, on their own combat turn, now asks for "one short line in character as you act, unless silence fits the moment better."
+2. **A downed PC is out for good.** Death saving throws are implemented (design: `docs/superpowers/specs/2026-09-17-death-saves-design.md`). A downed PC keeps its place in initiative and the engine rolls a d20 death save for them each round, with no model call: a natural 20 wakes them at 1 HP, a natural 1 counts as two failures, three failures kill, three successes stabilize (saves reset), and damage taken at 0 HP adds a failure (two on a critical); healing above 0 HP clears the tally. The DM's prompt marks a dying PC `DYING (death saves x/y)` and a stabilized one `STABLE at 0 HP`; the transcript, `PlayerView`, and `sim script`'s cues all show the roll and the running tally.
+3. **Combat was never closed.** `scene_change` now throws (`Combat is still running. Call end_combat first, then scene_change.`) while combat is running; the clock's end-of-session instruction tells the DM to end combat before cutting the scene; and the director itself emits `combat_end` immediately before every `session_end` if combat is somehow still open, so a log can no longer end mid-fight.
+4. **Prompt state leaked into narration.** A new `dm_state_leak` validator rule catches a combatant `(id: …)` reference, an `HP x/y` block, or an "It is `<name>`'s turn" line inside DM prose. Rather than rejecting the whole narration, the director strips just the offending lines (flagged `dm_state_leak`, resolution `trimmed`) and logs what it cut in a DM-only note.
+5. **The DM repeats what players just said.** A new `repeated_text` validator rule (`cutRepeats`, `packages/core/src/repeats.ts`) drops any sentence of the DM's narration that, once case, whitespace, and quote/emphasis marks are normalized, quotes back four or more words of a player's recent line. A narration left with nothing after the cut is rejected, same as a fully-cut violation today.
+6. **Near-duplicate narration within a beat.** The same `repeated_text` rule also drops a narration sentence that exactly matches (after the same normalization) a sentence the DM already narrated this beat, so a reworded resend after a tool error still loses any sentence it repeats verbatim from the first attempt.
+7. **Continuity drift.** The DM prompt's NPC list now carries each NPC's description (`- <name> (npcId: <id>): <description>`, collapsed to one line and truncated to 200 characters), not just its name, so an NPC introduced many turns ago no longer disappears once it scrolls out of the transcript window.
+8. **Tool errors leave no trace.** Every place the director flags `invalid_tool_call` or `tool_error` — the DM's prepare and execution failures, and the same two cases on the player path — now also writes a DM-only `ooc_note` (`Invalid tool call (<tool>): <message>` or `Tool error (<tool>): <message>`), so the errors show up in the log instead of only being sent back to the model.
+9. **Script speakers split in two.** `sim script`'s label request now lists monster and NPC combatants alongside introduced NPCs, so a monster's line is attributed to its existing combatant id instead of inventing a new speaker; and `promote` now also merges an unlisted `new:` speaker into an introduced NPC whose id differs only by a leading article ("the"/"a"/"an"), rewriting any lines already drafted under the old id onto the merged one.
+10. **Minor: stale invention query.** `record_invention` no longer takes a `query` from the model; it derives one from this turn's own lore lookup, if there was one, so a later invention no longer inherits an earlier turn's stale query.
 
 ## What Plan 2A added
 
