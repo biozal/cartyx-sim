@@ -1,6 +1,6 @@
 # cartyx-sim status
 
-_Last updated: 2026-09-16_
+_Last updated: 2026-09-17_
 
 cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on local models) built to test the Cartyx lore in `cartyx-lore`. It records a session as an event log, and later plans add voices, art, and a video-call-style playback page for recording. See the spec (`docs/superpowers/specs/2026-09-13-cartyx-sim-v1-design.md`) and the roadmap (`docs/superpowers/plans/2026-09-13-cartyx-sim-v1-roadmap.md`).
 
@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (55 files, 833 tests), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (55 files, 930 tests plus 1 expected failure), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -77,7 +77,7 @@ What the scripts show:
 Before the 1-hour run, review of the script stage above turned up ten issues, now fixed:
 
 1. The labeling prompt labels a quote inside reported speech as `none`, and `LABEL_PROMPT_VERSION` is now 3.
-2. PC speech also splits when every quote is a full sentence and every outside sentence is a speech tag (I/he/she/they/the PC's name + a say-verb) or an `I <body-language verb>` sentence.
+2. PC speech also splits when every quote is a sentence and every clause outside the quotes parses completely under a small fixed grammar: a speech tag ("she says", "I say quietly, drawing my blade") or a short gesture ("I nod slowly", "I glance at Bram"). Names must belong to the party or an introduced NPC, and a question is never a direction; anything else keeps the whole line voiced (spec §5.1). Five review rounds each found real speech the looser versions dropped.
 3. An NPC the model named with `new:` before its `npc_introduced` event is promoted to the introduced NPC.
 4. A hidden HP change uses core's `hpTrend`: equal values print no markdown line, and non-numbers read "condition changes".
 5. Each `session_paused` event gets its own pause cue.
@@ -86,6 +86,38 @@ Before the 1-hour run, review of the script stage above turned up ten issues, no
 8. `sim script --refresh` with no model labeling quotes (`--no-model`, or no `script`/`checker` seat) says so instead of doing nothing silently.
 9. `sim script` reads the event log once, hashing the exact bytes it parses for `eventsSha256`, and writes `script.md` and `script.json` as a pair, with `script.json` last.
 10. `sim run`, `sim bench`, and `sim script` print a clean error message and exit 1 on any other failure, with `SIM_DEBUG=1` for the stack.
+
+## 1-hour run (session 005, 2026-09-17)
+
+`sim run --campaign avalon --session 5 --target-minutes 60` ran for 80 minutes of wall time (much faster than the 10-minute runs) and ended with `session_end: target_reached` at 63.7 spoken minutes (9,548 words). The same seats as above passed `sim bench --trials 3` first. The log is in `campaigns/avalon/logs/session-005.log`.
+
+| Measure                  | Result                                                                                                                                                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Events                   | 478; 3 scenes (tavern, streets, manor foyer); one combat of 5 rounds (5 mercenaries)                                                                                                                                           |
+| Pauses                   | 1 at 49 min: `player-bram` (Gemma 4 12B) answered 4 times without a tool call; `--resume` continued cleanly                                                                                                                    |
+| Clock                    | 80% steer at 62.9 wall min (spoken 48), 100% at 77.6 (spoken 60); the DM cut to the manor foyer at 62.4 spoken min and the session ended one turn later                                                                        |
+| Word share               | DM 70%, Kira 12%, Mira 7%, Bram 5%, Tomas 4%, NPC Elias (via `npc_say`) 2%                                                                                                                                                     |
+| Turn time (avg by third) | DM 43 / 83 / 71 s; Kira 80 / 86 / 47 s; Tomas 31 / 23 / 15 s; Bram 13 / 41 / 12 s; Mira 4–5 s                                                                                                                                  |
+| DM prompt transcript     | Bounded by the 30-line window: 0.8k–15.6k characters, largest at 28 min when narrations were longest; no growth trend                                                                                                          |
+| Validator flags          | 37: DM `tool_error` 12, `dm_controls_pc_checker` 13 (8 re-prompted, 5 trimmed), DM `invalid_tool_call` 5, player `invalid_tool_call` 6 (Mira 3, Tomas 3), `duplicate_narration` 1. The checker never failed or disabled itself |
+| Lore                     | 3 lookups (all gaps, as expected before Plan 2B) and 4 inventions (the Old Stone Bridge, the salt-line ward, Warden Silas Thorne's paranoia, his manor)                                                                        |
+
+What went wrong, most serious first:
+
+1. **Players go silent in combat.** From spoken minute 40 to the end the DM had 96–98% of the words: player combat turns are an action and a roll, and the DM narrates each monster turn at length. Most of the clock went to combat narration.
+2. **A downed PC is out for good.** Kira dropped to 0 HP in round 2 and got no further turns: there are no death saves, so downed PCs stay in the initiative order but are skipped. Her seat was silent for the last 40% of the session.
+3. **Combat was never closed.** The DM resolved the fight in the story (the mercenary fled into the manor) and called `scene_change`, but never `end_combat`. `combat_turn` events continued after the cut, and the session ended in round 5 with combat still running.
+4. **Prompt state leaked into narration.** Event 228 ends with a copy of the prompt's combatant list (`Kira Vale (id: kira) | HP 24/24, AC 15`, … monster HP and AC) and "It is Kira's turn." No validator caught it, and it is voiced in `script.md`.
+5. **The DM repeats what players just said.** Event 114 re-narrates Tomas's, Mira's, and Kira's dialogue word for word. The checker allows this because the players did say it, so the script voices each line twice (the second time as `DM (as …)`).
+6. **Near-duplicate narration within a beat.** At events 291 and 293 the DM narrated, a later call in the same batch failed with a tool error, and the DM re-sent a reworded version of the same narration. The exact-match duplicate check missed it, so two sentences were narrated twice.
+7. **Continuity drift.** The DM introduced "The Innkeeper" of the Gilded Griffin (event 98) and 40 minutes later had him arrive at the manor with guards and call himself Silas's steward. The DM prompt lists NPCs by name only, so the description fell out of view once event 98 left the 30-line window.
+8. **Tool errors leave no trace.** The DM's 12 tool errors and 5 invalid calls are flagged, but the error text is only sent back to the model, not logged, so they cannot be reviewed.
+9. **Script speakers split in two.** The labeler named the innkeeper `new:innkeeper` before the DM introduced `npc-the-innkeeper`, so the script has both speakers (10 and 18 lines). It also named a combatant `npc-overhang-mercenary`, because the label request lists introduced NPCs but not monsters.
+10. **Minor:** `record_invention` at event 167 carries the previous lookup's query; one of Bram's lines has an odd number of quote marks (the script removes them).
+
+What went well: the checker kept catching DM-written player lines and thoughts (13 catches; 4 more quotes were labeled `DM (as …)` in the script), the DM voiced its main NPC with `npc_say` for the first time, nothing drifted in the transcript size or latency, and the resume after the pause was seamless.
+
+Script output (`sim script`, labeling seat `checker`): 005 has 10,492 spoken words (the script also voices actions), 80 model labels, no rules fallbacks, and 22 dropped stage directions, all real (mostly Kira's parenthetical asides such as "(A small, steady smile.)"). The re-run scripts for 002–004 match the counts above; 003's unnamed speaker is now `npc-faceless-creature`, since the new prompt version missed the cache.
 
 ## What Plan 2A added
 
@@ -106,7 +138,7 @@ Before the 1-hour run, review of the script stage above turned up ten issues, no
 
 ## Next steps
 
-1. Test a 1-hour session end to end (the runs so far are 10 minutes) and watch for drift, repetition, and context growth over a longer arc.
+1. Fix what the 1-hour run broke (above), then re-run a 1-hour session.
 2. Write Plan 2B (lore: ingest `cartyx-lore`, embeddings, `sim index`, `sim audit`).
 3. Start the Avalon Artificers Academy lore expansion (in `cartyx-lore`) before Plan 2C, since chargen drafts the party from it. It can run alongside Plan 2B.
 4. Write Plan 2C (SRD import, production prompts, scribe, `sim chargen`, `sim prep`, 5-minute smoke run), using the real-run findings above.
