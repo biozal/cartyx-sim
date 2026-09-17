@@ -74,6 +74,23 @@ describe('SpeakerTable.promote', () => {
   });
 });
 
+describe('SpeakerTable.listedNpc', () => {
+  it('matches a listed NPC that differs only by a leading article', () => {
+    const speakers = new SpeakerTable(PARTY);
+    speakers.npc('npc-the-innkeeper', 'The Innkeeper');
+    expect(speakers.listedNpc('npc-innkeeper')).toBe('npc-the-innkeeper');
+    expect(speakers.listedNpc('npc-the-innkeeper')).toBe('npc-the-innkeeper');
+  });
+
+  it('ignores unlisted NPCs, other kinds, and ids that name someone else', () => {
+    const speakers = new SpeakerTable(PARTY);
+    speakers.unlisted('npc-the-thing', 'The Thing', 12);
+    expect(speakers.listedNpc('npc-thing')).toBeUndefined();
+    expect(speakers.listedNpc('kira')).toBeUndefined();
+    expect(speakers.listedNpc('npc-ghost')).toBeUndefined();
+  });
+});
+
 describe('applySpeakerOverrides', () => {
   it('renames a speaker', () => {
     const result = applySpeakerOverrides(table(), [], {

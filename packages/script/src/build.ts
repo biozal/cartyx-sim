@@ -26,7 +26,7 @@ import {
   type StateLine,
   type VoicedLine,
 } from './schema';
-import { applySpeakerOverrides, SpeakerTable } from './speakers';
+import { applySpeakerOverrides, SpeakerTable, withoutArticle } from './speakers';
 import { cleanAction, splitSpeech } from './speech';
 
 export interface BuildInput {
@@ -148,7 +148,11 @@ class ScriptBuilder {
         if (!this.sceneNpcs.includes(event.npcId)) this.sceneNpcs.push(event.npcId);
         const promotedFrom = this.speakers.promote(event.npcId, event.name);
         if (promotedFrom) this.renameSpeaker(promotedFrom, event.npcId);
-        const kept = this.newLabels.filter((label) => `npc-${slugify(label)}` !== event.npcId);
+        // Compared without a leading article, the way `promote` matches: a label of "innkeeper"
+        // is stale once "npc-the-innkeeper" is introduced, and must not go back to the labeler.
+        const kept = this.newLabels.filter(
+          (label) => withoutArticle(`npc-${slugify(label)}`) !== withoutArticle(event.npcId)
+        );
         this.newLabels.splice(0, this.newLabels.length, ...kept);
       }
       if (event.visibility === 'public') await this.add(event);
@@ -371,8 +375,12 @@ class ScriptBuilder {
           speaker: this.speakers.npc(label.id, nameOf(this.state, label.id)),
         };
       case 'new': {
-        if (!this.newLabels.includes(label.label)) this.newLabels.push(label.label);
         const id = `npc-${slugify(label.label)}`;
+        // A label that differs from an NPC already introduced only by a leading article names
+        // that NPC: keep it on the introduced speaker, and off the list of labels still new.
+        const listed = this.speakers.listedNpc(id);
+        if (listed) return { kind: 'speech', speaker: listed };
+        if (!this.newLabels.includes(label.label)) this.newLabels.push(label.label);
         const speaker = ownEntry(this.state.npcs, id)
           ? this.speakers.npc(id, nameOf(this.state, id))
           : this.speakers.unlisted(id, capitalize(label.label), seq);

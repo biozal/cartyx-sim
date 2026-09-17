@@ -501,6 +501,29 @@ describe('Director', () => {
     ]);
   });
 
+  it('records no leak trim when the stripped narration is rejected as a duplicate', async () => {
+    const leak = 'Kira Vale (id: kira) | HP 24/24, AC 15';
+    const { deps: built, sink } = deps({
+      dm: [
+        { text: 'The engines roar to life.', toolCalls: [] },
+        { text: `${leak}\nThe engines roar to life.`, toolCalls: [] },
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration')).toMatchObject([
+      { text: 'The engines roar to life.' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'duplicate_narration', resolution: 're_prompted' },
+    ]);
+    expect(
+      sink.events.filter((e) => e.type === 'ooc_note' && e.text.includes('dm_state_leak'))
+    ).toEqual([]);
+  });
+
   it('rejects a narration that leaks prompt state on every line, and the beat still hands off', async () => {
     const leak = 'Kira Vale (id: kira) | HP 24/24, AC 15';
     const { deps: built, sink } = deps({

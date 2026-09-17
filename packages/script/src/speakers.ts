@@ -61,6 +61,21 @@ export class SpeakerTable {
     return oldId;
   }
 
+  /**
+   * The id of the listed NPC that `id` names when the two differ only by a leading article
+   * (`npc-innkeeper` against an introduced `npc-the-innkeeper`), or undefined when none does.
+   * The mirror of `promote`: it keeps a `new:` label that arrives after the introduction on the
+   * introduced speaker, instead of splitting a second one off beside it.
+   */
+  listedNpc(id: string): string | undefined {
+    const normalized = withoutArticle(id);
+    const match = [...this.byId.entries()].find(
+      ([otherId, other]) =>
+        other.kind === 'npc' && !other.unlisted && withoutArticle(otherId) === normalized
+    );
+    return match?.[0];
+  }
+
   /** Replaces the entry at `key` with a listed NPC `id`/`name`, keeping its position. */
   private replace(key: string, id: string, name: string): void {
     const entries = [...this.byId.entries()].map(([entryKey, value]): [string, Speaker] =>
@@ -77,7 +92,7 @@ export class SpeakerTable {
 }
 
 /** Strips a leading "the/a/an" article from an "npc-" id, to match ids that name the same NPC. */
-function withoutArticle(id: string): string {
+export function withoutArticle(id: string): string {
   return id.replace(/^npc-(the|a|an)-/, 'npc-');
 }
 

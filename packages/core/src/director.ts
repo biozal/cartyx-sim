@@ -606,6 +606,9 @@ export class Director {
         let text = prepared.def.narrativeText?.(prepared.args);
         let args = prepared.args;
         let removed = '';
+        // The lines a state leak cost this narration, held back until the call actually runs:
+        // the stripped text can still be rejected below, and then nothing was cut from narration.
+        let leakTrim: string | null = null;
         let violation = text
           ? validateDmText(text, {
               pcNames,
@@ -623,19 +626,16 @@ export class Director {
           const leaked = violation.strip ?? [];
           const listed = leaked.join(' | ');
           const stripped = stripLeakedLines(text!, leaked);
-          this.flag(recorder, seat, 'dm_state_leak', 0, 'trimmed');
-          recorder.emit({
-            type: 'ooc_note',
-            visibility: 'dm',
-            text: `Cut from DM narration (dm_state_leak): ${listed}`,
-          });
           if (!stripped) {
+            // Nothing survives, so there is nothing left to reject: the trim is final here.
+            this.noteStateLeak(recorder, seat, listed);
             fullyCutNarrations.add(collapseWhitespace(text!));
             messages.push(
               toolMessage(call, `Not narrated: every line leaked prompt state. ${listed}`)
             );
             continue;
           }
+          leakTrim = listed;
           args = { ...(prepared.args as Record<string, unknown>), text: stripped };
           removed = ` Removed lines that leaked prompt state: ${listed}`;
           text = stripped;
@@ -734,7 +734,7 @@ export class Director {
               continue;
             }
             args = { ...(prepared.args as Record<string, unknown>), text: kept };
-            removed = ` Removed sentences that played player characters: ${listed}`;
+            removed += ` Removed sentences that played player characters: ${listed}`;
           }
         }
         // Last: cut any sentence that only repeats what this beat already narrated, or quotes a
@@ -770,6 +770,8 @@ export class Director {
             removed += ` Removed repeated sentences: ${listed}`;
           }
         }
+        // The call is past every rejection, so a leak trim above really did reach narration.
+        if (leakTrim !== null) this.noteStateLeak(recorder, seat, leakTrim);
         const execution = await runPreparedCall(prepared.def, args, context);
         if (!execution.ok) {
           messages.push(toolMessage(call, `Error: ${execution.error}`));
@@ -992,6 +994,16 @@ export class Director {
     resolution: 're_prompted' | 'accepted_with_flag' | 'forced_pass' | 'forced_hand_off' | 'trimmed'
   ): void {
     recorder.emit({ type: 'validator_flag', visibility: 'dm', seat, rule, retries, resolution });
+  }
+
+  /** Records a `dm_state_leak` trim: the flag, and a DM-only note naming the lines it cut. */
+  private noteStateLeak(recorder: TurnRecorder, seat: string, listed: string): void {
+    this.flag(recorder, seat, 'dm_state_leak', 0, 'trimmed');
+    recorder.emit({
+      type: 'ooc_note',
+      visibility: 'dm',
+      text: `Cut from DM narration (dm_state_leak): ${listed}`,
+    });
   }
 
   /** Kept for review: the checker's raw reply text, DM-only. Logs nothing when there is none. */

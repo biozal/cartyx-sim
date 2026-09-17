@@ -97,7 +97,8 @@ export function failDeathSaves(
 /**
  * Temp HP absorbs damage first. At 0 HP, monsters and NPCs die; PCs fall unconscious unless the
  * damage left over after reaching 0 is at least their max HP (massive damage). A PC already at 0
- * HP loses no more HP: the hit costs death saving throw failures instead, two on a critical.
+ * HP loses no more HP: the hit costs death saving throw failures instead, two on a critical, but
+ * only when damage actually got through.
  */
 export function applyDamage(
   combatant: Combatant,
@@ -113,6 +114,8 @@ export function applyDamage(
   if (hp > 0) return next;
   const overflow = remaining - combatant.hp;
   if (combatant.kind !== 'pc' || overflow >= combatant.maxHp) return { ...next, dead: true };
+  // Nothing got through (0 damage, or temp HP soaked it all), so it is not a hit at 0 HP.
+  if (remaining === 0) return next;
   if (combatant.hp === 0) return failDeathSaves(next, options.critical ? 2 : 1).combatant;
   return addCondition(next, 'unconscious');
 }

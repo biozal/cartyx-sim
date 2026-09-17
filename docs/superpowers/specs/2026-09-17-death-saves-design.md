@@ -31,7 +31,7 @@ stable: z.boolean().default(false),
 Invariants, enforced by the rules functions rather than the schema:
 
 - `stable` is true only while `hp === 0 && !dead`.
-- `deathSaves` is `{0, 0}` whenever `hp > 0`, when `dead`, or when `stable`.
+- `deathSaves` is `{0, 0}` whenever `hp > 0` or when `stable`. A dead PC keeps the failures that killed them (`{_, 3}`), as §4 says, so the log records why they died.
 
 ## 4. Rules (`packages/rules/src/hp.ts`)
 
@@ -96,11 +96,13 @@ Stable PCs stay in the order but are skipped (`takesTurn` is false), exactly as 
 
 ## 7. Script stage
 
-`packages/script` needs no schema change. `state_change` cues for `deathSaves` and `stable` are silent lines like the others:
+`packages/script` needs no new line kinds. `state_change` cues for `deathSaves` and `stable` are silent lines like the others:
 
 - `deathSaves` renders as `*Kira Vale: 2 death save successes, 1 failure.*`
 - `stable` becoming true renders as `*Kira Vale is stable.*`
 - A roll line already covers the save itself.
+
+`StateLine.state.field` gains `'deathSaves'` and `'stable'`, with `SCRIPT_SCHEMA_VERSION` staying 1: the same additive tradeoff §3 takes for the event schema.
 
 Death saves for a non-PC never happen, so the hidden-stat rule (§5.5 of the v1 design) is unaffected.
 

@@ -152,7 +152,7 @@ function controlledCharacter(text: string, names: readonly string[]): string | n
 const STATE_LEAK_PATTERNS = [
   /\(id:\s*[a-z0-9-]+\)/i,
   /\bHP\s+\d+\s*\/\s*\d+/i,
-  /\bIt is [^.]{1,40}'s turn\b/i,
+  /\bIt is [^.]{1,40}['’]s turn\b/i,
 ];
 
 /** The lines of `text` that leak prompt state, in order, or `[]` when none do. */

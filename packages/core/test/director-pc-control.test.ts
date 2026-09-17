@@ -367,6 +367,27 @@ describe('DM player-character control checker', () => {
     ).toHaveLength(2);
   });
 
+  it('tells the DM about both trims when a leak and a checker cut land on one narration', async () => {
+    const leak = 'Kira Vale (id: kira) | HP 24/24, AC 15';
+    // The first offense is rejected, so the second one is cut rather than rejected again.
+    const { director, model } = setup({
+      dm: [respond(narrate(BAD)), respond(narrate(`${leak}\n${BAD}`)), respond(handOffTomas())],
+      checker: [flagged(BAD_SENTENCE), flagged(BAD_SENTENCE)],
+    });
+    await playDmBeat(director);
+
+    const dmRequests = model.requests.filter((request) => request.seat === 'dm');
+    const result = dmRequests[2]!.messages.at(-1);
+    expect(result).toMatchObject({
+      role: 'tool',
+      content: expect.stringContaining('Removed lines that leaked prompt state'),
+    });
+    expect(result).toMatchObject({
+      role: 'tool',
+      content: expect.stringContaining('Removed sentences that played player characters'),
+    });
+  });
+
   it('skips a repeated fully cut narration without calling the checker again', async () => {
     const FULL = 'Kira turns to the others, eyes bright.';
     const { director, model, sink } = setup({

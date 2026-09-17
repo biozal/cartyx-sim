@@ -87,6 +87,7 @@ describe('validateDmText', () => {
       'Kira Vale (id: kira) | HP 24/24, AC 15',
       'Bram Holloway (id: bram) | HP 28/28, AC 16',
       "It is Kira's turn.",
+      'It is Kira’s turn.',
     ])('flags a leaked prompt-state line: "%s"', (text) => {
       const violation = validateDmText(text, { pcNames, mechanicsToolCalled: false });
       expect(violation?.rule).toBe('dm_state_leak');

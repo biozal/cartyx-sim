@@ -57,6 +57,34 @@ describe('applyDamage', () => {
     expect(hurt.dead).toBe(false);
   });
 
+  it('costs a dying PC nothing when the damage is 0', () => {
+    const untouched = applyDamage(dying(), 0);
+    expect(untouched.deathSaves).toEqual({ successes: 0, failures: 0 });
+    expect(untouched.dead).toBe(false);
+  });
+
+  it('costs a dying PC nothing when temp HP soaks the whole hit', () => {
+    const shielded = makeCombatant({
+      id: 'pc',
+      hp: 0,
+      maxHp: 10,
+      tempHp: 5,
+      conditions: ['unconscious'],
+    });
+    const struck = applyDamage(shielded, 3);
+    expect(struck.tempHp).toBe(2);
+    expect(struck.deathSaves).toEqual({ successes: 0, failures: 0 });
+    expect(struck.dead).toBe(false);
+  });
+
+  it('still adds a failure when a single point gets through to a dying PC', () => {
+    expect(applyDamage(dying(), 1).deathSaves).toEqual({ successes: 0, failures: 1 });
+    expect(applyDamage(dying(), 1, { critical: true }).deathSaves).toEqual({
+      successes: 0,
+      failures: 2,
+    });
+  });
+
   it('adds two failures for a critical hit on a PC at 0 HP', () => {
     expect(applyDamage(dying(), 3, { critical: true }).deathSaves).toEqual({
       successes: 0,

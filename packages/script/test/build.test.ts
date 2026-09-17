@@ -345,6 +345,34 @@ describe('buildScript', () => {
     ).toBe(true);
   });
 
+  it('keeps a later new: label on the promoted NPC when the introduced id kept an article', async () => {
+    const labeler = new FakeLabeler(() => ({
+      labels: [{ kind: 'new', label: 'innkeeper' }],
+      source: 'model',
+    }));
+    const events = eventLog([
+      narration('"Rooms are two silver," the innkeeper says.'),
+      {
+        type: 'npc_introduced',
+        npcId: 'npc-the-innkeeper',
+        name: 'The Innkeeper',
+        description: 'Runs the Gilded Griffin',
+        invented: true,
+      },
+      narration('"Welcome back," the innkeeper says.'),
+    ]);
+    const { script } = await build(events, { labeler });
+    expect(labeler.requests[1]!.newLabels).toEqual([]);
+    expect(script.speakers.filter((speaker) => speaker.name.includes('Innkeeper'))).toEqual([
+      { id: 'npc-the-innkeeper', name: 'The Innkeeper', kind: 'npc' },
+    ]);
+    const dialogueLines = script.lines.filter((line) => isVoiced(line) && line.kind === 'dialogue');
+    expect(dialogueLines).toHaveLength(2);
+    expect(
+      dialogueLines.every((line) => isVoiced(line) && line.speaker === 'npc-the-innkeeper')
+    ).toBe(true);
+  });
+
   it('drops every new label that slugifies to a promoted NPC, not just the first', async () => {
     const answers: LabelResult[] = [
       { labels: [{ kind: 'new', label: 'Faceless Creature' }], source: 'model' },
