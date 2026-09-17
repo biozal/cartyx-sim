@@ -117,7 +117,8 @@ export async function makeScript(options: ScriptOptions): Promise<ScriptResult> 
   let eventsSha256: string;
   try {
     events = await sink.readAll();
-    eventsSha256 = sink.lastReadSha256!;
+    if (sink.lastReadSha256 === undefined) throw new Error(`No event log at ${eventsPath}.`);
+    eventsSha256 = sink.lastReadSha256;
     if (sink.tornTail) {
       log(
         `Ignoring an incomplete final line (line ${sink.tornTail.line}) left by an interrupted ` +

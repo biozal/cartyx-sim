@@ -123,6 +123,18 @@ describe('splitSpeech direction rule', () => {
     ]);
   });
 
+  it('drops a short first-person action with a prepositional tail', () => {
+    const raw = '"Over here." I glance at Bram.';
+    const split = splitSpeech(raw);
+    expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual(['I glance at Bram.']);
+  });
+
+  it('drops a first-person action with a direction word and an adverb', () => {
+    const raw = '"Back." I step back slowly.';
+    const split = splitSpeech(raw);
+    expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual(['I step back slowly.']);
+  });
+
   it.each([
     'Aye, the "old road" is safer.',
     'I think "Stay back" is wise.',
@@ -131,6 +143,24 @@ describe('splitSpeech direction rule', () => {
     'I nod. "Fine." We should move before dark.',
     'I nod slowly. "Stay back," I say. "Now',
   ])('keeps %j whole', (raw) => {
+    expect(spoken(raw).directions).toEqual([]);
+    expect(spoken(raw).lines).toHaveLength(1);
+  });
+
+  it.each([
+    '"Captain." He asked for you by name, and he said it was urgent.',
+    '"Listen." They say the old mine is haunted.',
+    '"Enough!" I say we go now.',
+    '"Fine." I nod; we should leave before the guards return.',
+    '"Fine." I nod — we should leave before the guards return.',
+    '"Fine." I nod\nWe should leave before the guards return.',
+    '"Run!" I point at the ridge, they are coming from there!',
+    '"Fine." I look forward to it.',
+    '"Deal." I raise you ten gold.',
+    '"No." I draw the line at murder.',
+    '"Go." I nod to you and we should go now.',
+    '"Wait." I glance at Bram, then we run.',
+  ])('keeps %j whole (a clause that runs on into real speech)', (raw) => {
     expect(spoken(raw).directions).toEqual([]);
     expect(spoken(raw).lines).toHaveLength(1);
   });

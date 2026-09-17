@@ -15,14 +15,24 @@ function isHiddenStats(id: string, state: GameState): boolean {
 /** How an HP value moved, without exposing the numbers themselves. */
 export type HpTrend = 'down' | 'wounded' | 'recovers' | 'unchanged' | 'unknown';
 
+const NUMERIC_STRING = /^\s*-?\d+(\.\d+)?\s*$/;
+
+/** Whether `value` is a finite number, or a string that reads as one (`Number` also accepts `true`,
+ * `null`, `[]`, hex, and whitespace-only strings as numbers, which are not HP values). */
+function asNumber(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value === 'string' && NUMERIC_STRING.test(value)) return Number(value);
+  return undefined;
+}
+
 /**
  * Compares two HP values coarsely: `unknown` when either is not a finite number, `down` when
  * `after` is at or below zero, `wounded` for a drop, `recovers` for a rise, else `unchanged`.
  */
 export function hpTrend(before: unknown, after: unknown): HpTrend {
-  const from = Number(before);
-  const to = Number(after);
-  if (!Number.isFinite(from) || !Number.isFinite(to)) return 'unknown';
+  const from = asNumber(before);
+  const to = asNumber(after);
+  if (from === undefined || to === undefined) return 'unknown';
   if (to <= 0) return 'down';
   if (to < from) return 'wounded';
   if (to > from) return 'recovers';

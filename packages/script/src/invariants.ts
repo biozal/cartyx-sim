@@ -47,6 +47,7 @@ export function invariantViolations(script: ScriptFile, events: readonly SimEven
     const text = sourceText(bySeq.get(span.seq));
     const valid =
       text !== undefined &&
+      span.start >= 0 &&
       span.start <= span.end &&
       span.end <= text.length &&
       span.text === text.slice(span.start, span.end);

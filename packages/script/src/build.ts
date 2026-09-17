@@ -133,10 +133,8 @@ class ScriptBuilder {
         this.descriptions.set(event.npcId, event.description);
         if (!this.sceneNpcs.includes(event.npcId)) this.sceneNpcs.push(event.npcId);
         this.speakers.promote(event.npcId, event.name);
-        const labelIndex = this.newLabels.findIndex(
-          (label) => `npc-${slugify(label)}` === event.npcId
-        );
-        if (labelIndex !== -1) this.newLabels.splice(labelIndex, 1);
+        const kept = this.newLabels.filter((label) => `npc-${slugify(label)}` !== event.npcId);
+        this.newLabels.splice(0, this.newLabels.length, ...kept);
       }
       if (event.visibility === 'public') await this.add(event);
     }

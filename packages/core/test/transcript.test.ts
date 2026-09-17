@@ -272,4 +272,10 @@ describe('hpTrend', () => {
     expect(hpTrend(3, -2)).toBe('down');
     expect(hpTrend('x', 3)).toBe('unknown');
   });
+
+  it('accepts a numeric string but rejects other values Number() would coerce', () => {
+    expect(hpTrend('7', '3')).toBe('wounded');
+    expect(hpTrend(5, null)).toBe('unknown');
+    expect(hpTrend(true, 1)).toBe('unknown');
+  });
 });

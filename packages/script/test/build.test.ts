@@ -1,5 +1,6 @@
 import { makeCombatant } from '@cartyx-sim/rules/testing';
 import { describe, expect, it } from 'vitest';
+import type { LabelResult } from '../src/attribution';
 import { buildScript } from '../src/build';
 import { isVoiced, ScriptError, type ScriptFile } from '../src/schema';
 import { eventLog, FakeLabeler, KIRA, narration, SHA, TOMAS } from './helpers';
@@ -266,6 +267,30 @@ describe('buildScript', () => {
       true
     );
     expect(labeler.requests[1]!.newLabels).not.toContain('the warden');
+  });
+
+  it('drops every new label that slugifies to a promoted NPC, not just the first', async () => {
+    const answers: LabelResult[] = [
+      { labels: [{ kind: 'new', label: 'Faceless Creature' }], source: 'model' },
+      { labels: [{ kind: 'new', label: 'faceless creature' }], source: 'model' },
+      { labels: [{ kind: 'npc', id: 'npc-faceless-creature' }], source: 'model' },
+    ];
+    let call = 0;
+    const labeler = new FakeLabeler(() => answers[call++]!);
+    const events = eventLog([
+      narration('"Leave," it says.'),
+      narration('"Now," it says.'),
+      {
+        type: 'npc_introduced',
+        npcId: 'npc-faceless-creature',
+        name: 'The Faceless',
+        description: 'No face',
+        invented: true,
+      },
+      narration('"Go," it says.'),
+    ]);
+    await build(events, { labeler });
+    expect(labeler.requests[2]!.newLabels).toEqual([]);
   });
 
   it('attributes quotes by rules without a labeler, and says why when the labeler fails', async () => {

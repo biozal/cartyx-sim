@@ -75,6 +75,23 @@ describe('invariantViolations', () => {
     );
   });
 
+  it('reports a dropped span with a negative start even when the negative-index slice matches', async () => {
+    const script = await built();
+    const line = script.lines.find(
+      (candidate): candidate is VoicedLine => 'dropped' in candidate && !!candidate.dropped?.length
+    )!;
+    const span = line.dropped![0]!;
+    const event = EVENTS.find((candidate) => candidate.seq === span.seq)!;
+    const sourceLength =
+      event.type === 'narration' || event.type === 'dialogue' ? event.text.length : 0;
+    // A negative start this far below zero maps to the same non-negative index, so
+    // `text.slice(span.start, span.end)` still equals `span.text` by coincidence.
+    span.start -= sourceLength;
+    expect(invariantViolations(script, EVENTS)).toContain(
+      `${line.id}: dropped span ${span.seq}:${span.start}-${span.end} does not match its source`
+    );
+  });
+
   it('reports a line whose source points at a non-public event', async () => {
     const log = eventLog([
       narration('The gate creaks.'),
