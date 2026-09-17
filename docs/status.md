@@ -124,7 +124,8 @@ The full list is in the roadmap's Backlog section. Highlights:
   - `sim bench` checks fallback targets;
   - backstop limits exposed in `campaign.json`;
   - player prompts that keep stage directions out of `speak` (kira mixes them into quoted lines);
-  - a `sim bench` tool trial realistic enough to expose thinking overflow (the dice-roll trial passes models that fail on real turns).
+  - a `sim bench` tool trial realistic enough to expose thinking overflow (the dice-roll trial passes models that fail on real turns);
+  - the script's quote-majority split can drop outside text that is speech (`"Who scouts first tonight?" We send Molly.`); consider applying the direction rule's clause check there too, after reviewing real sessions.
 - **Unscheduled:**
   - director-side response validation retries the primary, not the fallbacks;
   - `ModelRequest.signal` is never set;

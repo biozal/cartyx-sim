@@ -129,10 +129,26 @@ describe('splitSpeech direction rule', () => {
     expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual(['I glance at Bram.']);
   });
 
-  it('drops a first-person action with a direction word and an adverb', () => {
-    const raw = '"Back." I step back slowly.';
+  it('drops a short first-person action with a target and an adverb', () => {
+    const raw = '"Down!" I say sharply, pointing at the ridge.';
     const split = splitSpeech(raw);
-    expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual(['I step back slowly.']);
+    expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual([
+      'I say sharply, pointing at the ridge.',
+    ]);
+  });
+
+  it('drops a bare first-person action', () => {
+    const raw = '"Fine." I sigh.';
+    const split = splitSpeech(raw);
+    expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual(['I sigh.']);
+  });
+
+  it('drops a first-person action with a target noun phrase', () => {
+    const raw = '"Quiet." I glance toward the door.';
+    const split = splitSpeech(raw);
+    expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual([
+      'I glance toward the door.',
+    ]);
   });
 
   it.each([
@@ -161,6 +177,47 @@ describe('splitSpeech direction rule', () => {
     '"Go." I nod to you and we should go now.',
     '"Wait." I glance at Bram, then we run.',
   ])('keeps %j whole (a clause that runs on into real speech)', (raw) => {
+    expect(spoken(raw).directions).toEqual([]);
+    expect(spoken(raw).lines).toHaveLength(1);
+  });
+
+  // "step" and "lean" are no longer action verbs (round 2): both take a direction word too
+  // easily mistaken for a real target, so this round-1 split case is now kept whole.
+  it('keeps a removed action verb whole even with an adverb', () => {
+    expect(spoken('"Back." I step back slowly.')).toEqual({
+      lines: ['Back. I step back slowly.'],
+      directions: [],
+    });
+  });
+
+  it.each([
+    '"Enough." I say, bring the rope.',
+    '"Go." I say, nothing.',
+    '"Listen." I say, something is wrong with the well.',
+    '"Fine." I say, Sterling takes first watch.',
+    '"Fine." I nod, morning it is.',
+    '"Go." I whisper, darling we have to run.',
+    '"Go." I nod, King Aldric wants us gone and so do I.',
+    '“Go.” I nod, bring the rope.',
+    '"Go." I say, meaning we leave at dawn and nobody argues.',
+    '"Go." They said, burning the maps is our only option.',
+    '"Go." I say it, knowing full well we die here.',
+    '"Go." I nod, knowing we have to leave now and you should too.',
+    '"Go." I say Molly.',
+    '"Go." I reply early.',
+    '"Go." I say only.',
+    '"Go." I call it early.',
+    '"Which way?" I lean toward the east road.',
+    '"Fine." I lean towards mercy.',
+    '"Enough." I step down as captain.',
+    '"Fine." I step up to the plate.',
+    '"Deal." I step away from the deal.',
+    '"Enough." I step up I\'m going first.',
+    '"Go." I step in we go now.',
+    '"Fine." I nod back and we go.',
+    '"Fine." I nod to say yes.',
+    '"Go." I say, drawing my blade and we go now.',
+  ])('keeps %j whole (round 2: closed-list probe)', (raw) => {
     expect(spoken(raw).directions).toEqual([]);
     expect(spoken(raw).lines).toHaveLength(1);
   });

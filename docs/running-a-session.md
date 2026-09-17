@@ -148,7 +148,7 @@ The labeling seat is `seats.script` in `campaign.json` when present, otherwise `
 }
 ```
 
-Model answers are cached in `sessions/NNN/.script-cache/`, so re-running is free and gives the same result. `--refresh` asks the model again. When a fallback model answers instead of the primary (the seat's endpoint has one configured), its reply is cached under the fallback's own key, never the primary's; a later rerun still asks the primary first, so a real answer from it is never shadowed by a cached fallback reply. With `--no-model`, or a campaign with no `script` or `checker` seat, nothing labels quotes, so `--refresh` has no effect; it prints a line saying so rather than silently doing nothing.
+Model answers are cached in `sessions/NNN/.script-cache/`, so re-running is free and gives the same result. `--refresh` asks the model again. When a fallback model answers instead of the primary (`fallbacks` is configured on the seat, not the endpoint), its reply is cached under the fallback's own key, never the primary's; a later rerun still asks the primary first, so a real answer from it is never shadowed by a cached fallback reply. With `--no-model`, or a campaign with no `script` or `checker` seat, nothing labels quotes, so `--refresh` has no effect; it prints a line saying so rather than silently doing nothing.
 
 `script.md`'s header names the event log it was built from: `` - Events: `<first 12 hex chars of eventsSha256>` ``, matching `script.json`'s `eventsSha256`. A script rebuilt from the same log always shows the same hash; a different one means the log changed underneath it.
 
