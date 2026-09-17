@@ -147,10 +147,19 @@ export const recordInvention = defineTool({
   parameters: z.object({
     fact: z.string().trim().min(1).max(2000),
     reason: z.string().trim().min(1).max(2000),
-    query: z.string().trim().min(1).max(200).optional(),
   }),
   run(args, { recorder }) {
-    recorder.emit({ type: 'lore_invention', visibility: 'dm', ...args });
+    // The query is the engine's own, not the model's: attaching whatever the model last searched
+    // for produced a stale query on an invention that had nothing to do with it. `recorder.events`
+    // holds only this turn, so a lookup from an earlier turn never lingers here either.
+    const lookup = recorder.events.findLast((event) => event.type === 'lore_lookup');
+    recorder.emit({
+      type: 'lore_invention',
+      visibility: 'dm',
+      fact: args.fact,
+      reason: args.reason,
+      ...(lookup ? { query: lookup.query } : {}),
+    });
     return { result: 'Recorded.' };
   },
 });

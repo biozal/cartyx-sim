@@ -275,6 +275,34 @@ describe('buildScript', () => {
     expect(labeler.requests[1]!.newLabels).not.toContain('the warden');
   });
 
+  it('merges a new: label into its npc_introduced NPC even when the introduced id keeps a leading article', async () => {
+    const labeler = new FakeLabeler((request) =>
+      request.seq === 1
+        ? { labels: [{ kind: 'new', label: 'innkeeper' }], source: 'model' }
+        : { labels: [{ kind: 'npc', id: 'npc-the-innkeeper' }], source: 'model' }
+    );
+    const events = eventLog([
+      narration('"Rooms are two silver," the innkeeper says.'),
+      {
+        type: 'npc_introduced',
+        npcId: 'npc-the-innkeeper',
+        name: 'The Innkeeper',
+        description: 'Runs the Gilded Griffin',
+        invented: true,
+      },
+      narration('"Welcome back," the innkeeper says.'),
+    ]);
+    const { script } = await build(events, { labeler });
+    expect(script.speakers.filter((speaker) => speaker.name.includes('Innkeeper'))).toEqual([
+      { id: 'npc-the-innkeeper', name: 'The Innkeeper', kind: 'npc' },
+    ]);
+    const dialogueLines = script.lines.filter((line) => isVoiced(line) && line.kind === 'dialogue');
+    expect(dialogueLines).toHaveLength(2);
+    expect(
+      dialogueLines.every((line) => isVoiced(line) && line.speaker === 'npc-the-innkeeper')
+    ).toBe(true);
+  });
+
   it('drops every new label that slugifies to a promoted NPC, not just the first', async () => {
     const answers: LabelResult[] = [
       { labels: [{ kind: 'new', label: 'Faceless Creature' }], source: 'model' },
@@ -370,6 +398,40 @@ describe('buildScript', () => {
     ]);
     expect(labeler.requests[1]!.newLabels).toEqual(['faceless creature']);
     expect(stats.labels.cache).toBe(2);
+  });
+
+  it('lists non-PC combatants in the label request, after introduced NPCs, so a monster line is attributed to it', async () => {
+    const mercenary = makeCombatant({
+      id: 'overhang-mercenary-1-1',
+      name: 'Overhang Mercenary',
+      kind: 'monster',
+    });
+    const events = eventLog([
+      { type: 'combatant_added', combatant: mercenary },
+      {
+        type: 'npc_introduced',
+        npcId: 'npc-warden',
+        name: 'The Warden',
+        description: 'A stone guardian',
+        invented: true,
+      },
+      narration('"Get back!" the mercenary shouts.'),
+    ]);
+    const labeler = new FakeLabeler(() => ({
+      labels: [{ kind: 'npc', id: 'overhang-mercenary-1-1' }],
+      source: 'model',
+    }));
+    const { script } = await build(events, { labeler });
+    expect(labeler.requests[0]!.npcs).toEqual([
+      { id: 'npc-warden', name: 'The Warden', description: 'A stone guardian' },
+      {
+        id: 'overhang-mercenary-1-1',
+        name: 'Overhang Mercenary',
+        description: 'a combatant in this fight',
+      },
+    ]);
+    const dialogueLine = script.lines.find((line) => isVoiced(line) && line.kind === 'dialogue');
+    expect(dialogueLine).toMatchObject({ speaker: 'overhang-mercenary-1-1', text: 'Get back!' });
   });
 
   it('keeps DM-written PC dialogue in the DM voice with a flag', async () => {

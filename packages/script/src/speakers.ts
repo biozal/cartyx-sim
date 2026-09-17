@@ -37,22 +37,48 @@ export class SpeakerTable {
 
   /**
    * Turns an unlisted NPC into a listed one named `name`, keeping its position in the table.
-   * Does nothing if `id` is not an unlisted speaker.
+   * Matches `id` exactly first; failing that, an unlisted id that differs from it only by a
+   * leading article (`npc-innkeeper` vs. `npc-the-innkeeper`), since a `new:` label and a later
+   * introduction often name the same NPC with or without one. Does nothing if neither matches.
+   * Returns the id of the unlisted entry that was renamed to `id`, so the caller can move its
+   * already-drafted lines too, or undefined when nothing changed (including the exact-id case,
+   * where the id was already right).
    */
-  promote(id: string, name: string): void {
-    const speaker = this.byId.get(id);
-    if (!speaker?.unlisted) return;
-    const entries = [...this.byId.entries()].map(([key, value]): [string, Speaker] =>
-      key === id ? [key, { id, name, kind: 'npc' }] : [key, value]
+  promote(id: string, name: string): string | undefined {
+    const exact = this.byId.get(id);
+    if (exact) {
+      if (!exact.unlisted) return undefined;
+      this.replace(id, id, name);
+      return undefined;
+    }
+    const normalized = withoutArticle(id);
+    const match = [...this.byId.entries()].find(
+      ([otherId, other]) => other.unlisted && withoutArticle(otherId) === normalized
+    );
+    if (!match) return undefined;
+    const [oldId] = match;
+    this.replace(oldId, id, name);
+    return oldId;
+  }
+
+  /** Replaces the entry at `key` with a listed NPC `id`/`name`, keeping its position. */
+  private replace(key: string, id: string, name: string): void {
+    const entries = [...this.byId.entries()].map(([entryKey, value]): [string, Speaker] =>
+      entryKey === key ? [id, { id, name, kind: 'npc' }] : [entryKey, value]
     );
     this.byId.clear();
-    for (const [key, value] of entries) this.byId.set(key, value);
+    for (const [entryKey, value] of entries) this.byId.set(entryKey, value);
   }
 
   private add(speaker: Speaker): string {
     if (!this.byId.has(speaker.id)) this.byId.set(speaker.id, speaker);
     return speaker.id;
   }
+}
+
+/** Strips a leading "the/a/an" article from an "npc-" id, to match ids that name the same NPC. */
+function withoutArticle(id: string): string {
+  return id.replace(/^npc-(the|a|an)-/, 'npc-');
 }
 
 function fail(message: string): never {

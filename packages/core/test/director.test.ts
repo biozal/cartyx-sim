@@ -1285,6 +1285,13 @@ describe('Director', () => {
       { rule: 'tool_error', retries: 1, resolution: 're_prompted' },
     ]);
     expect(sink.events.some((e) => e.type === 'action')).toBe(false);
+    expect(sink.events.filter((e) => e.type === 'ooc_note')).toMatchObject([
+      {
+        text: expect.stringContaining(
+          'Tool error (declare_spell): You have no level 2 spell slots'
+        ),
+      },
+    ]);
     const kiraRequests = model.requests.filter((r) => r.seat === 'player-kira');
     expect(kiraRequests).toHaveLength(2);
     expect(kiraRequests[1]!.messages.at(-1)).toMatchObject({
@@ -1631,6 +1638,11 @@ describe('Director', () => {
       },
       { type: 'turn_end', actor: 'tomas' },
     ]);
+    expect(sink.events.filter((e) => e.type === 'ooc_note')).toMatchObject(
+      Array.from({ length: 3 }, () => ({
+        text: expect.stringContaining('Invalid tool call (unknown_tool): Unknown tool'),
+      }))
+    );
   });
 
   it('G5.7: a text-only player reply becomes a dialogue event', async () => {

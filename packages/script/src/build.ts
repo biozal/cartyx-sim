@@ -100,7 +100,6 @@ class ScriptBuilder {
   readonly counts = { model: 0, cache: 0, fallback: 0, stageDirections: 0 };
   private state: GameState = initialState();
   private readonly party: { id: string; name: string }[];
-  private readonly descriptions = new Map<string, string>();
   private sceneNpcs: string[] = [];
   private readonly newLabels: string[] = [];
 
@@ -130,9 +129,9 @@ class ScriptBuilder {
       pauses.length = 0;
       if (event.type === 'scene_change') this.sceneNpcs = [];
       if (event.type === 'npc_introduced') {
-        this.descriptions.set(event.npcId, event.description);
         if (!this.sceneNpcs.includes(event.npcId)) this.sceneNpcs.push(event.npcId);
-        this.speakers.promote(event.npcId, event.name);
+        const promotedFrom = this.speakers.promote(event.npcId, event.name);
+        if (promotedFrom) this.renameSpeaker(promotedFrom, event.npcId);
         const kept = this.newLabels.filter((label) => `npc-${slugify(label)}` !== event.npcId);
         this.newLabels.splice(0, this.newLabels.length, ...kept);
       }
@@ -142,6 +141,16 @@ class ScriptBuilder {
 
   private push(line: LineDraft, overlapsSeq?: number): void {
     this.drafts.push(overlapsSeq === undefined ? { line } : { line, overlapsSeq });
+  }
+
+  /**
+   * After `promote` renames an unlisted speaker's id to an introduced NPC's id, moves that
+   * speaker's already-drafted lines to the new id too, so the script ends up with one speaker.
+   */
+  private renameSpeaker(from: string, to: string): void {
+    for (const draft of this.drafts) {
+      if ('speaker' in draft.line && draft.line.speaker === from) draft.line.speaker = to;
+    }
   }
 
   private async add(event: SimEvent): Promise<void> {
@@ -304,11 +313,22 @@ class ScriptBuilder {
       seq,
       narration: segmented.promptText,
       quotes: segmented.quotes.map((quote) => quote.text),
-      npcs: Object.values(this.state.npcs).map((npc) => ({
-        id: npc.npcId,
-        name: npc.name,
-        description: this.descriptions.get(npc.npcId) ?? '',
-      })),
+      // Introduced NPCs first, then other combatants (monsters, and NPCs fighting alongside the
+      // party), so a line a monster speaks is attributed to it instead of a new unlisted speaker.
+      npcs: [
+        ...Object.values(this.state.npcs).map((npc) => ({
+          id: npc.npcId,
+          name: npc.name,
+          description: npc.description ?? '',
+        })),
+        ...Object.values(this.state.combatants)
+          .filter((combatant) => combatant.kind !== 'pc')
+          .map((combatant) => ({
+            id: combatant.id,
+            name: combatant.name,
+            description: 'a combatant in this fight',
+          })),
+      ],
       pcs: this.party.map((pc) => ({ ...pc })),
       newLabels: [...this.newLabels],
     };

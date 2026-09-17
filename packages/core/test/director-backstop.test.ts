@@ -345,6 +345,13 @@ describe('DM validator flags', () => {
       expect.objectContaining({ rule: 'invalid_tool_call', resolution: 're_prompted' }),
       expect.objectContaining({ rule: 'tool_error', resolution: 're_prompted' }),
     ]);
+    const notes = sink.events
+      .filter((event) => event.type === 'ooc_note')
+      .map((event) => event.text);
+    expect(notes).toEqual([
+      expect.stringContaining('Invalid tool call (narrate): Invalid arguments for narrate'),
+      expect.stringContaining('Tool error (npc_say): Unknown npcId "npc-nobody"'),
+    ]);
   });
 
   it('flags accepted_with_flag only after the accepted tool actually succeeds', async () => {

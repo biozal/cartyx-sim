@@ -590,6 +590,12 @@ export class Director {
         if (!prepared.ok) {
           messages.push(toolMessage(call, prepared.error));
           this.flag(recorder, seat, 'invalid_tool_call', rejections, 're_prompted');
+          // Kept for review: the model only sees this in a tool message, not the committed log.
+          recorder.emit({
+            type: 'ooc_note',
+            visibility: 'dm',
+            text: `Invalid tool call (${call.name}): ${prepared.error}`,
+          });
           noteProseHandOff(handOffProse, call, prepared.error);
           skipRest = true;
           continue;
@@ -765,6 +771,12 @@ export class Director {
         if (!execution.ok) {
           messages.push(toolMessage(call, `Error: ${execution.error}`));
           this.flag(recorder, seat, 'tool_error', rejections, 're_prompted');
+          // Kept for review: the model only sees this in a tool message, not the committed log.
+          recorder.emit({
+            type: 'ooc_note',
+            visibility: 'dm',
+            text: `Tool error (${call.name}): ${execution.error}`,
+          });
           noteProseHandOff(handOffProse, call, execution.error);
           skipRest = true;
           continue;
@@ -850,6 +862,12 @@ export class Director {
         const prepared = prepareToolCall(call, PLAYER_TOOLS);
         if (!prepared.ok) {
           problems.push({ rule: 'invalid_tool_call', message: prepared.error });
+          // Kept for review: the model only sees this in a tool message, not the committed log.
+          recorder.emit({
+            type: 'ooc_note',
+            visibility: 'dm',
+            text: `Invalid tool call (${call.name}): ${prepared.error}`,
+          });
           continue;
         }
         const text = prepared.def.narrativeText?.(prepared.args);
@@ -883,10 +901,12 @@ export class Director {
       // re-prompted above), so a checkpoint here brackets exactly this attempt's accepted calls.
       const checkpoint = recorder.checkpoint();
       let tookTurn = false;
+      const toolErrors: { name: string; message: string }[] = [];
       for (const item of accepted) {
         const execution = await runPreparedCall(item.def, item.args, context);
         if (!execution.ok) {
           problems.push({ rule: 'tool_error', message: execution.error });
+          toolErrors.push({ name: item.def.name, message: execution.error });
           continue;
         }
         if (TURN_ACTION_TOOL_NAMES.has(item.def.name)) tookTurn = true;
@@ -894,14 +914,17 @@ export class Director {
 
       const executionFailed = problems.some((problem) => problem.rule === 'tool_error');
       if (executionFailed && attempt < this.maxValidatorRetries) {
-        // Roll back so none of this attempt's successful calls leave events behind, then send
-        // the error back to the model and re-prompt instead of forcing a pass.
+        // Roll back so none of this attempt's successful calls leave events behind, then log the
+        // errors (after the rollback, so the notes survive it) and re-prompt instead of forcing a
+        // pass.
         recorder.rollback(checkpoint);
+        this.logToolErrors(recorder, toolErrors);
         const summary = problems.map((problem) => `${problem.rule}: ${problem.message}`).join(' ');
         for (const call of calls) messages.push(toolMessage(call, `Not executed. ${summary}`));
         this.flag(recorder, seat, ruleList(problems), attempt + 1, 're_prompted');
         continue;
       }
+      this.logToolErrors(recorder, toolErrors);
 
       if (problems.length > 0) {
         this.flag(
@@ -940,6 +963,20 @@ export class Director {
   private logCheckerReply(recorder: TurnRecorder, reply: string | undefined): void {
     if (reply !== undefined && reply.trim() !== '') {
       recorder.emit({ type: 'ooc_note', visibility: 'dm', text: `Checker reply: ${reply}` });
+    }
+  }
+
+  /** Kept for review, DM-only: one tool error's message. Callers log this after any rollback. */
+  private logToolErrors(
+    recorder: TurnRecorder,
+    errors: readonly { name: string; message: string }[]
+  ): void {
+    for (const error of errors) {
+      recorder.emit({
+        type: 'ooc_note',
+        visibility: 'dm',
+        text: `Tool error (${error.name}): ${error.message}`,
+      });
     }
   }
 

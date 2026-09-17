@@ -290,6 +290,49 @@ describe('record_invention', () => {
     });
     expect(harness.recorder.events[0]).toMatchObject({ type: 'lore_invention', visibility: 'dm' });
   });
+
+  it('attaches the query of a lore lookup earlier this turn', async () => {
+    const harness = toolHarness();
+    await harness.run(lookupLore, { query: 'Echor airship defenses' });
+    await harness.run(recordInvention, {
+      fact: 'Echor airships carry no weapons.',
+      reason: 'not in lore',
+    });
+    expect(harness.recorder.events[1]).toMatchObject({
+      type: 'lore_invention',
+      query: 'Echor airship defenses',
+    });
+  });
+
+  it('leaves the query out when nothing was looked up this turn', async () => {
+    // A fresh recorder (a new turn/beat) holds none of a prior turn's events, so a lookup from
+    // before this beat never lingers here.
+    const harness = toolHarness();
+    await harness.run(recordInvention, {
+      fact: 'Engine three is named Marigold.',
+      reason: 'not in lore',
+    });
+    expect(harness.recorder.events[0]).not.toHaveProperty('query');
+  });
+
+  it('ignores a query the model supplies, deriving it from the turn instead', async () => {
+    const harness = toolHarness();
+    await harness.run(recordInvention, {
+      fact: 'Engine three is named Marigold.',
+      reason: 'not in lore',
+      query: 'a stale query from a different turn',
+    });
+    expect(harness.recorder.events[0]).not.toHaveProperty('query');
+  });
+
+  it('no longer publishes a query parameter to the model', () => {
+    expect(toToolSchema(recordInvention).parameters).toMatchObject({
+      required: ['fact', 'reason'],
+    });
+    const properties = (toToolSchema(recordInvention).parameters as { properties: object })
+      .properties;
+    expect(properties).not.toHaveProperty('query');
+  });
 });
 
 describe('id lookups reject built-in property names', () => {
