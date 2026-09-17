@@ -129,7 +129,7 @@ describe('splitSpeech direction rule', () => {
     expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual(['I glance at Bram.']);
   });
 
-  it('drops a short first-person action with a target and an adverb', () => {
+  it('drops a first-person speech tag with an adverb and a participle object', () => {
     const raw = '"Down!" I say sharply, pointing at the ridge.';
     const split = splitSpeech(raw);
     expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual([
@@ -218,6 +218,55 @@ describe('splitSpeech direction rule', () => {
     '"Fine." I nod to say yes.',
     '"Go." I say, drawing my blade and we go now.',
   ])('keeps %j whole (round 2: closed-list probe)', (raw) => {
+    expect(spoken(raw).directions).toEqual([]);
+    expect(spoken(raw).lines).toHaveLength(1);
+  });
+
+  it('drops a bare action with a particle participle', () => {
+    const raw = '"Go." I nod, holding still.';
+    const split = splitSpeech(raw);
+    expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual([
+      'I nod, holding still.',
+    ]);
+  });
+
+  it('drops a speech tag with a particle participle', () => {
+    const raw = '"Back." I say, stepping back.';
+    const split = splitSpeech(raw);
+    expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual([
+      'I say, stepping back.',
+    ]);
+  });
+
+  it("doesn't swallow a trailing adverb into a TARGET (the round-2 greedy-TARGET bug)", () => {
+    const raw = '"Now." I glance at Bram quietly.';
+    const split = splitSpeech(raw);
+    expect(split.directions.map((r) => raw.slice(r.start, r.end))).toEqual([
+      'I glance at Bram quietly.',
+    ]);
+  });
+
+  it.each([
+    '"Enough." I say, holding this bridge costs too many lives.',
+    '"Fine." I nod, moving camp tonight makes sense.',
+    '"Go." I say, looking back gets people killed.',
+    '"Go." I say, turning back now means death.',
+    '"Wait." I say, keeping watch beats sleeping.',
+    '"Now." I say, pointing north run for the trees.',
+    '"Go." They said, looking at the old mine people vanish.',
+    '"Go." I nod, looking toward the hills where the smoke rises tonight.',
+    '"Go." I nod, looking back I’m right behind.',
+    '"Go." I say, pointing north it’s our only road.',
+    '"Go." I say, pointing north we’re leaving tonight.',
+    '"Go." I say, pointing north let’s move.',
+    '“Go.” I nod, looking back you’re next.',
+    '"Go." I say, pointing north we\'ll regroup at the ford.',
+    '"Go." I say, pointing north they\'ll never follow.',
+    '"Go." I say, pointing north we\'d better hurry.',
+    '"Go." I nod, looking back we...go now.',
+    '"Go." I say, pointing north that\'s the last of them.',
+    '"Go." I say, pointing north don\'t let them through.',
+  ])('keeps %j whole (round 3: no free-form participle tail)', (raw) => {
     expect(spoken(raw).directions).toEqual([]);
     expect(spoken(raw).lines).toHaveLength(1);
   });
