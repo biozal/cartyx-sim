@@ -270,6 +270,34 @@ describe('splitSpeech direction rule', () => {
     expect(spoken(raw).directions).toEqual([]);
     expect(spoken(raw).lines).toHaveLength(1);
   });
+
+  it.each([
+    '"Go." I nod, stepping back Why?',
+    '"Go." I nod, stepping back Wait!',
+    '"Go." I nod, looking back Now!',
+    '"Go." I nod, stepping back Agreed.',
+    '"Go." I say, pointing Ready?',
+    '"Go." I nod, stepping back your call.',
+    '"Go." I nod, looking back an ambush!',
+    '"Go." I say, looking back my lord.',
+    '"Who\'s next?" I nod, looking back You.',
+    '"Kira." I glance at Kira, holding up?',
+    '"Well?" I nod to Bram, moving out?',
+    '"Go." I say it, watching you?',
+    '"Options?" I say, keeping the gold.',
+    '"Why are the guards here?" They said, keeping the peace.',
+  ])('keeps %j whole (round 4: open objects need a preposition; questions)', (raw) => {
+    expect(spoken(raw).directions).toEqual([]);
+    expect(spoken(raw).lines).toHaveLength(1);
+  });
+
+  it.each([
+    ['"Go." I glance at her sword.', 'I glance at her sword.'],
+    ['"Go." I nod, stepping in her way.', 'I nod, stepping in her way.'],
+    ['"Go." I nod, watching them.', 'I nod, watching them.'],
+  ])('drops the direction in %j (round 4)', (raw, direction) => {
+    expect(spoken(raw).directions).toEqual([direction]);
+  });
 });
 
 describe('cleanAction', () => {
