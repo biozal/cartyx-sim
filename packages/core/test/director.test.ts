@@ -521,6 +521,52 @@ describe('Director', () => {
     expect(sink.events.filter((e) => e.type === 'hand_off')).toHaveLength(1);
   });
 
+  it('cuts a narration sentence repeating one already narrated this beat, and flags repeated_text', async () => {
+    const { deps: built, sink } = deps({
+      dm: [
+        { text: 'The gate groans open. Rain hammers the stones.', toolCalls: [] },
+        { text: 'Rain hammers the stones. Thunder rolls overhead.', toolCalls: [] },
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration')).toMatchObject([
+      { text: 'The gate groans open. Rain hammers the stones.' },
+      { text: 'Thunder rolls overhead.' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'repeated_text', resolution: 'trimmed' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'ooc_note')).toMatchObject([
+      { visibility: 'dm', text: 'Cut from DM narration (repeated_text): Rain hammers the stones.' },
+    ]);
+  });
+
+  it("rejects a narration that only repeats a player's recent line, and the beat still hands off", async () => {
+    const line = 'We do not have much time before it comes looking.';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })),
+        respond(
+          toolCall('narrate', {
+            text: '"We do not have much time before it comes looking," Tomas warns everyone.',
+          }),
+          toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })
+        ),
+      ],
+      'player-tomas': [respond(toolCall('speak', { text: line }))],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(4);
+    expect(sink.events.some((e) => e.type === 'narration')).toBe(false);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'repeated_text', resolution: 'trimmed' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'hand_off')).toHaveLength(2);
+  });
+
   it('does not speak player prose that arrives alongside a tool call', async () => {
     const { deps: built, sink } = deps({
       dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } }))],

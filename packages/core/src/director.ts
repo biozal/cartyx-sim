@@ -22,6 +22,7 @@ import {
 } from './pc-control';
 import type { PromptBuilder } from './prompts';
 import { TurnRecorder } from './recorder';
+import { cutRepeats } from './repeats';
 import type { EventSink } from './sink';
 import { advanceCombat, foldEvents, isUp, nextActor, ownEntry, type GameState } from './state';
 import {
@@ -236,6 +237,23 @@ function narratedThisBeat(recorder: TurnRecorder, text: string): boolean {
   return recorder.events.some(
     (event) => event.type === 'narration' && collapseWhitespace(event.text) === words
   );
+}
+
+/** Public dialogue lines players spoke since the DM's last turn ended: quoting one back is a repeat. */
+function recentPlayerLines(history: readonly SimEvent[]): string[] {
+  let start = 0;
+  for (let index = history.length - 1; index >= 0; index--) {
+    const event = history[index]!;
+    if (event.type === 'turn_end' && event.actor === 'dm') {
+      start = index + 1;
+      break;
+    }
+  }
+  const lines: string[] = [];
+  for (const event of history.slice(start)) {
+    if (event.type === 'dialogue' && event.visibility === 'public') lines.push(event.text);
+  }
+  return lines;
 }
 
 export class Director {
@@ -708,6 +726,39 @@ export class Director {
             }
             args = { ...(prepared.args as Record<string, unknown>), text: kept };
             removed = ` Removed sentences that played player characters: ${listed}`;
+          }
+        }
+        // Last: cut any sentence that only repeats what this beat already narrated, or quotes a
+        // player's own recent line back at them. Runs after both trims above so it sees their
+        // output, not the model's original draft.
+        if (call.name === 'narrate' && text) {
+          const current = (args as Record<string, unknown>).text as string;
+          const repeats = cutRepeats(current, {
+            narratedThisBeat: recorder.events
+              .filter((event) => event.type === 'narration')
+              .map((event) => event.text),
+            recentPlayerLines: recentPlayerLines(this.history),
+          });
+          if (repeats.removed.length > 0) {
+            const listed = repeats.removed.join(' | ');
+            this.flag(recorder, seat, 'repeated_text', 0, 'trimmed');
+            recorder.emit({
+              type: 'ooc_note',
+              visibility: 'dm',
+              text: `Cut from DM narration (repeated_text): ${listed}`,
+            });
+            if (!repeats.kept) {
+              fullyCutNarrations.add(collapseWhitespace(current));
+              messages.push(
+                toolMessage(
+                  call,
+                  `Not narrated: every sentence repeated text already narrated this turn, or a player's own words. ${listed}`
+                )
+              );
+              continue;
+            }
+            args = { ...(args as Record<string, unknown>), text: repeats.kept };
+            removed += ` Removed repeated sentences: ${listed}`;
           }
         }
         const execution = await runPreparedCall(prepared.def, args, context);

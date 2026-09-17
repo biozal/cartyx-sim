@@ -78,7 +78,7 @@ function matchText(text: string): string {
 }
 
 /** A sentence and the original whitespace that followed it, before the next sentence (or ''). */
-interface SplitSentence {
+export interface SplitSentence {
   sentence: string;
   separator: string;
 }
@@ -89,7 +89,7 @@ interface SplitSentence {
  * sentence, so a caller that rejoins sentences can reproduce the original line breaks instead of
  * always using a single space.
  */
-function splitSentences(paragraph: string): SplitSentence[] {
+export function splitSentences(paragraph: string): SplitSentence[] {
   const parts = paragraph.split(/(?<=[.!?…]["“”‘’')\]]*)(\s+)/);
   const result: SplitSentence[] = [];
   for (let i = 0; i < parts.length; i += 2) {
