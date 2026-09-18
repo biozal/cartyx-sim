@@ -907,7 +907,9 @@ export class Director {
         if (text && REPEAT_CHECKED_TOOL_NAMES.has(prepared.def.name)) {
           const repeats = repeatedSentences(text, earlierLines);
           if (repeats.length > 0) {
-            if (!repeatRePrompted) {
+            // Only re-prompt while the turn still has a retry to spend: without that check the
+            // call would be dropped here and never re-issued, losing the line.
+            if (!repeatRePrompted && attempt < this.maxValidatorRetries) {
               repeatRePrompted = true;
               problems.push({
                 rule: 'player_repeats_self',
@@ -915,8 +917,9 @@ export class Director {
               });
               continue;
             }
-            // Re-prompted once already this turn and it still repeats: speak it as-is (spec: never
-            // drop or trim a player's words) and flag it once the call actually executes below.
+            // No retry left, or re-prompted once already this turn and it still repeats: speak it
+            // as-is (spec: never drop or trim a player's words) and flag it once the call actually
+            // executes below.
             repeatsToFlag = true;
           }
         }
@@ -970,16 +973,17 @@ export class Director {
       }
       this.logToolErrors(recorder, toolErrors);
 
-      if (problems.length > 0) {
+      // An accepted repeat joins whatever else this attempt hit, so its flag is not lost when the
+      // same attempt also had, say, a tool error.
+      const flagged = repeatsToFlag ? [...problems, { rule: 'player_repeats_self' }] : problems;
+      if (flagged.length > 0) {
         this.flag(
           recorder,
           seat,
-          ruleList(problems),
+          ruleList(flagged),
           attempt,
           tookTurn ? 'accepted_with_flag' : 'forced_pass'
         );
-      } else if (repeatsToFlag) {
-        this.flag(recorder, seat, 'player_repeats_self', attempt, 'accepted_with_flag');
       }
       if (!tookTurn) recorder.emit({ type: 'pass', actor: pcId });
       break;
@@ -1159,6 +1163,9 @@ export class Director {
     const base =
       reason === 'resolve'
         ? `${name} has declared their combat action (see recent events). Resolve it with tools, narrate the result, then call hand_off.` +
+          // Not dead code: the cap belongs to combat, and a "resolve" beat outside combat would
+          // otherwise inherit it silently. `nextActor` only asks for one during a fight today, so
+          // the guard keeps that coupling explicit rather than assumed.
           (this.state.combat !== null
             ? " Keep this turn's narration to at most three sentences: what the character's action " +
               'achieves and what it costs. Save detail for scene beats.'
@@ -1227,7 +1234,7 @@ export class Director {
       rng: this.deps.rng,
       lore: { search: (query, limit) => this.searchLore(query, limit) },
       loreThreshold: this.loreThreshold,
-      clockPhase: clockPhase(this.state, this.targetMinutes),
+      clockPhase: () => clockPhase(recorder.state, this.targetMinutes),
       actorId,
       seat,
     };

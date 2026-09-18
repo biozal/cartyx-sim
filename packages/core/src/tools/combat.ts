@@ -27,7 +27,7 @@ export const startCombat = defineTool({
   run(args, { recorder, rng, clockPhase }) {
     const { state } = recorder;
     if (state.combat) throw new ToolError('Combat is already running. Call end_combat first.');
-    if (clockPhase === 'hard_stop') {
+    if (clockPhase() === 'hard_stop') {
       throw new ToolError(
         'Time is up: no new fight can start. Close the scene and call scene_change.'
       );

@@ -56,7 +56,7 @@ export function toolHarness(
     loreThreshold: 0.35,
     actorId,
     seat: options.seat ?? actorId,
-    clockPhase: options.clockPhase ?? 'running',
+    clockPhase: () => options.clockPhase ?? 'running',
   };
   return {
     recorder,

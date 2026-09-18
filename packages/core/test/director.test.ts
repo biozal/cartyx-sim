@@ -703,6 +703,88 @@ describe('Director', () => {
     expect(sink.events.some((e) => e.type === 'validator_flag')).toBe(false);
   });
 
+  it('speaks a repeat found once the turn has spent its retries', async () => {
+    const line = 'My numbers are what you breathe on, same rule as the drip.';
+    const outcome = respond(toolCall('speak', { text: 'I successfully pick the lock.' }));
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+      ],
+      'player-kira': [
+        respond(toolCall('speak', { text: line })),
+        outcome,
+        outcome,
+        respond(toolCall('speak', { text: line })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(5);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([
+      { text: line },
+      { text: line },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'player_narrates_outcome', resolution: 're_prompted' },
+      { rule: 'player_narrates_outcome', resolution: 're_prompted' },
+      { rule: 'player_repeats_self', resolution: 'accepted_with_flag' },
+    ]);
+    expect(sink.events.some((e) => e.type === 'pass')).toBe(false);
+  });
+
+  it('speaks a first repeat when the turn has no retries to spend', async () => {
+    const line = 'My numbers are what you breathe on, same rule as the drip.';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+      ],
+      'player-kira': [
+        respond(toolCall('speak', { text: line })),
+        respond(toolCall('speak', { text: line })),
+      ],
+    });
+    const director = await Director.create(config({ maxValidatorRetries: 0 }), built);
+    await director.run(5);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([
+      { text: line },
+      { text: line },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'player_repeats_self', resolution: 'accepted_with_flag' },
+    ]);
+    expect(sink.events.some((e) => e.type === 'pass')).toBe(false);
+  });
+
+  it('keeps the repeat flag on an attempt that also hit a tool error', async () => {
+    const line = 'My numbers are what you breathe on, same rule as the drip.';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+      ],
+      'player-kira': [
+        respond(toolCall('speak', { text: line })),
+        respond(
+          toolCall('speak', { text: line }),
+          toolCall('declare_spell', { spell: 'Fireball', slotLevel: 3 })
+        ),
+      ],
+    });
+    const director = await Director.create(config({ maxValidatorRetries: 0 }), built);
+    await director.run(5);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([
+      { text: line },
+      { text: line },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'tool_error,player_repeats_self', resolution: 'accepted_with_flag' },
+    ]);
+  });
+
   it('ends at the hard stop even without a scene break', async () => {
     const { deps: built, sink } = deps({
       dm: [
@@ -721,8 +803,9 @@ describe('Director', () => {
     const { deps: built, sink } = deps(
       {
         dm: [
+          // The fight starts before the narration runs the clock out: past the hard stop
+          // `start_combat` refuses, and this is about the session ending mid-fight.
           respond(
-            toolCall('narrate', { text: 'The engines roar to life all around you.' }),
             toolCall('start_combat', {
               monsters: [
                 {
@@ -733,6 +816,7 @@ describe('Director', () => {
                 },
               ],
             }),
+            toolCall('narrate', { text: 'The engines roar to life all around you.' }),
             toolCall('hand_off', { target: { kind: 'party' } })
           ),
         ],
@@ -746,6 +830,34 @@ describe('Director', () => {
       { type: 'session_end', reason: 'hard_stop' },
     ]);
     expect(director.currentState.combat).toBeNull();
+  });
+
+  it('refuses a fight the DM starts after narrating past the hard stop in the same beat', async () => {
+    const { deps: built, sink } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('narrate', {
+              text: 'The engines roar to life all around you, and the brass plates underfoot begin to buckle.',
+            }),
+            toolCall('start_combat', { monsters: [monsterSpec('Goblin')] })
+          ),
+          respond(toolCall('hand_off', { target: { kind: 'party' } })),
+        ],
+      },
+      { rolls: [10, 5, 17] }
+    );
+    const director = await Director.create(config({ targetMinutes: 0.02 }), built);
+    const outcome = await director.run();
+
+    expect(sink.events.some((e) => e.type === 'combat_start')).toBe(false);
+    expect(outcome.status).toBe('ended');
+    expect(sink.events).toContainEqual(
+      expect.objectContaining({
+        type: 'ooc_note',
+        text: 'Tool error (start_combat): Time is up: no new fight can start. Close the scene and call scene_change.',
+      })
+    );
   });
 
   it('pauses when a seat keeps failing and resumes from the log', async () => {
