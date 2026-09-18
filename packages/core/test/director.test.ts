@@ -501,6 +501,39 @@ describe('Director', () => {
     ]);
   });
 
+  it('strips every shape of leaked prompt state from a session-007-style narration, keeping the prose', async () => {
+    const leakLines = [
+      '**Current Status:**',
+      '- Kira: 20/24 HP (Dagger wound)',
+      '- All three Hooded Figures: 11 HP each, AC 12',
+      "[combat] Round 1: Kira Vale's turn",
+      '[hand_off]',
+      '{"target": {"kind": "party"}}',
+    ];
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(
+          toolCall('narrate', {
+            text: `${leakLines.join('\n')}\nThe mercenaries fall back into the alley.`,
+          }),
+          toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })
+        ),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration')).toMatchObject([
+      { text: 'The mercenaries fall back into the alley.' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'dm_state_leak', resolution: 'trimmed', retries: 0 },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'ooc_note')).toMatchObject([
+      { visibility: 'dm', text: `Cut from DM narration (dm_state_leak): ${leakLines.join(' | ')}` },
+    ]);
+  });
+
   it('records no leak trim when the stripped narration is rejected as a duplicate', async () => {
     const leak = 'Kira Vale (id: kira) | HP 24/24, AC 15';
     const { deps: built, sink } = deps({

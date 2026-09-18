@@ -147,12 +147,20 @@ function controlledCharacter(text: string, names: readonly string[]): string | n
 }
 
 // Lines of prompt state that must never reach narration: a combatant's id parenthetical, an HP
-// block, or a bald "whose turn" statement. Checked one line at a time, so surrounding prose that
-// does not match survives.
+// block (either digit order), an AC readout, a bald "whose turn" statement, a transcript tag line
+// (e.g. "[combat]", "[hand_off]"), a hand-off JSON object, or the "Current Status" heading the DM
+// writes above its own status readout. Checked one line at a time, so surrounding prose that does
+// not match survives.
 const STATE_LEAK_PATTERNS = [
   /\(id:\s*[a-z0-9-]+\)/i,
   /\bHP\s+\d+\s*\/\s*\d+/i,
+  /\d+\s*\/\s*\d+\s*HP\b/i,
+  /\bAC\s+\d+\b/i,
   /\bIt is [^.]{1,40}['’]s turn\b/i,
+  /^\s*\[(?:combat|roll|state|scene|npc|lore|invented|hand_off|ooc)\]/i,
+  /^\s*\{.*"(?:target|kind)"\s*:/,
+  /^\s*\*\*Current Status:?\*\*\s*$/i,
+  /^\s*Current Status:?\s*$/i,
 ];
 
 /** The lines of `text` that leak prompt state, in order, or `[]` when none do. */

@@ -123,6 +123,54 @@ describe('validateDmText', () => {
     ])('leaves ordinary narration alone: "%s"', (text) => {
       expect(validateDmText(text, { pcNames, mechanicsToolCalled: false })).toBeNull();
     });
+
+    // Every shape below is taken verbatim from what actually leaked into narration in session 007.
+    it.each([
+      '- Kira: 20/24 HP (Dagger wound)',
+      '- All three Hooded Figures: 11 HP each, AC 12',
+      "[combat] Round 1: Kira Vale's turn",
+      '[hand_off]',
+      '{"target": {"kind": "party"}}',
+      '**Current Status:**',
+      'Current Status:',
+    ])('flags a leaked prompt-state line: "%s"', (text) => {
+      const violation = validateDmText(text, { pcNames, mechanicsToolCalled: false });
+      expect(violation?.rule).toBe('dm_state_leak');
+      expect(violation?.strip).toEqual([text]);
+    });
+
+    it('names every leaked line from a real session-007 narration, leaving the prose out of it', () => {
+      const text = [
+        '**Current Status:**',
+        '- Kira: 20/24 HP (Dagger wound)',
+        '- All three Hooded Figures: 11 HP each, AC 12',
+        '6. Hooded Figure (3)',
+        '7. Kira Vale',
+        'The mercenaries fall back into the alley.',
+        "[combat] Round 1: Kira Vale's turn",
+        '[hand_off]',
+        '{"target": {"kind": "party"}}',
+      ].join('\n');
+      const violation = validateDmText(text, { pcNames, mechanicsToolCalled: false });
+      expect(violation?.rule).toBe('dm_state_leak');
+      expect(violation?.strip).toEqual([
+        '**Current Status:**',
+        '- Kira: 20/24 HP (Dagger wound)',
+        '- All three Hooded Figures: 11 HP each, AC 12',
+        "[combat] Round 1: Kira Vale's turn",
+        '[hand_off]',
+        '{"target": {"kind": "party"}}',
+      ]);
+    });
+
+    it.each([
+      'The room is quiet.',
+      'He wears heavy plate, well cared for.',
+      'She takes a hit and keeps her feet.',
+      'The AC unit rattles.',
+    ])('does not flag prose that merely brushes against a leak pattern: "%s"', (text) => {
+      expect(validateDmText(text, { pcNames, mechanicsToolCalled: false })).toBeNull();
+    });
   });
 
   describe('G4.2: catches past-tense, adverb, vocative, and Unicode PC control', () => {
