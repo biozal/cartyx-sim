@@ -388,6 +388,75 @@ describe('DM player-character control checker', () => {
     });
   });
 
+  it('records no checker trim when the repeats trim then cuts the narration to nothing', async () => {
+    // The first offense is rejected, so the second one is cut rather than rejected again.
+    const { director, sink } = setup({
+      dm: [
+        respond(
+          narrate('The gate groans open.'),
+          narrate('Rain hammers the stones.'),
+          narrate(BAD)
+        ),
+        respond(narrate(`The gate groans open. Rain hammers the stones. ${BAD_SENTENCE}`)),
+        respond(handOffTomas()),
+      ],
+      checker: [CLEAN, CLEAN, flagged(BAD_SENTENCE), flagged(BAD_SENTENCE)],
+    });
+    await playDmBeat(director);
+
+    expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual([
+      'The gate groans open.',
+      'Rain hammers the stones.',
+    ]);
+    // The checker trim never reached narration, so only the repeats full cut is recorded.
+    expect(ofType(sink.events, 'validator_flag')).toMatchObject([
+      { rule: 'dm_controls_pc_checker', resolution: 're_prompted' },
+      { rule: 'repeated_text', resolution: 'trimmed' },
+    ]);
+    const notes = ofType(sink.events, 'ooc_note').map((e) => e.text);
+    expect(notes).toEqual([
+      `Rejected DM draft (dm_controls_pc_checker): ${BAD}`,
+      `Checker reply: ${flaggedText(BAD_SENTENCE)}`,
+      'Cut from DM narration (repeated_text): The gate groans open. | Rain hammers the stones.',
+    ]);
+    expect(ofType(sink.events, 'hand_off')).toHaveLength(1);
+  });
+
+  it('records all three trims, in trim order, when the trimmed narration is narrated', async () => {
+    const leak = 'Kira Vale (id: kira) | HP 24/24, AC 15';
+    // The first offense is rejected, so the second one is cut rather than rejected again.
+    const { director, sink } = setup({
+      dm: [
+        respond(narrate('Rain hammers the stones.'), narrate(BAD)),
+        respond(
+          narrate(`${leak}\nRain hammers the stones. ${BAD} Thunder rolls overhead.`),
+          handOffTomas()
+        ),
+      ],
+      checker: [CLEAN, flagged(BAD_SENTENCE), flagged(BAD_SENTENCE)],
+    });
+    await playDmBeat(director);
+
+    expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual([
+      'Rain hammers the stones.',
+      'The runes pulse. Kira turns to the others. Thunder rolls overhead.',
+    ]);
+    expect(ofType(sink.events, 'validator_flag')).toMatchObject([
+      { rule: 'dm_controls_pc_checker', resolution: 're_prompted' },
+      { rule: 'dm_state_leak', resolution: 'trimmed' },
+      { rule: 'dm_controls_pc_checker', resolution: 'trimmed' },
+      { rule: 'repeated_text', resolution: 'trimmed' },
+    ]);
+    expect(ofType(sink.events, 'ooc_note').map((e) => e.text)).toEqual([
+      `Rejected DM draft (dm_controls_pc_checker): ${BAD}`,
+      `Checker reply: ${flaggedText(BAD_SENTENCE)}`,
+      `Cut from DM narration (dm_state_leak): ${leak}`,
+      `Cut from DM narration (dm_controls_pc_checker): "${BAD_SENTENCE}" (Kira Vale: the player never declared it)`,
+      `Checker reply: ${flaggedText(BAD_SENTENCE)}`,
+      'Cut from DM narration (repeated_text): Rain hammers the stones.',
+    ]);
+  });
+
   it('skips a repeated fully cut narration without calling the checker again', async () => {
     const FULL = 'Kira turns to the others, eyes bright.';
     const { director, model, sink } = setup({

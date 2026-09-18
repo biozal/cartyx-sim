@@ -232,6 +232,16 @@ function stripLeakedLines(text: string, lines: readonly string[]): string {
     .trim();
 }
 
+/** What a checker trim cost a narration, held until the trimmed narration is really narrated. */
+interface CheckerTrim {
+  /** The cut sentences, as the note and the tool message list them. */
+  listed: string;
+  /** Retries the rule already cost this beat, for the flag. */
+  retries: number;
+  /** The checker's raw reply, logged with the note it belongs to. */
+  reply: string | undefined;
+}
+
 /** True when this beat already narrated the same words: some models repeat a line verbatim. */
 function narratedThisBeat(recorder: TurnRecorder, text: string): boolean {
   const words = collapseWhitespace(text);
@@ -606,9 +616,12 @@ export class Director {
         let text = prepared.def.narrativeText?.(prepared.args);
         let args = prepared.args;
         let removed = '';
-        // The lines a state leak cost this narration, held back until the call actually runs:
-        // the stripped text can still be rejected below, and then nothing was cut from narration.
+        // What each trim below cost this narration, held back until the call actually runs: the
+        // trimmed text can still be rejected, or cut to nothing by a later trim, and then nothing
+        // was cut from narration. A trim that cuts everything records itself where it happens.
         let leakTrim: string | null = null;
+        let checkerTrim: CheckerTrim | null = null;
+        let repeatsTrim: string | null = null;
         let violation = text
           ? validateDmText(text, {
               pcNames,
@@ -710,20 +723,10 @@ export class Director {
               rejectDuplicateNarration(call, ALREADY_NARRATED);
               continue;
             }
-            this.flag(
-              recorder,
-              seat,
-              DM_CONTROLS_PC_CHECKER_RULE,
-              pcControlRetried ? 1 : 0,
-              'trimmed'
-            );
-            recorder.emit({
-              type: 'ooc_note',
-              visibility: 'dm',
-              text: `Cut from DM narration (${DM_CONTROLS_PC_CHECKER_RULE}): ${listed}`,
-            });
-            this.logCheckerReply(recorder, reply);
+            const trim: CheckerTrim = { listed, retries: pcControlRetried ? 1 : 0, reply };
             if (!kept) {
+              // Nothing survives for a later trim to cut away: this trim is final here.
+              this.noteCheckerTrim(recorder, seat, trim);
               fullyCutNarrations.add(collapseWhitespace(text));
               messages.push(
                 toolMessage(
@@ -733,6 +736,7 @@ export class Director {
               );
               continue;
             }
+            checkerTrim = trim;
             args = { ...(prepared.args as Record<string, unknown>), text: kept };
             removed += ` Removed sentences that played player characters: ${listed}`;
           }
@@ -750,13 +754,9 @@ export class Director {
           });
           if (repeats.removed.length > 0) {
             const listed = repeats.removed.join(' | ');
-            this.flag(recorder, seat, 'repeated_text', 0, 'trimmed');
-            recorder.emit({
-              type: 'ooc_note',
-              visibility: 'dm',
-              text: `Cut from DM narration (repeated_text): ${listed}`,
-            });
             if (!repeats.kept) {
+              // Nothing survives to narrate, so this trim is final here.
+              this.noteRepeatsTrim(recorder, seat, listed);
               fullyCutNarrations.add(collapseWhitespace(current));
               messages.push(
                 toolMessage(
@@ -766,12 +766,16 @@ export class Director {
               );
               continue;
             }
+            repeatsTrim = listed;
             args = { ...(args as Record<string, unknown>), text: repeats.kept };
             removed += ` Removed repeated sentences: ${listed}`;
           }
         }
-        // The call is past every rejection, so a leak trim above really did reach narration.
+        // The call is past every rejection and every later trim, so the trims above really did
+        // reach narration. They are recorded in the order they cut.
         if (leakTrim !== null) this.noteStateLeak(recorder, seat, leakTrim);
+        if (checkerTrim !== null) this.noteCheckerTrim(recorder, seat, checkerTrim);
+        if (repeatsTrim !== null) this.noteRepeatsTrim(recorder, seat, repeatsTrim);
         const execution = await runPreparedCall(prepared.def, args, context);
         if (!execution.ok) {
           messages.push(toolMessage(call, `Error: ${execution.error}`));
@@ -1003,6 +1007,27 @@ export class Director {
       type: 'ooc_note',
       visibility: 'dm',
       text: `Cut from DM narration (dm_state_leak): ${listed}`,
+    });
+  }
+
+  /** Records a checker trim: the flag, a DM-only note naming the sentences it cut, and the reply. */
+  private noteCheckerTrim(recorder: TurnRecorder, seat: string, trim: CheckerTrim): void {
+    this.flag(recorder, seat, DM_CONTROLS_PC_CHECKER_RULE, trim.retries, 'trimmed');
+    recorder.emit({
+      type: 'ooc_note',
+      visibility: 'dm',
+      text: `Cut from DM narration (${DM_CONTROLS_PC_CHECKER_RULE}): ${trim.listed}`,
+    });
+    this.logCheckerReply(recorder, trim.reply);
+  }
+
+  /** Records a `repeated_text` trim: the flag, and a DM-only note naming the sentences it cut. */
+  private noteRepeatsTrim(recorder: TurnRecorder, seat: string, listed: string): void {
+    this.flag(recorder, seat, 'repeated_text', 0, 'trimmed');
+    recorder.emit({
+      type: 'ooc_note',
+      visibility: 'dm',
+      text: `Cut from DM narration (repeated_text): ${listed}`,
     });
   }
 
