@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1006 tests plus 1 expected failure), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1018 tests plus 1 expected failure), and `npm run format:check` all pass.
 
 ## What works today
 
