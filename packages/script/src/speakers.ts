@@ -62,12 +62,15 @@ export class SpeakerTable {
   }
 
   /**
-   * The id of the listed NPC that `id` names when the two differ only by a leading article
-   * (`npc-innkeeper` against an introduced `npc-the-innkeeper`), or undefined when none does.
-   * The mirror of `promote`: it keeps a `new:` label that arrives after the introduction on the
-   * introduced speaker, instead of splitting a second one off beside it.
+   * The id of the listed NPC that `id` names: `id` itself when it is one, and failing that a
+   * listed NPC whose id differs only by a leading article (`npc-innkeeper` against an introduced
+   * `npc-the-innkeeper`), or undefined when neither is. The mirror of `promote`, exact match
+   * first and all: it keeps a `new:` label that arrives after the introduction on the introduced
+   * speaker, instead of splitting a second one off beside it.
    */
   listedNpc(id: string): string | undefined {
+    const exact = this.byId.get(id);
+    if (exact?.kind === 'npc' && !exact.unlisted) return id;
     const normalized = withoutArticle(id);
     const match = [...this.byId.entries()].find(
       ([otherId, other]) =>

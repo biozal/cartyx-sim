@@ -82,6 +82,26 @@ describe('SpeakerTable.listedNpc', () => {
     expect(speakers.listedNpc('npc-the-innkeeper')).toBe('npc-the-innkeeper');
   });
 
+  it('prefers the exact id over a listed NPC that differs only by an article', () => {
+    const articleFirst = new SpeakerTable(PARTY);
+    articleFirst.npc('npc-the-warden', 'The Warden');
+    articleFirst.npc('npc-warden', 'Warden');
+    expect(articleFirst.listedNpc('npc-warden')).toBe('npc-warden');
+    expect(articleFirst.listedNpc('npc-the-warden')).toBe('npc-the-warden');
+
+    const exactFirst = new SpeakerTable(PARTY);
+    exactFirst.npc('npc-warden', 'Warden');
+    exactFirst.npc('npc-the-warden', 'The Warden');
+    expect(exactFirst.listedNpc('npc-warden')).toBe('npc-warden');
+    expect(exactFirst.listedNpc('npc-the-warden')).toBe('npc-the-warden');
+
+    // An exact id that is only unlisted is no match: the article variant still wins.
+    const unlistedExact = new SpeakerTable(PARTY);
+    unlistedExact.unlisted('npc-warden', 'Warden', 12);
+    unlistedExact.npc('npc-the-warden', 'The Warden');
+    expect(unlistedExact.listedNpc('npc-warden')).toBe('npc-the-warden');
+  });
+
   it('ignores unlisted NPCs, other kinds, and ids that name someone else', () => {
     const speakers = new SpeakerTable(PARTY);
     speakers.unlisted('npc-the-thing', 'The Thing', 12);
