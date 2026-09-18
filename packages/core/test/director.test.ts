@@ -69,6 +69,26 @@ function flakyNow(failOnCall: number): () => Date {
   };
 }
 
+/**
+ * A committed history that starts a session for the default `config()` party, then narrates one
+ * DM beat per `sentence`, each ending with `turn_end` (actor 'dm') as a beat boundary would.
+ */
+function priorBeats(sentences: string[]): SimEvent[] {
+  const recorder = new TurnRecorder(initialState(), 'setup', now);
+  recorder.emit({
+    type: 'session_start',
+    session: 1,
+    loreCommit: 'abc123',
+    targetMinutes: 60,
+    party: [kira, tomas],
+  });
+  for (const sentence of sentences) {
+    recorder.emit({ type: 'narration', speaker: 'dm', text: sentence, emotion: 'neutral' });
+    recorder.emit({ type: 'turn_end', actor: 'dm' });
+  }
+  return [...recorder.events];
+}
+
 /** Every turn's events must be contiguous and seqs must count up from 0 without gaps. */
 function expectWellFormedLog(events: readonly SimEvent[]) {
   expect(events.map((e) => e.seq)).toEqual(events.map((_, index) => index));
@@ -598,6 +618,62 @@ describe('Director', () => {
     expect(sink.events.filter((e) => e.type === 'ooc_note')).toMatchObject([
       { visibility: 'dm', text: 'Cut from DM narration (repeated_text): Rain hammers the stones.' },
     ]);
+  });
+
+  it('cuts a narration sentence repeating one narrated in the previous beat, and flags repeated_text', async () => {
+    const sink = new MemorySink();
+    sink.events.push(...priorBeats(['The room is utterly silent.']));
+    const { deps: built } = deps(
+      {
+        dm: [
+          { text: 'The room is utterly silent. Someone coughs in the dark.', toolCalls: [] },
+          respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })),
+        ],
+      },
+      { sink }
+    );
+    const director = await Director.create(config(), built);
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration').map((e) => e.text)).toEqual([
+      'The room is utterly silent.',
+      'Someone coughs in the dark.',
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'repeated_text', resolution: 'trimmed' },
+    ]);
+  });
+
+  it('keeps a narration sentence that only repeats one narrated five beats ago', async () => {
+    const sink = new MemorySink();
+    sink.events.push(
+      ...priorBeats([
+        'The room is utterly silent.',
+        'Filler beat two.',
+        'Filler beat three.',
+        'Filler beat four.',
+        'Filler beat five.',
+      ])
+    );
+    const { deps: built } = deps(
+      {
+        dm: [
+          { text: 'The room is utterly silent. New sounds echo down the hall.', toolCalls: [] },
+          respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })),
+        ],
+      },
+      { sink }
+    );
+    const director = await Director.create(config(), built);
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration').map((e) => e.text)).toEqual([
+      'The room is utterly silent.',
+      'Filler beat two.',
+      'Filler beat three.',
+      'Filler beat four.',
+      'Filler beat five.',
+      'The room is utterly silent. New sounds echo down the hall.',
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toEqual([]);
   });
 
   it("rejects a narration that only repeats a player's recent line, and the beat still hands off", async () => {

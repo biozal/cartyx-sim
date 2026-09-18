@@ -267,6 +267,33 @@ function recentPlayerLines(history: readonly SimEvent[]): string[] {
   return lines;
 }
 
+/** Beats of prior DM narration still checked for a repeat, besides the beat in progress (finding 6). */
+const REPEAT_LOOKBACK_BEATS = 3;
+
+/**
+ * The DM's narration text from the last `beatCount` beats already committed to `history`, each
+ * beat being the span up to and including a `turn_end` event with `actor: 'dm'`. Beats older than
+ * that window are left out, so a line that repeats one from further back is not flagged.
+ */
+function narrationsFromRecentBeats(history: readonly SimEvent[], beatCount: number): string[] {
+  let start = 0;
+  let beatsSeen = 0;
+  for (let index = history.length - 1; index >= 0; index--) {
+    const event = history[index]!;
+    if (event.type === 'turn_end' && event.actor === 'dm') {
+      beatsSeen++;
+      if (beatsSeen > beatCount) {
+        start = index + 1;
+        break;
+      }
+    }
+  }
+  return history
+    .slice(start)
+    .filter((event) => event.type === 'narration')
+    .map((event) => event.text);
+}
+
 /** The public dialogue lines this PC has spoken so far this session (the whole history, not a window). */
 function pcDialogueLines(history: readonly SimEvent[], pcId: string): string[] {
   const lines: string[] = [];
@@ -760,10 +787,16 @@ export class Director {
         // output, not the model's original draft.
         if (call.name === 'narrate' && text) {
           const current = (args as Record<string, unknown>).text as string;
-          const repeats = cutRepeats(current, {
-            narratedThisBeat: recorder.events
+          // This beat's own narration, plus the DM's narration from the last few committed beats:
+          // a line can repeat one said several beats ago, not only one said earlier in this beat.
+          const recentNarrations = [
+            ...recorder.events
               .filter((event) => event.type === 'narration')
               .map((event) => event.text),
+            ...narrationsFromRecentBeats(this.history, REPEAT_LOOKBACK_BEATS),
+          ];
+          const repeats = cutRepeats(current, {
+            narratedThisBeat: recentNarrations,
             recentPlayerLines: recentPlayerLines(this.history),
           });
           if (repeats.removed.length > 0) {
