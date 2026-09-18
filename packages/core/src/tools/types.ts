@@ -1,5 +1,6 @@
 import { RulesError, type Combatant, type Rng } from '@cartyx-sim/rules';
 import { z } from 'zod';
+import type { ClockPhase } from '../clock';
 import { SessionPausedError } from '../errors';
 import type { SimEvent } from '../events';
 import type { LoreIndex, ToolCall, ToolSchema } from '../model';
@@ -31,6 +32,8 @@ export interface ToolContext {
   rng: Rng;
   lore: LoreIndex;
   loreThreshold: number;
+  /** The session clock's current phase, e.g. so a tool can refuse to start something new past its hard stop. */
+  clockPhase: ClockPhase;
   /** "dm" or the acting PC's id. */
   actorId: string;
   /** The configured model seat for the acting DM or PC (e.g. "player-kira"), distinct from actorId. */

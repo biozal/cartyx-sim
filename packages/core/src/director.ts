@@ -1121,7 +1121,11 @@ export class Director {
       : '';
     const base =
       reason === 'resolve'
-        ? `${name} has declared their combat action (see recent events). Resolve it with tools, narrate the result, then call hand_off.`
+        ? `${name} has declared their combat action (see recent events). Resolve it with tools, narrate the result, then call hand_off.` +
+          (this.state.combat !== null
+            ? " Keep this turn's narration to at most three sentences: what the character's action " +
+              'achieves and what it costs. Save detail for scene beats.'
+            : '')
         : reason === 'monster'
           ? `It is ${name}'s turn (id: ${combatantId}). Act for it with tools, narrate, then call hand_off. ` +
             "Keep this turn's narration to at most three sentences: what the creature does and what it costs. " +
@@ -1186,6 +1190,7 @@ export class Director {
       rng: this.deps.rng,
       lore: { search: (query, limit) => this.searchLore(query, limit) },
       loreThreshold: this.loreThreshold,
+      clockPhase: clockPhase(this.state, this.targetMinutes),
       actorId,
       seat,
     };

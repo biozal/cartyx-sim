@@ -24,6 +24,11 @@ describe('session clock', () => {
     expect(clockInstruction('end_at_scene_break')).toContain('call scene_change');
   });
 
+  it('tells the DM not to start a new fight once wrap-up begins', () => {
+    expect(clockInstruction('wrap_up')).toContain('do not start a new fight');
+    expect(clockInstruction('running')).not.toContain('do not start a new fight');
+  });
+
   it.each(['end_at_scene_break', 'hard_stop'] as const)(
     'tells the DM to close combat before the scene cut in %s',
     (phase) => {

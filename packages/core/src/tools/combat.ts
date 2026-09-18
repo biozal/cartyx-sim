@@ -24,9 +24,14 @@ export const startCombat = defineTool({
   description:
     'Start combat with the given monsters. The engine adds them, rolls initiative for every living combatant (a party member at 0 HP joins the order and spends their turns rolling death saving throws), and fixes turn order.',
   parameters: z.object({ monsters: z.array(MonsterSpec).min(1) }),
-  run(args, { recorder, rng }) {
+  run(args, { recorder, rng, clockPhase }) {
     const { state } = recorder;
     if (state.combat) throw new ToolError('Combat is already running. Call end_combat first.');
+    if (clockPhase === 'hard_stop') {
+      throw new ToolError(
+        'Time is up: no new fight can start. Close the scene and call scene_change.'
+      );
+    }
 
     const monsters: Combatant[] = [];
     // Ids share one namespace across combatants and NPCs, so skip any id either already uses.

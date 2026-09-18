@@ -1193,6 +1193,52 @@ describe('Director', () => {
     expect(lastUserMessage(dmRequests[0]!)).not.toContain("Keep this turn's narration");
   });
 
+  it("caps an in-combat resolve turn's instruction at three sentences of narration", async () => {
+    const { deps: built, model } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('start_combat', { monsters: [monsterSpec('Goblin')] }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+          respond(
+            toolCall('narrate', { text: 'Kira swings.' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+        'player-kira': [respond(toolCall('act', { intent: 'swing wildly' }))],
+      },
+      // initiative: kira 20+2=22, tomas 15+1=16, goblin 1+0=1 -> kira, tomas, goblin.
+      { rolls: [20, 15, 1] }
+    );
+    const director = await Director.create(config(), built);
+
+    await director.run(4);
+
+    const dmRequests = model.requests.filter((request) => request.seat === 'dm');
+    expect(lastUserMessage(dmRequests[1]!)).toContain(
+      "Keep this turn's narration to at most three sentences: what the character's action achieves and what it costs. Save detail for scene beats."
+    );
+  });
+
+  it('does not cap a resolve instruction outside combat', async () => {
+    const { deps: built } = deps({});
+    const director = await Director.create(config(), built);
+    // dmInstruction is private; cast to reach it directly rather than contriving a reachable
+    // resolve-outside-combat state through the public step API (nextActor never produces one).
+    const instruction = (
+      director as unknown as {
+        dmInstruction(
+          reason: 'beat' | 'resolve' | 'monster',
+          combatantId: string | undefined,
+          nudge: string | undefined
+        ): string;
+      }
+    ).dmInstruction('resolve', 'kira', undefined);
+
+    expect(instruction).not.toContain("Keep this turn's narration");
+  });
+
   it('G2.2: leaves a PC downed in the same beat that started combat on their turn', async () => {
     const { deps: built, sink } = deps(
       {

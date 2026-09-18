@@ -26,7 +26,10 @@ export function clockInstruction(phase: ClockPhase): string {
     case 'running':
       return '';
     case 'wrap_up':
-      return 'The session is nearing its time limit: start steering toward a satisfying cliffhanger.';
+      return (
+        'The session is nearing its time limit: start steering toward a satisfying cliffhanger, ' +
+        'and do not start a new fight.'
+      );
     case 'end_at_scene_break':
     case 'hard_stop':
       return 'Time is up: end combat with end_combat if a fight is running, close the current scene now, and call scene_change to cut to the cliffhanger.';
