@@ -169,6 +169,31 @@ All five findings above are fixed on `feat/dm-pc-control-checker`:
 4. **A fight started after the wrap-up steer.** The `wrap_up` clock instruction now tells the DM outright not to start a new fight, and once the clock reaches `hard_stop`, `start_combat` itself refuses ("Time is up: no new fight can start. Close the scene and call scene_change.") rather than relying on instruction wording alone.
 5. **Minor: a read-aloud diary quote became a speaker.** The script labeling prompt's rules now include: "'none' for words read from something written — a diary, a letter, a sign, a ledger, an inscription — even when a character reads them aloud." `LABEL_PROMPT_VERSION` is bumped 3 → 4 so old cached labels aren't reused.
 
+## Third 1-hour run (session 007, 2026-09-18)
+
+Run on HEAD `9e8cd89`, after the second batch of fixes. It reached `target_reached` at 60.7 spoken minutes, but took **154 wall minutes** and paused once when the Ampere machine (Mira's seat, the checker's primary) dropped off the network for half an hour; `--resume` continued cleanly once it was back.
+
+| Measure               | 005         | 006         | 007                 |
+| --------------------- | ----------- | ----------- | ------------------- |
+| Wall / spoken minutes | 80.5 / 63.7 | 68.8 / 63.0 | 154.4 / 60.7        |
+| Pauses                | 1 (seat)    | none        | 1 (machine offline) |
+| DM share              | 70%         | 64%         | 72%                 |
+| Fights                | 1           | 1           | 3                   |
+| Checker flags         | 13          | 7           | 27                  |
+| Tool errors           | 12          | 5           | 19                  |
+
+The session was combat-heavy (three fights, 77 rolls), which explains part of the DM share, but the wall-clock cost and the flag counts point at real problems:
+
+1. **Prompt state still reaches the story, in shapes the strip does not match.** Event 108 narrates an initiative list plus `**Current Status:** - Kira: 20/24 HP (Dagger wound)` and `All three Hooded Figures: 11 HP each, AC 12`, and several beats end with `[combat] Round 1: Kira Vale's turn` or `[hand_off]` followed by the raw JSON. `dm_state_leak` matches `HP 20/24`, not `20/24 HP`, and knows nothing about the transcript's `[tag]` lines. All of it is voiced in `script.md` (lines 193–197, 245–259) — and monster HP and AC reaching players breaks the hidden-stat rule (v1 design §5.5).
+2. **The `hand_off` string coercion accepts nonsense.** Twice the DM sent a malformed string (`<parameter=kind>\npcs`), which the coercion read as a list of player ids, so the error came back as `Unknown player character ids: <parameter=kind>` instead of saying the shape was wrong.
+3. **The DM invents weapons its characters do not carry** (`Mira … no attack named "Shortsword"`, `Bram … "Blade"`, `Mira … "Longsword"`). The party block in the DM prompt lists HP, AC and conditions, but not each character's attacks, so there is nothing to copy from.
+4. **A spell aimed at an NPC id fails.** `cast_spell` was called with `npc-silas-vane` while the combatant was `silas-vane-1`; the engine lists valid ids but does not resolve the NPC to its combatant.
+5. **The checker rejected or trimmed 27 narrations**, four times as many as session 006, many of them the DM describing where a character is standing or that a wound is bleeding. Each rejection costs a DM turn, and the run's wall time shows it.
+6. **The DM repeats itself across beats.** `cutRepeats` only compares within one beat, so "The room is utterly silent." (events 56 and 78) and a two-sentence recap (605 and 632) were narrated twice.
+7. **Death saves have still never fired in a live run.** Kira dropped to 11 HP at the lowest.
+
+The script stage itself held up: 41 model labels, no rules fallbacks, no notes, and only 5 stage directions dropped (the players wrote fewer asides this time).
+
 ## What Plan 2A added
 
 - **Engine hardening:** a runaway-loop backstop (12 stalled turns, 3 idle hand-offs, 24 DM tool calls per beat), a validator flag for every DM outcome, a player-safe `PlayerView` for prompts, downed PCs kept in initiative, turn ids and tool choice on model requests, an event schema version, a Node-free typecheck for `core` and `rules`, and recovery from a torn final log line.
