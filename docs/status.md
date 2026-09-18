@@ -178,4 +178,7 @@ The full list is in the roadmap's Backlog section. Highlights:
   - `ModelRequest.signal` is never set;
   - a seeded run's dice restart on resume;
   - kira's 8-bit Qwen3.8 is the slowest seat; a 4-bit build would roughly halve its turns;
+  - the three narration trims record their flag and note just before the tool runs, so a `narrate` call that then fails leaves a record for a narration that never happened (DM-only review data, no behaviour depends on it);
+  - a leaked state line that shares a line with real prose costs the whole line, since `dm_state_leak` strips whole lines;
+  - the label request now lists monsters, so re-scripting a session with combat misses the label cache once;
   - plus the older cleanup items.
