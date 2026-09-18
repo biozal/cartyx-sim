@@ -22,7 +22,7 @@ import {
 } from './pc-control';
 import type { PromptBuilder } from './prompts';
 import { TurnRecorder } from './recorder';
-import { cutRepeats } from './repeats';
+import { cutRepeats, repeatedSentences } from './repeats';
 import type { EventSink } from './sink';
 import { advanceCombat, foldEvents, nextActor, ownEntry, takesTurn, type GameState } from './state';
 import { emitCombatantChanges } from './tools/mechanics';
@@ -266,6 +266,20 @@ function recentPlayerLines(history: readonly SimEvent[]): string[] {
   }
   return lines;
 }
+
+/** The public dialogue lines this PC has spoken so far this session (the whole history, not a window). */
+function pcDialogueLines(history: readonly SimEvent[], pcId: string): string[] {
+  const lines: string[] = [];
+  for (const event of history) {
+    if (event.type === 'dialogue' && event.visibility === 'public' && event.speaker === pcId) {
+      lines.push(event.text);
+    }
+  }
+  return lines;
+}
+
+/** Tools whose narrated text is checked for a repeated line (spec finding 2). */
+const REPEAT_CHECKED_TOOL_NAMES: ReadonlySet<string> = new Set(['speak', 'interject']);
 
 export class Director {
   private state: GameState;
@@ -855,6 +869,10 @@ export class Director {
       .filter((id) => id !== pcId)
       .map((id) => ownEntry(this.state.combatants, id)?.name ?? id);
     const context = this.toolContext(recorder, pcId, seat);
+    // The whole session's public lines, not a window: nothing is committed to `this.history`
+    // mid-turn, so this stays accurate across every retry below.
+    const earlierLines = pcDialogueLines(this.history, pcId);
+    let repeatRePrompted = false;
 
     for (let attempt = 0; ; attempt++) {
       const response = await this.callModel(seat, recorder.turnId, messages, PLAYER_TOOL_SCHEMAS);
@@ -867,6 +885,7 @@ export class Director {
 
       const accepted: { call: ToolCall; def: AnyToolDef; args: unknown }[] = [];
       const problems: { rule: string; message: string }[] = [];
+      let repeatsToFlag = false;
       for (const call of calls) {
         const prepared = prepareToolCall(call, PLAYER_TOOLS);
         if (!prepared.ok) {
@@ -884,6 +903,22 @@ export class Director {
         if (violation) {
           problems.push(violation);
           continue;
+        }
+        if (text && REPEAT_CHECKED_TOOL_NAMES.has(prepared.def.name)) {
+          const repeats = repeatedSentences(text, earlierLines);
+          if (repeats.length > 0) {
+            if (!repeatRePrompted) {
+              repeatRePrompted = true;
+              problems.push({
+                rule: 'player_repeats_self',
+                message: `You already said that this session: "${repeats[0]}". Say something new, in your own words.`,
+              });
+              continue;
+            }
+            // Re-prompted once already this turn and it still repeats: speak it as-is (spec: never
+            // drop or trim a player's words) and flag it once the call actually executes below.
+            repeatsToFlag = true;
+          }
         }
         accepted.push({ call, def: prepared.def, args: prepared.args });
       }
@@ -943,6 +978,8 @@ export class Director {
           attempt,
           tookTurn ? 'accepted_with_flag' : 'forced_pass'
         );
+      } else if (repeatsToFlag) {
+        this.flag(recorder, seat, 'player_repeats_self', attempt, 'accepted_with_flag');
       }
       if (!tookTurn) recorder.emit({ type: 'pass', actor: pcId });
       break;

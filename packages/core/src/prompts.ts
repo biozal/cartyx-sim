@@ -126,6 +126,7 @@ export const basicPrompts: PromptBuilder = {
           `You are playing ${view.pc.name} (id: ${view.pc.id}) in a Dungeons & Dragons 5e session.`,
           'Stay in character. Use speak for dialogue and act to declare what you attempt; use pass if your character does nothing.',
           'Only ever control your own character, and never describe the outcome of your actions: the DM decides what happens.',
+          'Use fresh wording: do not reuse phrases or lines you have already said this session.',
           ...(view.inCombat && view.yourTurn
             ? ['Say one short line in character as you act, unless silence fits the moment better.']
             : []),

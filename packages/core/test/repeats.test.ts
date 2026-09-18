@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cutRepeats } from '../src/repeats';
+import { cutRepeats, repeatedSentences } from '../src/repeats';
 
 describe('cutRepeats', () => {
   it('cuts a sentence the DM already narrated this beat', () => {
@@ -68,5 +68,32 @@ describe('cutRepeats', () => {
       recentPlayerLines: [],
     });
     expect(out).toEqual({ kept: '', removed: ['Rain hammers the stones.'] });
+  });
+});
+
+describe('repeatedSentences', () => {
+  it('finds a sentence the speaker already said', () => {
+    expect(
+      repeatedSentences('My numbers are what you breathe on. We move now.', [
+        'My numbers are what you breathe on.',
+      ])
+    ).toEqual(['My numbers are what you breathe on.']);
+  });
+
+  it('matches case-insensitively and ignoring punctuation and quote marks', () => {
+    expect(
+      repeatedSentences('"MY NUMBERS ARE WHAT YOU BREATHE ON!"', [
+        'My numbers are what you breathe on.',
+      ])
+    ).toEqual(['"MY NUMBERS ARE WHAT YOU BREATHE ON!"']);
+  });
+
+  it('ignores a short line and an unrelated one', () => {
+    expect(repeatedSentences('Agreed.', ['Agreed.'])).toEqual([]);
+    expect(repeatedSentences('We go left at the fork.', ['We go right at the fork.'])).toEqual([]);
+  });
+
+  it('returns nothing when the speaker has not said anything yet', () => {
+    expect(repeatedSentences('My numbers are what you breathe on.', [])).toEqual([]);
   });
 });

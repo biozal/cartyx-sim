@@ -93,6 +93,20 @@ describe('basicPrompts.dm', () => {
   });
 });
 
+describe('basicPrompts.player', () => {
+  it('tells the player to use fresh wording', () => {
+    const { state } = startedState();
+    const [system] = basicPrompts.player({
+      view: playerView(state, 'kira'),
+      transcript: '',
+      instruction: 'The DM has turned to you.',
+    });
+    expect(system!.content).toContain(
+      'Use fresh wording: do not reuse phrases or lines you have already said this session.'
+    );
+  });
+});
+
 describe('basicPrompts.player in combat', () => {
   const ogre = makeCombatant({
     id: 'ogre-1',

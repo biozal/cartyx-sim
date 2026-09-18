@@ -627,6 +627,82 @@ describe('Director', () => {
     ]);
   });
 
+  it('re-prompts a player who repeats a line they already said this session, once', async () => {
+    const line = 'My numbers are what you breathe on, same rule as the drip.';
+    const freshLine = 'The math never lies about what happens to the plates.';
+    const {
+      deps: built,
+      sink,
+      model,
+    } = deps({
+      dm: [
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+      ],
+      'player-kira': [
+        respond(toolCall('speak', { text: line })),
+        respond(toolCall('speak', { text: line })),
+        respond(toolCall('speak', { text: freshLine })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(5);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([
+      { text: line },
+      { text: freshLine },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'player_repeats_self', resolution: 're_prompted' },
+    ]);
+    const retry = model.requests.filter((r) => r.seat === 'player-kira')[2]!;
+    expect(retry.messages.at(-1)).toMatchObject({
+      role: 'tool',
+      content: expect.stringContaining(
+        `You already said that this session: "${line}". Say something new, in your own words.`
+      ),
+    });
+  });
+
+  it('accepts a line repeated a second time, flagged and unaltered', async () => {
+    const line = 'My numbers are what you breathe on, same rule as the drip.';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+      ],
+      'player-kira': [
+        respond(toolCall('speak', { text: line })),
+        respond(toolCall('speak', { text: line })),
+        respond(toolCall('speak', { text: line })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(5);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([
+      { text: line },
+      { text: line },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'player_repeats_self', resolution: 're_prompted' },
+      { rule: 'player_repeats_self', resolution: 'accepted_with_flag' },
+    ]);
+  });
+
+  it("leaves a player's first use of a line untouched", async () => {
+    const line = 'My numbers are what you breathe on, same rule as the drip.';
+    const { deps: built, sink } = deps({
+      dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } }))],
+      'player-kira': [respond(toolCall('speak', { text: line }))],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(3);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([{ text: line }]);
+    expect(sink.events.some((e) => e.type === 'validator_flag')).toBe(false);
+  });
+
   it('ends at the hard stop even without a scene break', async () => {
     const { deps: built, sink } = deps({
       dm: [

@@ -42,6 +42,20 @@ function quotedSpans(sentence: string): string[] {
     .filter((span) => span.trim().length > 0);
 }
 
+/**
+ * The sentences of `text` this speaker has already said, normalized the same way `cutRepeats`
+ * does. A sentence counts as a repeat only on an exact normalized match, and only when it has 5
+ * or more words, so short lines like "Agreed." never count.
+ */
+export function repeatedSentences(text: string, earlierLines: readonly string[]): string[] {
+  const alreadySaid = new Set(
+    earlierLines.flatMap((line) => splitSentences(line).map(({ sentence }) => normalize(sentence)))
+  );
+  return splitSentences(text)
+    .map(({ sentence }) => sentence)
+    .filter((sentence) => wordCount(sentence) >= 5 && alreadySaid.has(normalize(sentence)));
+}
+
 /** A sentence of `text` repeats when it was already narrated this beat, or quotes a player's recent line. */
 export function cutRepeats(text: string, options: CutRepeatsOptions): CutRepeatsResult {
   const narratedSentences = new Set(
