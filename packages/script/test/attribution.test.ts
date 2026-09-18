@@ -58,7 +58,14 @@ describe('buildLabelMessages', () => {
   it('tells the model that a quote inside reported speech is not speech', () => {
     const [system] = buildLabelMessages(REQUEST);
     expect(system && 'content' in system ? system.content : '').toMatch(/reported speech/i);
-    expect(LABEL_PROMPT_VERSION).toBe(3);
+  });
+
+  it('tells the model that a read-aloud written quote is not speech', () => {
+    const [system] = buildLabelMessages(REQUEST);
+    const prompt = system && 'content' in system ? system.content : '';
+    expect(prompt).toMatch(/read from something written.*diary.*letter.*sign/i);
+    expect(prompt).toMatch(/even when a character reads them aloud/i);
+    expect(LABEL_PROMPT_VERSION).toBe(4);
   });
 });
 

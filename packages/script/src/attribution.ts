@@ -8,7 +8,7 @@ import {
 import { z } from 'zod';
 
 /** Part of every cache key: bump it whenever the prompt or the label rules change. */
-export const LABEL_PROMPT_VERSION = 3;
+export const LABEL_PROMPT_VERSION = 4;
 
 /** The `new:` label the rules fallback gives a speaker it cannot name. */
 export const UNNAMED_LABEL = 'unnamed';
@@ -60,6 +60,7 @@ const SYSTEM_PROMPT = [
   '- the id of a player character, when the narration has that player character say it;',
   '- "none" when it is not speech: a sign, an inscription, a name, a sound, or an emphasized word.',
   '- "none" also for words the narration only reports, such as "mutters something about "bad luck"" or "says that "the gate is shut"": reported speech is part of the narration, not a line of dialogue.',
+  '- "none" for words read from something written — a diary, a letter, a sign, a ledger, an inscription — even when a character reads them aloud.',
   'Reply with only a JSON object: {"labels": [{"quote": 1, "speaker": "..."}]}, with one entry per quotation.',
 ].join('\n');
 
