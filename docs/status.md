@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1018 tests plus 1 expected failure), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1054 tests plus 1 expected failure), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -158,6 +158,16 @@ What the run still shows:
 3. **The tool errors we can now see are mostly avoidable.** 15 re-prompts came from shapes the engine could accept or correct: `hand_off` with a string instead of `{kind}` (4), an emotion outside the enum (3), an attack named loosely ("melee weapon attack", Kira asking for a "Longsword" when she carries a Light Hammer, Mira a "rapier") (4), `declare_spell` with no slot left (2), `request_check` missing `skill` (1). Each one costs a re-prompt and a retry.
 4. **A fight started after the wrap-up steer,** at 51.9 of 60 spoken minutes, and needed 9 minutes to finish. It landed, but the clock had no say in whether a new fight should begin that late.
 5. **Minor:** a quote from a diary the DM read aloud became a speaker (`npc-diary-writer`) rather than `none`.
+
+### Fixes after the second run
+
+All five findings above are fixed on `feat/dm-pc-control-checker`:
+
+1. **Combat is still a DM monologue.** The three-sentence narration cap that already applied to a monster's turn now also applies when the DM resolves a PC's declared combat action while combat is running ("Keep this turn's narration to at most three sentences: what the character's action achieves and what it costs. Save detail for scene beats."), so a round no longer lets the DM spend unlimited words narrating the player's own action.
+2. **Players repeat themselves.** A new `player_repeats_self` check compares a `speak`/`interject` line against every public dialogue line that PC has spoken this session (not just the recent window), catching a 5-word-or-longer sentence that exactly repeats (after case/whitespace normalization) one already said. The first repeat in a turn is re-prompted ("You already said that this session: \"<sentence>\". Say something new, in your own words."); a repeat that survives a second re-prompt is still spoken exactly as given — a player's words are never dropped or trimmed — but the turn is flagged `player_repeats_self`. The player system prompt also now asks for fresh wording.
+3. **The tool errors we can now see are mostly avoidable — the genuine shape mismatches are fixed.** `hand_off` now accepts a bare string ("party", "open", or a player character id) alongside the `{kind}` object form; an emotion outside the fixed list is coerced to "neutral" instead of failing the call; and attack-name matching now accepts, after an exact name and a case-insensitive name, a unique case-insensitive substring match in either direction ("pickaxe" finds "Rusty Pickaxe"). A generic phrase such as "melee weapon attack" still errors, deliberately: accepting it by falling back to a combatant's only attack would also accept a wrong weapon name (the DM asking Kira for a longsword when she carries a Light Hammer), which is an error worth keeping. `declare_spell` with no slot left and `request_check` missing `skill` are unchanged — those are real errors, not shape mismatches.
+4. **A fight started after the wrap-up steer.** The `wrap_up` clock instruction now tells the DM outright not to start a new fight, and once the clock reaches `hard_stop`, `start_combat` itself refuses ("Time is up: no new fight can start. Close the scene and call scene_change.") rather than relying on instruction wording alone.
+5. **Minor: a read-aloud diary quote became a speaker.** The script labeling prompt's rules now include: "'none' for words read from something written — a diary, a letter, a sign, a ledger, an inscription — even when a character reads them aloud." `LABEL_PROMPT_VERSION` is bumped 3 → 4 so old cached labels aren't reused.
 
 ## What Plan 2A added
 
