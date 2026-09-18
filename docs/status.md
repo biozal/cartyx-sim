@@ -1,6 +1,6 @@
 # cartyx-sim status
 
-_Last updated: 2026-09-17_
+_Last updated: 2026-09-18_
 
 cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on local models) built to test the Cartyx lore in `cartyx-lore`. It records a session as an event log, and later plans add voices, art, and a video-call-style playback page for recording. See the spec (`docs/superpowers/specs/2026-09-13-cartyx-sim-v1-design.md`) and the roadmap (`docs/superpowers/plans/2026-09-13-cartyx-sim-v1-roadmap.md`).
 
@@ -133,6 +133,31 @@ All ten findings above are fixed on `feat/dm-pc-control-checker`:
 8. **Tool errors leave no trace.** Every place the director flags `invalid_tool_call` or `tool_error` — the DM's prepare and execution failures, and the same two cases on the player path — now also writes a DM-only `ooc_note` (`Invalid tool call (<tool>): <message>` or `Tool error (<tool>): <message>`), so the errors show up in the log instead of only being sent back to the model.
 9. **Script speakers split in two.** `sim script`'s label request now lists monster and NPC combatants alongside introduced NPCs, so a monster's line is attributed to its existing combatant id instead of inventing a new speaker; and `promote` now also merges an unlisted `new:` speaker into an introduced NPC whose id differs only by a leading article ("the"/"a"/"an"), rewriting any lines already drafted under the old id onto the merged one.
 10. **Minor: stale invention query.** `record_invention` no longer takes a `query` from the model; it derives one from this turn's own lore lookup, if there was one, so a later invention no longer inherits an earlier turn's stale query.
+
+## Second 1-hour run (session 006, 2026-09-18)
+
+The same command on the fixed engine (HEAD `dd50ea2`): 68.8 wall minutes, `session_end: target_reached` at 63.0 spoken minutes (9,444 words), **no pauses**. All six seats passed `sim bench` first, after the DM's LM Studio wedged mid-`GENERATING` and needed the model reloaded.
+
+| Measure                    | 005                                                 | 006                                                                                                                          |
+| -------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Wall time / spoken minutes | 80.5 / 63.7                                         | 68.8 / 63.0                                                                                                                  |
+| Pauses                     | 1 (player-bram)                                     | none                                                                                                                         |
+| DM share of words          | 70%                                                 | 64% (Kira 20%, Bram 7%, Mira 5%, Tomas 3%)                                                                                   |
+| Combat                     | opened, never closed, ran past the end              | opened at 51.9 spoken min, closed at 61.2, then a scene cut                                                                  |
+| Prompt-state leaks         | 1 voiced into the script                            | none (`dm_state_leak` never fired)                                                                                           |
+| Repeated narration         | 2 duplicated sentences, 3 re-quoted player lines    | `repeated_text` trimmed 5 narrations, including two echoes of the prompt's "What do you do?"                                 |
+| Checker                    | 13 catches                                          | 7 catches (5 re-prompted, 2 trimmed)                                                                                         |
+| Script                     | 1 NPC split in two, 1 monster invented as a speaker | 4 unlisted NPC speakers, all genuinely never introduced; no notes, no rules fallbacks, 38 dropped stage directions, all real |
+
+The fixes hold: combat closes, no state leaked, the DM stopped repeating itself and the players, tool errors are now in the log, and the script needed no fallback. Death saves never fired, because no PC dropped to 0 HP.
+
+What the run still shows:
+
+1. **Combat is still a DM monologue.** Over the session the DM is down to 64%, but in the last 20 spoken minutes (the fight) it is 88% and then 99%. The three-sentence cap applies to monster turns; resolving a PC's declared action has no cap, and each fight round still costs far more DM words than player words.
+2. **Players repeat themselves.** `repeated_text` only watches the DM. Kira reuses her own phrasing across the session: "my voice stays low and flat" (3 events), "voice low and even as stone" (5), and one sentence verbatim twice ("My numbers are what you breathe on — same rule as the drip.").
+3. **The tool errors we can now see are mostly avoidable.** 15 re-prompts came from shapes the engine could accept or correct: `hand_off` with a string instead of `{kind}` (4), an emotion outside the enum (3), an attack named loosely ("melee weapon attack", Kira asking for a "Longsword" when she carries a Light Hammer, Mira a "rapier") (4), `declare_spell` with no slot left (2), `request_check` missing `skill` (1). Each one costs a re-prompt and a retry.
+4. **A fight started after the wrap-up steer,** at 51.9 of 60 spoken minutes, and needed 9 minutes to finish. It landed, but the clock had no say in whether a new fight should begin that late.
+5. **Minor:** a quote from a diary the DM read aloud became a speaker (`npc-diary-writer`) rather than `none`.
 
 ## What Plan 2A added
 
