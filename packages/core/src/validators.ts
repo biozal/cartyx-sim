@@ -157,8 +157,8 @@ const STATE_LEAK_PATTERNS = [
   /\d+\s*\/\s*\d+\s*HP\b/i,
   /\bAC\s+\d+\b/i,
   /\bIt is [^.]{1,40}['’]s turn\b/i,
-  /^\s*\[(?:combat|roll|state|scene|npc|lore|invented|hand_off|ooc)\]/i,
-  /^\s*\{.*"(?:target|kind)"\s*:/,
+  /\[(?:combat|roll|state|scene|npc|lore|invented|hand_off|ooc)\]/i,
+  /\{[^}]*"(?:target|kind)"\s*:/,
   /^\s*\*\*Current Status:?\*\*\s*$/i,
   /^\s*Current Status:?\s*$/i,
 ];

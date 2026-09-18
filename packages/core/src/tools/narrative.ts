@@ -175,7 +175,13 @@ const ID_SHAPE = /^[a-z0-9][a-z0-9-]*$/;
  * syntax, a comma-separated list, an empty string) is a shape error, not a list of ids: it never
  * reaches `state.partyIds`, so it can't be misread as an unknown-id problem.
  */
-const HandOffTargetArg = z.union([z.string(), HandOffTarget]);
+const HandOffTargetArg = z.union([
+  z.string().meta({
+    description: 'Shorthand: "party", "open", or one player character id such as "kira".',
+    examples: ['party', 'open', 'kira'],
+  }),
+  HandOffTarget,
+]);
 
 const HAND_OFF_SHAPE_ERROR =
   'hand_off target must be an object like {"kind": "party"}, {"kind": "open"}, or ' +

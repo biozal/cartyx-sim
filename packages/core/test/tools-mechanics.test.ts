@@ -210,6 +210,45 @@ describe('getCombatant resolves an npc- prefixed id to its combatant', () => {
     expect(result.ok).toBe(false);
     expect((result as { error: string }).error).toContain('Unknown combatant id "npc-nobody-here"');
   });
+
+  it('does not resolve a short prefix to an unrelated combatant, e.g. "npc-k" to "kira"', async () => {
+    const harness = withSilasVane();
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-k',
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain('Unknown combatant id "npc-k"');
+  });
+
+  it('does not resolve an empty suffix, e.g. "npc-", to the only combatant', async () => {
+    const harness = withSilasVane();
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-',
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain('Unknown combatant id "npc-"');
+  });
+
+  it('never resolves to a combatant whose kind is "pc", even on an exact suffix match', async () => {
+    const harness = withSilasVane();
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-kira',
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain('Unknown combatant id "npc-kira"');
+  });
 });
 
 describe('request_check', () => {

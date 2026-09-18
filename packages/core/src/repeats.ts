@@ -68,7 +68,9 @@ export function cutRepeats(text: string, options: CutRepeatsOptions): CutRepeats
   const kept: string[] = [];
   const removed: string[] = [];
   for (const { sentence } of splitSentences(text)) {
-    const repeatsNarration = narratedSentences.has(normalize(sentence));
+    // Matches repeatedSentences' 5-word floor, so a deliberate short refrain (e.g. "Silence.")
+    // or a recurring NPC catchphrase is never cut for repeating a narration beat.
+    const repeatsNarration = wordCount(sentence) >= 5 && narratedSentences.has(normalize(sentence));
     const repeatsPlayer = quotedSpans(sentence).some(
       (span) => wordCount(span) >= 4 && playerLines.some((line) => line.includes(normalize(span)))
     );

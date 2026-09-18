@@ -600,8 +600,8 @@ describe('Director', () => {
   it('cuts a narration sentence repeating one already narrated this beat, and flags repeated_text', async () => {
     const { deps: built, sink } = deps({
       dm: [
-        { text: 'The gate groans open. Rain hammers the stones.', toolCalls: [] },
-        { text: 'Rain hammers the stones. Thunder rolls overhead.', toolCalls: [] },
+        { text: 'The gate groans open. Rain hammers down on the stones.', toolCalls: [] },
+        { text: 'Rain hammers down on the stones. Thunder rolls overhead.', toolCalls: [] },
         respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })),
       ],
     });
@@ -609,14 +609,17 @@ describe('Director', () => {
     await director.step();
     await director.step();
     expect(sink.events.filter((e) => e.type === 'narration')).toMatchObject([
-      { text: 'The gate groans open. Rain hammers the stones.' },
+      { text: 'The gate groans open. Rain hammers down on the stones.' },
       { text: 'Thunder rolls overhead.' },
     ]);
     expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
       { rule: 'repeated_text', resolution: 'trimmed' },
     ]);
     expect(sink.events.filter((e) => e.type === 'ooc_note')).toMatchObject([
-      { visibility: 'dm', text: 'Cut from DM narration (repeated_text): Rain hammers the stones.' },
+      {
+        visibility: 'dm',
+        text: 'Cut from DM narration (repeated_text): Rain hammers down on the stones.',
+      },
     ]);
   });
 

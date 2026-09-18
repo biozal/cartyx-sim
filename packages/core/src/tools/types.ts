@@ -142,14 +142,20 @@ export async function runPreparedCall(
 
 /**
  * When `id` is not a combatant but looks like an NPC id (`npc-` followed by the combatant's own
- * id), and exactly one combatant's id starts with that suffix, resolves to it (e.g.
- * `npc-silas-vane` → `silas-vane-1`). Two or more matches are left ambiguous.
+ * id, or a prefix of it), and exactly one non-PC combatant's id equals that suffix or starts with
+ * `<suffix>-`, resolves to it (e.g. `npc-silas-vane` → `silas-vane-1`). An empty suffix (`npc-`)
+ * never matches, and a player character is never resolved this way. Two or more matches are left
+ * ambiguous.
  */
 function resolveNpcId(state: GameState, id: string): Combatant | undefined {
   const prefix = 'npc-';
   if (!id.startsWith(prefix)) return undefined;
   const suffix = id.slice(prefix.length);
-  const matches = Object.keys(state.combatants).filter((key) => key.startsWith(suffix));
+  if (suffix === '') return undefined;
+  const matches = Object.keys(state.combatants).filter((key) => {
+    if (key !== suffix && !key.startsWith(`${suffix}-`)) return false;
+    return ownEntry(state.combatants, key)?.kind !== 'pc';
+  });
   return matches.length === 1 ? ownEntry(state.combatants, matches[0]!) : undefined;
 }
 

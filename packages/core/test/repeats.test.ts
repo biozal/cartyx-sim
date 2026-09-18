@@ -3,27 +3,33 @@ import { cutRepeats, repeatedSentences } from '../src/repeats';
 
 describe('cutRepeats', () => {
   it('cuts a sentence the DM already narrated this beat', () => {
-    const out = cutRepeats('The gate groans open. Rain hammers the stones.', {
-      narratedThisBeat: ['Rain hammers the stones.'],
+    const out = cutRepeats('The gate groans open. Rain hammers down on the stones.', {
+      narratedThisBeat: ['Rain hammers down on the stones.'],
       recentPlayerLines: [],
     });
-    expect(out).toEqual({ kept: 'The gate groans open.', removed: ['Rain hammers the stones.'] });
+    expect(out).toEqual({
+      kept: 'The gate groans open.',
+      removed: ['Rain hammers down on the stones.'],
+    });
   });
 
   it('cuts a sentence that repeats one sentence of an earlier multi-sentence narration', () => {
-    const out = cutRepeats('Thunder rolls overhead. The gate groans open.', {
-      narratedThisBeat: ['The wind picks up. The gate groans open. Rain begins to fall.'],
+    const out = cutRepeats('Thunder rolls overhead. The old gate groans open again.', {
+      narratedThisBeat: ['The wind picks up. The old gate groans open again. Rain begins to fall.'],
       recentPlayerLines: [],
     });
-    expect(out).toEqual({ kept: 'Thunder rolls overhead.', removed: ['The gate groans open.'] });
+    expect(out).toEqual({
+      kept: 'Thunder rolls overhead.',
+      removed: ['The old gate groans open again.'],
+    });
   });
 
   it('matches a repeated sentence case-insensitively and ignoring punctuation', () => {
-    const out = cutRepeats('THE GATE GROANS OPEN! Something new happens.', {
-      narratedThisBeat: ['The gate groans open.'],
+    const out = cutRepeats('THE OLD GATE GROANS OPEN AGAIN! Something new happens.', {
+      narratedThisBeat: ['The old gate groans open again.'],
       recentPlayerLines: [],
     });
-    expect(out.removed).toEqual(['THE GATE GROANS OPEN!']);
+    expect(out.removed).toEqual(['THE OLD GATE GROANS OPEN AGAIN!']);
     expect(out.kept).toBe('Something new happens.');
   });
 
@@ -63,11 +69,27 @@ describe('cutRepeats', () => {
   });
 
   it('cuts to nothing when every sentence repeats', () => {
-    const out = cutRepeats('Rain hammers the stones.', {
-      narratedThisBeat: ['Rain hammers the stones.'],
+    const out = cutRepeats('Rain hammers down on the stones.', {
+      narratedThisBeat: ['Rain hammers down on the stones.'],
       recentPlayerLines: [],
     });
-    expect(out).toEqual({ kept: '', removed: ['Rain hammers the stones.'] });
+    expect(out).toEqual({ kept: '', removed: ['Rain hammers down on the stones.'] });
+  });
+
+  it('keeps a short refrain repeated across beats instead of cutting it, like repeatedSentences does', () => {
+    const out = cutRepeats('Silence.', {
+      narratedThisBeat: ['Silence.'],
+      recentPlayerLines: [],
+    });
+    expect(out).toEqual({ kept: 'Silence.', removed: [] });
+  });
+
+  it('still cuts a 5-word sentence repeated across beats', () => {
+    const out = cutRepeats('The gate groans shut again.', {
+      narratedThisBeat: ['The gate groans shut again.'],
+      recentPlayerLines: [],
+    });
+    expect(out).toEqual({ kept: '', removed: ['The gate groans shut again.'] });
   });
 });
 

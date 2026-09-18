@@ -541,5 +541,16 @@ describe('hand_off', () => {
       expect(await harness.run(handOff, { target })).toEqual({ ok: false, error: SHAPE_ERROR });
       expect(harness.recorder.events).toHaveLength(0);
     });
+
+    it('documents the string branch in the published schema instead of a bare string', () => {
+      const parameters = toToolSchema(handOff).parameters as {
+        properties: { target: { anyOf: Array<{ type?: string; description?: string }> } };
+      };
+      const stringBranch = parameters.properties.target.anyOf.find(
+        (branch) => branch.type === 'string'
+      );
+      expect(stringBranch?.description).toEqual(expect.stringContaining('party'));
+      expect(stringBranch?.description).toEqual(expect.stringContaining('open'));
+    });
   });
 });

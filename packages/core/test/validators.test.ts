@@ -171,6 +171,28 @@ describe('validateDmText', () => {
     ])('does not flag prose that merely brushes against a leak pattern: "%s"', (text) => {
       expect(validateDmText(text, { pcNames, mechanicsToolCalled: false })).toBeNull();
     });
+
+    it('flags a tag leak that shares a line with good prose instead of only a line-start tag', () => {
+      const text = 'The mercenaries fall back. [combat] Round 2 begins.';
+      const violation = validateDmText(text, { pcNames, mechanicsToolCalled: false });
+      expect(violation?.rule).toBe('dm_state_leak');
+      expect(violation?.strip).toEqual([text]);
+    });
+
+    it('flags a JSON leak that shares a line with good prose instead of only a line-start object', () => {
+      const text = 'Handing off now. {"target": {"kind": "party"}}';
+      const violation = validateDmText(text, { pcNames, mechanicsToolCalled: false });
+      expect(violation?.rule).toBe('dm_state_leak');
+      expect(violation?.strip).toEqual([text]);
+    });
+
+    it.each([
+      '…lined with brackets [sic].',
+      'A crate marked "cargo" sits by the door.',
+      'The note read: take the {small} road.',
+    ])('leaves prose that merely resembles a leak alone: "%s"', (text) => {
+      expect(validateDmText(text, { pcNames, mechanicsToolCalled: false })).toBeNull();
+    });
   });
 
   describe('G4.2: catches past-tense, adverb, vocative, and Unicode PC control', () => {
