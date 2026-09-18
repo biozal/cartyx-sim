@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1054 tests plus 1 expected failure), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1082 tests plus 1 expected failure), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -193,6 +193,17 @@ The session was combat-heavy (three fights, 77 rolls), which explains part of th
 7. **Death saves have still never fired in a live run.** Kira dropped to 11 HP at the lowest.
 
 The script stage itself held up: 41 model labels, no rules fallbacks, no notes, and only 5 stage directions dropped (the players wrote fewer asides this time).
+
+### Fixes after the third run
+
+Findings 1–6 above are fixed on `feat/dm-pc-control-checker`; finding 7 (death saves) is **not** — they have still never fired in a live run.
+
+1. **Prompt state still reaches the story, in shapes the strip does not match.** `dm_state_leak` now also catches the reversed `20/24 HP` form, a bare `AC 12` readout, a `[combat]`/`[roll]`/`[state]`/`[scene]`/`[npc]`/`[lore]`/`[invented]`/`[hand_off]`/`[ooc]` transcript tag line, a `{"target": …}`/`{"kind": …}` JSON line, and the `**Current Status:**` heading (bold or plain, with or without a colon) — five new line-shape patterns alongside the three it already had.
+2. **The `hand_off` string coercion accepts nonsense.** A bare string is now accepted only when, trimmed, it is exactly `party`, `open`, or a single id shaped like `kira` (`/^[a-z0-9][a-z0-9-]*$/`); anything else — including the garbled `<parameter=kind>\npcs` the DM actually sent — fails with a shape error naming the object forms, instead of being misread as an unknown player id.
+3. **The DM invents weapons its characters do not carry.** `describeCombatant` now lists each combatant's attack names (`attacks: Light Hammer`, or `attacks: none`), so the DM prompt's party block gives it something to copy from.
+4. **A spell aimed at an NPC id fails.** The shared `getCombatant` lookup (used by every tool, including `cast_spell`) now resolves an id like `npc-silas-vane` to the one combatant whose id starts with `silas-vane`, when exactly one matches; two or more matches, or no match, still give today's "Unknown combatant id" error.
+5. **The checker rejected or trimmed 27 narrations.** The checker prompt now says outright that describing a player character's position, injuries, and conditions is allowed even when the player didn't say so, and narrows a violation to the DM inventing a PC's words, thoughts, feelings, or decisions, or having them act without their player declaring it. Whether this brings the catch rate back down (7 in session 006, 27 in 007) is worth watching on the next run.
+6. **The DM repeats itself across beats.** The repeat check that already caught a sentence repeated within one beat now also checks the DM's narration from the previous 3 committed beats, so a sentence like "The room is utterly silent." repeated one beat later is cut and flagged `repeated_text`; a repeat from five beats back is out of the window and kept.
 
 ## What Plan 2A added
 
