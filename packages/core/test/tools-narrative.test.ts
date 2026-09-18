@@ -57,6 +57,19 @@ describe('narrate', () => {
   it('publishes a JSON schema where defaulted fields are optional', () => {
     expect(toToolSchema(narrate).parameters).toMatchObject({ required: ['text'] });
   });
+
+  it('coerces an emotion outside the enum to neutral instead of failing', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(narrate, { text: 'The engines hum.', emotion: 'furious' });
+    expect(result).toMatchObject({ ok: true });
+    expect(harness.recorder.events[0]).toMatchObject({ emotion: 'neutral' });
+  });
+
+  it('keeps the default emotion when none is given', async () => {
+    const harness = toolHarness();
+    await harness.run(narrate, { text: 'The engines hum.' });
+    expect(harness.recorder.events[0]).toMatchObject({ emotion: 'neutral' });
+  });
 });
 
 describe('introduce_npc and npc_say', () => {
@@ -83,6 +96,22 @@ describe('introduce_npc and npc_say', () => {
       speaker: 'npc-professor-sella-vaunt',
       speakerKind: 'npc',
     });
+  });
+
+  it('coerces an emotion outside the enum to neutral instead of failing', async () => {
+    const harness = toolHarness();
+    await harness.run(introduceNpc, {
+      name: 'Professor Sella Vaunt',
+      description: 'Crystal engine professor',
+      invented: false,
+    });
+    const result = await harness.run(npcSay, {
+      npcId: 'npc-professor-sella-vaunt',
+      text: 'Find out who.',
+      emotion: 'smug',
+    });
+    expect(result).toMatchObject({ ok: true });
+    expect(harness.recorder.events[1]).toMatchObject({ type: 'dialogue', emotion: 'neutral' });
   });
 
   it('removes quote marks wrapped around a whole NPC line', async () => {
@@ -450,6 +479,53 @@ describe('hand_off', () => {
     expect(await harness.run(handOff, { target: { kind: 'pcs', ids: ['oona'] } })).toEqual({
       ok: false,
       error: 'Unknown player character ids: oona. Party ids: kira, tomas',
+    });
+  });
+
+  describe('a bare string target', () => {
+    it('coerces "party" to { kind: "party" }', async () => {
+      const harness = toolHarness();
+      const result = await harness.run(handOff, { target: 'party' });
+      expect(result).toEqual({
+        ok: true,
+        outcome: { result: 'Handed off to kira, tomas.', endsBeat: true },
+      });
+      expect(harness.recorder.events[0]).toMatchObject({
+        type: 'hand_off',
+        target: { kind: 'party' },
+      });
+    });
+
+    it('coerces "open" to { kind: "open" }', async () => {
+      const harness = toolHarness();
+      const result = await harness.run(handOff, { target: 'open' });
+      expect(result).toMatchObject({ ok: true });
+      expect(harness.recorder.events[0]).toMatchObject({
+        type: 'hand_off',
+        target: { kind: 'open' },
+      });
+    });
+
+    it('coerces any other string to { kind: "pcs", ids: [string] }', async () => {
+      const harness = toolHarness();
+      const result = await harness.run(handOff, { target: 'kira' });
+      expect(result).toEqual({
+        ok: true,
+        outcome: { result: 'Handed off to kira.', endsBeat: true },
+      });
+      expect(harness.recorder.events[0]).toMatchObject({
+        type: 'hand_off',
+        target: { kind: 'pcs', ids: ['kira'] },
+      });
+    });
+
+    it("still errors on an unknown player character id, with today's message", async () => {
+      const harness = toolHarness();
+      expect(await harness.run(handOff, { target: 'oona' })).toEqual({
+        ok: false,
+        error: 'Unknown player character ids: oona. Party ids: kira, tomas',
+      });
+      expect(harness.recorder.events).toHaveLength(0);
     });
   });
 });

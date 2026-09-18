@@ -1453,6 +1453,69 @@ describe('Director', () => {
     ).rejects.toThrow(/lore commit/i);
   });
 
+  describe('accepts the tool shapes models actually send', () => {
+    it('hand_off: coerces a bare string target instead of re-prompting', async () => {
+      const {
+        deps: built,
+        model,
+        sink,
+      } = deps({
+        dm: [respond(toolCall('hand_off', { target: 'party' }))],
+      });
+      const director = await Director.create(config(), built);
+      await director.step(); // session_start
+      await director.step(); // the DM's whole beat, in a single model call
+      expect(sink.events.filter((e) => e.type === 'hand_off')).toMatchObject([
+        { target: { kind: 'party' }, responders: ['kira', 'tomas'] },
+      ]);
+      expect(model.requests).toHaveLength(1);
+    });
+
+    it('narrate: coerces an emotion outside the enum to neutral instead of re-prompting', async () => {
+      const {
+        deps: built,
+        model,
+        sink,
+      } = deps({
+        dm: [
+          respond(
+            toolCall('narrate', { text: 'The engines roar to life.', emotion: 'furious' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      });
+      const director = await Director.create(config(), built);
+      await director.step(); // session_start
+      await director.step(); // the DM's whole beat, in a single model call
+      expect(sink.events.filter((e) => e.type === 'narration')).toMatchObject([
+        { text: 'The engines roar to life.', emotion: 'neutral' },
+      ]);
+      expect(model.requests).toHaveLength(1);
+    });
+
+    it('attack: matches a loosely named attack by a unique substring instead of re-prompting', async () => {
+      const {
+        deps: built,
+        model,
+        sink,
+      } = deps({
+        dm: [
+          respond(
+            toolCall('attack', { attackerId: 'tomas', targetId: 'kira', attackName: 'sword' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      });
+      const director = await Director.create(config(), { ...built, rng: scriptedRng([12, 3]) });
+      await director.step(); // session_start
+      await director.step(); // the DM's whole beat, in a single model call
+      expect(sink.events.filter((e) => e.type === 'roll' && e.kind === 'attack')).toMatchObject([
+        { label: expect.stringContaining('Tomas Reed Longsword') },
+      ]);
+      expect(model.requests).toHaveLength(1);
+    });
+  });
+
   describe('F5: malformed model responses', () => {
     const malformed = (value: unknown) => value as ScriptedResponse;
 

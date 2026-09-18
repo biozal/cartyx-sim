@@ -35,6 +35,25 @@ function withGoblin(rolls: number[]) {
   });
 }
 
+const miner = makeCombatant({
+  id: 'miner-1',
+  name: 'Enslaved Miner',
+  kind: 'monster',
+  ac: 11,
+  hp: 9,
+  maxHp: 9,
+  attacks: [{ name: 'Rusty Pickaxe', bonus: 3, damage: '1d6+1', damageType: 'bludgeoning' }],
+});
+
+function withMiner(rolls: number[]) {
+  const { state, history } = startedState([kira, tomas]);
+  return toolHarness({
+    state: { ...state, combatants: { ...state.combatants, [miner.id]: miner } },
+    history,
+    rng: scriptedRng(rolls),
+  });
+}
+
 const POISON_IDS = ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf'];
 
 describe('id lookups reject built-in property names', () => {
@@ -264,6 +283,61 @@ describe('attack', () => {
       attackName: 'Longsword',
     });
     expect(harness.recorder.events[1]).toMatchObject({ kind: 'damage', expr: '2d8+3' });
+  });
+
+  describe('a loosely named attack', () => {
+    it('matches a unique case-insensitive substring of the attack name', async () => {
+      const harness = withMiner([15, 3]);
+      const result = await harness.run(attack, {
+        attackerId: 'miner-1',
+        targetId: 'tomas',
+        attackName: 'pickaxe',
+      });
+      expect(result).toMatchObject({
+        ok: true,
+        outcome: { result: expect.stringContaining("Enslaved Miner's Rusty Pickaxe hits") },
+      });
+    });
+
+    it('errors, listing every candidate, when the substring matches two or more attacks', async () => {
+      const twinBlades = makeCombatant({
+        id: 'twin-blades',
+        name: 'Twin-Blades',
+        kind: 'monster',
+        attacks: [
+          { name: 'Rusty Pickaxe', bonus: 3, damage: '1d6+1', damageType: 'bludgeoning' },
+          { name: 'Pickaxe Handle', bonus: 2, damage: '1d4', damageType: 'bludgeoning' },
+        ],
+      });
+      const { state, history } = startedState([kira, tomas]);
+      const harness = toolHarness({
+        state: { ...state, combatants: { ...state.combatants, [twinBlades.id]: twinBlades } },
+        history,
+      });
+      const result = await harness.run(attack, {
+        attackerId: 'twin-blades',
+        targetId: 'tomas',
+        attackName: 'pickaxe',
+      });
+      expect(result).toEqual({
+        ok: false,
+        error:
+          'Twin-Blades has no attack named "pickaxe". Known attacks: Rusty Pickaxe, Pickaxe Handle',
+      });
+    });
+
+    it('does not fall back to a specific but wrong weapon name for a character carrying only one attack', async () => {
+      const harness = toolHarness();
+      const result = await harness.run(attack, {
+        attackerId: 'kira',
+        targetId: 'tomas',
+        attackName: 'Longsword',
+      });
+      expect(result).toEqual({
+        ok: false,
+        error: 'Kira Vale has no attack named "Longsword". Known attacks: Light Hammer',
+      });
+    });
   });
 });
 

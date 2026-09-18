@@ -58,6 +58,19 @@ describe('player tools', () => {
     expect(harness.recorder.events).toHaveLength(0);
   });
 
+  it('speak coerces an emotion outside the enum to neutral instead of failing', async () => {
+    const harness = kiraHarness();
+    const result = await harness.run(speak, { text: 'Who is there?', emotion: 'smug' });
+    expect(result).toMatchObject({ ok: true });
+    expect(harness.recorder.events[0]).toMatchObject({ emotion: 'neutral' });
+  });
+
+  it('speak keeps the default emotion when none is given', async () => {
+    const harness = kiraHarness();
+    await harness.run(speak, { text: 'Who is there?' });
+    expect(harness.recorder.events[0]).toMatchObject({ emotion: 'neutral' });
+  });
+
   it('interject removes quote marks wrapped around the whole line', async () => {
     const harness = kiraHarness({ spoken: true });
     await harness.run(interject, { text: '“Wait—!”' });
@@ -82,6 +95,13 @@ describe('player tools', () => {
       overlaps: 1,
       emotion: 'surprised',
     });
+  });
+
+  it('interject coerces an emotion outside the enum to neutral, not its own default', async () => {
+    const harness = kiraHarness({ spoken: true });
+    const result = await harness.run(interject, { text: 'Wait—!', emotion: 'smug' });
+    expect(result).toMatchObject({ ok: true });
+    expect(harness.recorder.events[0]).toMatchObject({ emotion: 'neutral' });
   });
 
   it("G5.13: interject skips the actor's own most recent line and overlaps an earlier line by someone else", async () => {

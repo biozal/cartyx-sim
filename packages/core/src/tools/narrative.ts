@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { Emotion, HandOffTarget } from '../events';
+import { HandOffTarget } from '../events';
 import { ownEntry, selectResponders } from '../state';
 import { slugify } from '../text';
-import { defineTool, SpokenText, ToolError } from './types';
+import { coercedEmotion, defineTool, SpokenText, ToolError } from './types';
 
 export const LORE_RESULT_LIMIT = 8;
 
@@ -12,7 +12,7 @@ export const narrate = defineTool({
     'Speak as the Dungeon Master: describe scenes, events, and outcomes. Never decide what player characters do, say, or feel.',
   parameters: z.object({
     text: z.string().trim().min(1).max(4000),
-    emotion: Emotion.default('neutral'),
+    emotion: coercedEmotion('neutral'),
   }),
   narrativeText: (args) => args.text,
   run(args, { recorder }) {
@@ -71,7 +71,7 @@ export const npcSay = defineTool({
   parameters: z.object({
     npcId: z.string().trim().min(1).max(200),
     text: SpokenText,
-    emotion: Emotion.default('neutral'),
+    emotion: coercedEmotion('neutral'),
   }),
   narrativeText: (args) => args.text,
   run(args, { recorder }) {
@@ -164,11 +164,25 @@ export const recordInvention = defineTool({
   },
 });
 
+/**
+ * Accepts the strict `{ kind: ... }` object, or a bare string shorthand a model sends instead:
+ * "party" or "open" map to those kinds, and any other string is treated as a single player
+ * character id (`{ kind: 'pcs', ids: [string] }`). Coerced only here, at the tool's argument
+ * boundary — the logged `hand_off` event still carries the object shape, and an id that names no
+ * real party member still errors below with today's message.
+ */
+const HandOffTargetArg = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  if (value === 'party') return { kind: 'party' };
+  if (value === 'open') return { kind: 'open' };
+  return { kind: 'pcs', ids: [value] };
+}, HandOffTarget);
+
 export const handOff = defineTool({
   name: 'hand_off',
   description:
     'End your turn and pass the spotlight: to specific player characters (kind "pcs" with ids), the whole party ("party"), or whoever wants to act ("open"). In combat, initiative decides who acts next.',
-  parameters: z.object({ target: HandOffTarget }),
+  parameters: z.object({ target: HandOffTargetArg }),
   run(args, { recorder }) {
     const { state } = recorder;
     if (args.target.kind === 'pcs') {

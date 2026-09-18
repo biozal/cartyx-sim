@@ -2,7 +2,7 @@ import { RulesError, type Combatant, type Rng } from '@cartyx-sim/rules';
 import { z } from 'zod';
 import type { ClockPhase } from '../clock';
 import { SessionPausedError } from '../errors';
-import type { SimEvent } from '../events';
+import { Emotion, EMOTIONS, type SimEvent } from '../events';
 import type { LoreIndex, ToolCall, ToolSchema } from '../model';
 import type { TurnRecorder } from '../recorder';
 import { ownEntry, type GameState } from '../state';
@@ -16,6 +16,19 @@ export const SpokenText = z
   .max(4000)
   .transform(unwrapQuotes)
   .pipe(z.string().min(1, 'Say something inside the quotes.'));
+
+/**
+ * An emotion argument that never fails a tool call: a value outside {@link EMOTIONS} (an emotion
+ * the model invented, or the wrong type) coerces to "neutral" instead of rejecting the call, and
+ * the engine records that coerced value, never the model's original string. A missing value is
+ * left alone so `defaultEmotion` applies exactly as `Emotion.default(defaultEmotion)` would.
+ */
+export function coercedEmotion(defaultEmotion: Emotion) {
+  return z.preprocess((value) => {
+    if (value === undefined) return value;
+    return (EMOTIONS as readonly unknown[]).includes(value) ? value : 'neutral';
+  }, Emotion.default(defaultEmotion));
+}
 
 /** A tool misuse the model can correct, e.g. an unknown id. Returned to the model as an error result. */
 export class ToolError extends Error {
