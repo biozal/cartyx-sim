@@ -72,12 +72,43 @@ describe('basicPrompts.dm', () => {
       { ...tomas, hp: 0, stable: true },
     ]);
     const [, user] = basicPrompts.dm({ state, transcript: '', instruction: 'Begin.' });
-    expect(user!.content).toContain('- Kira Vale (id: kira) DYING (death saves 2/1), AC 15');
-    expect(user!.content).toContain('- Tomas Reed (id: tomas) STABLE at 0 HP, AC 16');
+    expect(user!.content).toContain(
+      '- Kira Vale (id: kira) DYING (death saves 2/1), AC 15, attacks: Light Hammer'
+    );
+    expect(user!.content).toContain(
+      '- Tomas Reed (id: tomas) STABLE at 0 HP, AC 16, attacks: Longsword'
+    );
 
     const dead = startedState([{ ...kira, hp: 0, dead: true }, tomas]).state;
     const [, deadUser] = basicPrompts.dm({ state: dead, transcript: '', instruction: 'Begin.' });
-    expect(deadUser!.content).toContain('- Kira Vale (id: kira) DEAD, AC 15');
+    expect(deadUser!.content).toContain(
+      '- Kira Vale (id: kira) DEAD, AC 15, attacks: Light Hammer'
+    );
+  });
+
+  it('lists a combatant\'s attacks by name, or "none" when it has no attacks', () => {
+    const { state } = startedState();
+    const [, user] = basicPrompts.dm({ state, transcript: '', instruction: 'Begin.' });
+    expect(user!.content).toContain(
+      '- Kira Vale (id: kira) HP 10/10, AC 15, attacks: Light Hammer'
+    );
+
+    const unarmed = makeCombatant({
+      id: 'goblin-1',
+      name: 'Goblin',
+      kind: 'monster',
+      ac: 13,
+      hp: 7,
+      maxHp: 7,
+    });
+    const recorder = new TurnRecorder(state, 'turn', now);
+    recorder.emit({ type: 'combatant_added', combatant: unarmed });
+    const [, withGoblin] = basicPrompts.dm({
+      state: recorder.state,
+      transcript: '',
+      instruction: 'Begin.',
+    });
+    expect(withGoblin!.content).toContain('- Goblin (id: goblin-1) HP 7/7, AC 13, attacks: none');
   });
 
   it("keeps today's line for an NPC with no description", () => {

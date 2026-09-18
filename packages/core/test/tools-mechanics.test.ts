@@ -145,6 +145,73 @@ describe('id lookups reject built-in property names', () => {
   });
 });
 
+const silasVane = makeCombatant({
+  id: 'silas-vane-1',
+  name: 'Silas Vane',
+  kind: 'npc',
+  ac: 11,
+  hp: 8,
+  maxHp: 8,
+});
+
+function withSilasVane() {
+  const { state, history } = startedState([kira, tomas]);
+  return toolHarness({
+    state: { ...state, combatants: { ...state.combatants, [silasVane.id]: silasVane } },
+    history,
+    rng: scriptedRng([10]),
+  });
+}
+
+describe('getCombatant resolves an npc- prefixed id to its combatant', () => {
+  it('resolves "npc-silas-vane" to the one combatant id starting with "silas-vane"', async () => {
+    const harness = withSilasVane();
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-silas-vane',
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('keeps the "Unknown combatant id" error when the NPC id matches two combatants', async () => {
+    const other = makeCombatant({
+      id: 'silas-vane-elder',
+      name: 'Silas Vane the Elder',
+      kind: 'npc',
+      ac: 11,
+      hp: 8,
+      maxHp: 8,
+    });
+    const harness = withSilasVane();
+    harness.recorder.emit({ type: 'combatant_added', combatant: other });
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-silas-vane',
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain('Unknown combatant id "npc-silas-vane"');
+  });
+
+  it('keeps the "Unknown combatant id" error for an unrelated unknown id', async () => {
+    const harness = withSilasVane();
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-nobody-here',
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain('Unknown combatant id "npc-nobody-here"');
+  });
+});
+
 describe('request_check', () => {
   it('rolls a skill check and logs the roll', async () => {
     const harness = toolHarness({ rng: scriptedRng([8]) });

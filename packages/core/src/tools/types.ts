@@ -140,8 +140,21 @@ export async function runPreparedCall(
   }
 }
 
+/**
+ * When `id` is not a combatant but looks like an NPC id (`npc-` followed by the combatant's own
+ * id), and exactly one combatant's id starts with that suffix, resolves to it (e.g.
+ * `npc-silas-vane` → `silas-vane-1`). Two or more matches are left ambiguous.
+ */
+function resolveNpcId(state: GameState, id: string): Combatant | undefined {
+  const prefix = 'npc-';
+  if (!id.startsWith(prefix)) return undefined;
+  const suffix = id.slice(prefix.length);
+  const matches = Object.keys(state.combatants).filter((key) => key.startsWith(suffix));
+  return matches.length === 1 ? ownEntry(state.combatants, matches[0]!) : undefined;
+}
+
 export function getCombatant(state: GameState, id: string): Combatant {
-  const combatant = ownEntry(state.combatants, id);
+  const combatant = ownEntry(state.combatants, id) ?? resolveNpcId(state, id);
   if (!combatant) {
     const known = Object.keys(state.combatants).join(', ') || 'none';
     throw new ToolError(`Unknown combatant id "${id}". Known ids: ${known}`);

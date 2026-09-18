@@ -70,7 +70,8 @@ function describeHealth(vitals: {
 
 function describeCombatant(combatant: Combatant): string {
   const conditions = combatant.conditions.length > 0 ? `, ${combatant.conditions.join(', ')}` : '';
-  return `- ${combatant.name} (id: ${combatant.id}) ${describeHealth(combatant)}, AC ${combatant.ac}${conditions}`;
+  const attacks = combatant.attacks.map((attack) => attack.name).join(', ') || 'none';
+  return `- ${combatant.name} (id: ${combatant.id}) ${describeHealth(combatant)}, AC ${combatant.ac}${conditions}, attacks: ${attacks}`;
 }
 
 // So a description that scrolled out of the transcript window still fits one prompt line.
