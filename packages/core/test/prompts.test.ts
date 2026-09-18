@@ -30,6 +30,28 @@ describe('basicPrompts.pcControlCheck', () => {
     });
     expect(user!.content).toContain('since the DM last spoke:\n- nothing');
   });
+
+  it('allows describing position, injuries, and conditions even if the player did not say it', () => {
+    const [system] = basicPrompts.pcControlCheck({
+      party: ['Kira Vale'],
+      declarations: [],
+      narration: 'Kira stands by the window, her bleeding wound fresh.',
+    });
+    expect(system!.content).toContain(
+      'Describing where a player character is, what their injuries and conditions look like, and what the world does to them is allowed, even when the player did not say it.'
+    );
+  });
+
+  it('defines a violation as inventing words, thoughts, feelings, or decisions', () => {
+    const [system] = basicPrompts.pcControlCheck({
+      party: ['Kira Vale'],
+      declarations: [],
+      narration: 'Kira stands by the window.',
+    });
+    expect(system!.content).toContain(
+      "A violation is the DM inventing a player character's words, thoughts, feelings, or decisions, or having them take an action their player did not declare."
+    );
+  });
 });
 
 describe('basicPrompts.dm', () => {

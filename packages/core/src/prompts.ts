@@ -44,7 +44,8 @@ const DM_SYSTEM = [
 const PC_CONTROL_SYSTEM = [
   "You check a Dungeons & Dragons Dungeon Master's narration for one rule: the DM must not play the player characters.",
   "The DM may describe a player character carrying out and experiencing the action that player declared, and the world's response to it, including effects on the character.",
-  "The DM must not write a player character's dialogue, thoughts, feelings, or decisions, or have them do anything their player did not declare.",
+  'Describing where a player character is, what their injuries and conditions look like, and what the world does to them is allowed, even when the player did not say it.',
+  "A violation is the DM inventing a player character's words, thoughts, feelings, or decisions, or having them take an action their player did not declare.",
   'Quote each offending sentence exactly as it appears in the narration.',
   'Reply with JSON only: {"violations": [{"pc": "<name>", "sentence": "<exact sentence>", "why": "<short reason>"}]}. Reply {"violations": []} when there are none.',
 ].join('\n');
