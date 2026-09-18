@@ -164,19 +164,31 @@ export const recordInvention = defineTool({
   },
 });
 
+/** The id shape used everywhere else: a lowercase-alnum token, hyphens allowed after the first char. */
+const ID_SHAPE = /^[a-z0-9][a-z0-9-]*$/;
+
 /**
- * Accepts the strict `{ kind: ... }` object, or a bare string shorthand a model sends instead:
- * "party" or "open" map to those kinds, and any other string is treated as a single player
- * character id (`{ kind: 'pcs', ids: [string] }`). Coerced only here, at the tool's argument
- * boundary — the logged `hand_off` event still carries the object shape, and an id that names no
- * real party member still errors below with today's message.
+ * Accepts the strict `{ kind: ... }` object, or a bare string shorthand a model sends instead.
+ * After trimming, "party" or "open" map to those kinds, and a string matching {@link ID_SHAPE} is
+ * treated as a single player character id (`{ kind: 'pcs', ids: [string] }`) — an id that names no
+ * real party member still errors below with today's message. Any other string (garbled tool-call
+ * syntax, a comma-separated list, an empty string) is a shape error, not a list of ids: it never
+ * reaches `state.partyIds`, so it can't be misread as an unknown-id problem.
  */
-const HandOffTargetArg = z.preprocess((value) => {
-  if (typeof value !== 'string') return value;
-  if (value === 'party') return { kind: 'party' };
-  if (value === 'open') return { kind: 'open' };
-  return { kind: 'pcs', ids: [value] };
-}, HandOffTarget);
+const HandOffTargetArg = z.union([z.string(), HandOffTarget]);
+
+const HAND_OFF_SHAPE_ERROR =
+  'hand_off target must be an object like {"kind": "party"}, {"kind": "open"}, or ' +
+  '{"kind": "pcs", "ids": ["kira"]}.';
+
+function normalizeHandOffTarget(target: string | HandOffTarget): HandOffTarget {
+  if (typeof target !== 'string') return target;
+  const trimmed = target.trim();
+  if (trimmed === 'party') return { kind: 'party' };
+  if (trimmed === 'open') return { kind: 'open' };
+  if (ID_SHAPE.test(trimmed)) return { kind: 'pcs', ids: [trimmed] };
+  throw new ToolError(HAND_OFF_SHAPE_ERROR);
+}
 
 export const handOff = defineTool({
   name: 'hand_off',
@@ -185,16 +197,17 @@ export const handOff = defineTool({
   parameters: z.object({ target: HandOffTargetArg }),
   run(args, { recorder }) {
     const { state } = recorder;
-    if (args.target.kind === 'pcs') {
-      const unknown = args.target.ids.filter((id) => !state.partyIds.includes(id));
+    const target = normalizeHandOffTarget(args.target);
+    if (target.kind === 'pcs') {
+      const unknown = target.ids.filter((id) => !state.partyIds.includes(id));
       if (unknown.length > 0) {
         throw new ToolError(
           `Unknown player character ids: ${unknown.join(', ')}. Party ids: ${state.partyIds.join(', ')}`
         );
       }
     }
-    const responders = selectResponders(args.target, state);
-    recorder.emit({ type: 'hand_off', target: args.target, responders });
+    const responders = selectResponders(target, state);
+    recorder.emit({ type: 'hand_off', target, responders });
     let result = 'Handed off.';
     if (responders.length > 0) result = `Handed off to ${responders.join(', ')}.`;
     else if (!state.combat) {

@@ -527,5 +527,19 @@ describe('hand_off', () => {
       });
       expect(harness.recorder.events).toHaveLength(0);
     });
+
+    const SHAPE_ERROR =
+      'hand_off target must be an object like {"kind": "party"}, {"kind": "open"}, or ' +
+      '{"kind": "pcs", "ids": ["kira"]}.';
+
+    it.each([
+      ['garbled tool-call syntax', '<parameter=kind>\npcs'],
+      ['a comma-separated list', 'party, open'],
+      ['an empty string', ''],
+    ])('rejects %s as a shape error, not a list of ids', async (_label, target) => {
+      const harness = toolHarness();
+      expect(await harness.run(handOff, { target })).toEqual({ ok: false, error: SHAPE_ERROR });
+      expect(harness.recorder.events).toHaveLength(0);
+    });
   });
 });
