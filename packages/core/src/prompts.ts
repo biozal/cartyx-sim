@@ -73,7 +73,13 @@ function describeHealth(vitals: {
 function describeCombatant(combatant: Combatant): string {
   const conditions = combatant.conditions.length > 0 ? `, ${combatant.conditions.join(', ')}` : '';
   const attacks = combatant.attacks.map((attack) => attack.name).join(', ') || 'none';
-  return `- ${combatant.name} (id: ${combatant.id}) ${describeHealth(combatant)}, AC ${combatant.ac}${conditions}, attacks: ${attacks}`;
+  // Carried items are listed for the same reason as attacks: so the DM works from what a
+  // character has instead of inventing it (session 011 spent items nobody was carrying).
+  const carrying =
+    combatant.inventory
+      .map((item) => (item.quantity > 1 ? `${item.quantity} × ${item.name}` : item.name))
+      .join(', ') || 'nothing';
+  return `- ${combatant.name} (id: ${combatant.id}) ${describeHealth(combatant)}, AC ${combatant.ac}${conditions}, attacks: ${attacks}, carrying: ${carrying}`;
 }
 
 // So a description that scrolled out of the transcript window still fits one prompt line.

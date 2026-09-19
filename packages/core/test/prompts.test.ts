@@ -108,6 +108,24 @@ describe('basicPrompts.dm', () => {
     );
   });
 
+  it('lists what a combatant carries, or "nothing" (session 011 spent items nobody had)', () => {
+    const { state } = startedState([
+      {
+        ...kira,
+        inventory: [
+          { name: 'Healing Potion', quantity: 2 },
+          { name: 'Rope', quantity: 1 },
+        ],
+      },
+      tomas,
+    ]);
+    const [, user] = basicPrompts.dm({ state, transcript: '', instruction: 'Begin.' });
+    expect(user!.content).toContain('carrying: 2 × Healing Potion, Rope');
+    expect(user!.content).toContain(
+      '- Tomas Reed (id: tomas) HP 12/12, AC 16, attacks: Longsword, carrying: nothing'
+    );
+  });
+
   it('lists a combatant\'s attacks by name, or "none" when it has no attacks', () => {
     const { state } = startedState();
     const [, user] = basicPrompts.dm({ state, transcript: '', instruction: 'Begin.' });
