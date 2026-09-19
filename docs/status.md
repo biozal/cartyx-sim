@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1158 tests plus 1 expected failure), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1176 tests plus 1 expected failure), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -241,6 +241,38 @@ Findings 1–6 are fixed (`bc334ff..656f4ce`); finding 7 is still open.
 
 The batch had one review; its findings (a leak cut breaking quotes, over-broad `order of battle`/`0 hit points`/bulleted-name matches, titles splitting sentences, exact-only checker name matching, turn-order shapes missed) are fixed in the follow-up commit.
 
+## Seventh 1-hour run (session 011, 2026-09-19)
+
+Run on HEAD `80ac5e0`, after the sixth batch of fixes. It reached `target_reached` at ~66 spoken minutes in **86 wall minutes** with no pauses.
+
+| Measure               | 009      | 010      | 011      |
+| --------------------- | -------- | -------- | -------- |
+| Wall / spoken minutes | 83 / ~65 | 77 / ~64 | 86 / ~66 |
+| Pauses                | 1        | none     | none     |
+| DM share              | 65%      | 66%      | 67%      |
+| Fights                | 1        | 0        | 2        |
+| Checker flags         | 13       | 6        | 12       |
+| Tool errors           | 7        | 2        | 11       |
+
+**No retelling was flagged and no turn hit the retell cap**, so the sixth batch cost nothing; one turn still hit the step limit, for the reason in finding 1. The leak strip caught six leaks before they were voiced, including four hit-point readouts in the DM's own words. Findings:
+
+1. **A monster attacked four times in one round.** `giant-rat-5` bit Kira at seq 286, 294, 301 and 314 — once out of turn (Mira held the spotlight) and three more times on its own turn — taking her from 24 HP to 6, while the DM also narrated another rat's turn in between. Nothing tied an action to the initiative order or counted how many a combatant had taken. This also drove that turn into the step limit.
+2. **Four hand-offs to monsters.** The DM tried to pass the spotlight to `giant-rat-2`/`giant-rat-3` when initiative said they were next.
+3. **Items spent that nobody carried.** Three `remove_item` errors for a glass vial and a potion of healing: the party files give the PCs no inventory, and the DM prompt never listed it.
+4. **Two voiced turn announcements.** "Giant Rat 2's turn is complete. Giant Rat 3's turn is complete." and "Giant Rat 3, it is your turn." — the DM's own wording, which the engine-phrasing pattern missed.
+5. **Four of twelve checker flags cut a miss.** "Mira twists away", "she sidesteps", "Mira's form blurs just out of reach" — the DM describing an enemy's attack missing.
+6. **Death saves have still never fired live.** Kira reached 6/24, the closest yet, in two fights.
+
+### Fixes after the seventh run
+
+Findings 1–5 are fixed (`7b4d55d..HEAD`); finding 6 is still open. The review caught that the first version of fix 1 restricted **who** could act but not **how often**, so it stopped only one of the four bites; the per-turn count came out of that.
+
+1. `attack` and `cast_spell` refuse anyone but the combatant whose turn it is, **and a second action on the same turn**, since the engine models no multiattack. The turn is counted from the last `combat_turn` (or `combat_start`) across the log, so an ambusher who attacks in the beat that starts the fight cannot attack again in the next beat before initiative moves on. A combatant outside the initiative order — a trap or a watching NPC — is not gated. Replaying sessions 007–011, the rule refuses 16 out-of-turn attacks and no legitimate one.
+2. In combat, a `hand_off` naming only combatants is taken as a hand-off to the party, since initiative decides who acts next.
+3. The DM prompt lists each combatant's carried items beside its attacks (players see their own too), and the `remove_item` error names what the character does carry. **Worth deciding:** only Kira and Mira carry anything in the Avalon party files (a healing potion each); Bram and Tomas carry nothing, which is why the DM reached for a vial that did not exist.
+4. `dm_state_leak` strips "<Name>'s turn is complete/over/done/finished", anchored to a capitalized name or a number so prose like "before its turn is complete the rope snaps" survives. Table talk like "Kira, it is your turn. What do you do?" stays, since a DM says that aloud at a real table.
+5. The checker prompt allows a miss told as the character avoiding it (twisting away, ducking, catching it on a shield), because the dice decided the miss; words, thoughts, decisions, or an action of the character's own are still violations.
+
 ## Sixth 1-hour run (session 010, 2026-09-19)
 
 Run on HEAD `95785ad`, after the fifth batch of fixes. It reached `target_reached` at ~64 spoken minutes in **77 wall minutes** with no pauses (the Ampere stayed up).
@@ -315,29 +347,31 @@ Findings 1–4 are fixed in `197b339` plus a follow-up after review; finding 5 i
 
 ## Where we are (2026-09-19)
 
-**Branch `feat/dm-pc-control-checker`: 105 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1158 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
+**Branch `feat/dm-pc-control-checker`: 112 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1176 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
 
 The expected failure is deliberate: it documents the quote-majority split's known cost (`"Who's next?" I nod to You.`), and will start passing only if that rule is revisited.
 
-**Not pushing until a live session comes back clean.** Aaron is in no rush to check in. Six 1-hour sessions have run (005–010), each followed by a reviewed batch of fixes, and each batch has been smaller than the last. Session 010 had no voiced stat leaks and no fight; its two findings (a paraphrase loop and a bare-line tool call) are fixed and reviewed but not yet run live.
+**Not pushing until a live session comes back clean.** Aaron is in no rush to check in. Seven 1-hour sessions have run (005–011), each followed by a reviewed batch of fixes. Session 011 confirmed the retelling rule costs nothing live (no flags, no cap hits) and that the leak strip catches hit-point readouts before they are voiced; it then turned up a real rules bug — a monster acting four times in one round — which is fixed and reviewed but not yet run live.
 
 ### What each batch did
 
-| Batch        | Trigger                     | Commits            | What changed                                                                                                                  |
-| ------------ | --------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| Script stage | Reviews of sessions 002–004 | `cc4eb6e..bf09ef5` | The ten script findings, including the speech-direction grammar (5 review rounds)                                             |
-| First run    | Session 005                 | `347f6d7..dd50ea2` | Death saves, combat closing, state-leak strip, repeat cutting, NPC continuity, tool-error logging                             |
-| Second run   | Session 006                 | `2deb439..86cdeb0` | Combat narration caps, player repeat re-prompt, tool-shape coercions, hard-stop rule, read-aloud labels                       |
-| Third run    | Session 007                 | `1d2f823..643befb` | Wider leak patterns, strict `hand_off` shape, attacks in the DM prompt, NPC-id resolution, cross-beat repeats, checker tuning |
-| Fourth run   | Session 008                 | `bc334ff..0bb260d` | Sentence-level leak strip, HP-in-prose and turn-order leaks, NPC checker findings, no fight past the target, quote repair     |
-| Fifth run    | Session 009                 | `197b339..95785ad` | Instruction-echo and HP/health leaks, checker allows enemy blows on PCs, `hand_off` to monsters explained                     |
-| Sixth run    | Session 010                 | `c75717c..HEAD`    | Retelling (paraphrase loop) rejection with a per-turn cap, bare-line tool-call leaks                                          |
+| Batch        | Trigger                     | Commits            | What changed                                                                                                                   |
+| ------------ | --------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Script stage | Reviews of sessions 002–004 | `cc4eb6e..bf09ef5` | The ten script findings, including the speech-direction grammar (5 review rounds)                                              |
+| First run    | Session 005                 | `347f6d7..dd50ea2` | Death saves, combat closing, state-leak strip, repeat cutting, NPC continuity, tool-error logging                              |
+| Second run   | Session 006                 | `2deb439..86cdeb0` | Combat narration caps, player repeat re-prompt, tool-shape coercions, hard-stop rule, read-aloud labels                        |
+| Third run    | Session 007                 | `1d2f823..643befb` | Wider leak patterns, strict `hand_off` shape, attacks in the DM prompt, NPC-id resolution, cross-beat repeats, checker tuning  |
+| Fourth run   | Session 008                 | `bc334ff..0bb260d` | Sentence-level leak strip, HP-in-prose and turn-order leaks, NPC checker findings, no fight past the target, quote repair      |
+| Fifth run    | Session 009                 | `197b339..95785ad` | Instruction-echo and HP/health leaks, checker allows enemy blows on PCs, `hand_off` to monsters explained                      |
+| Sixth run    | Session 010                 | `c75717c..80ac5e0` | Retelling (paraphrase loop) rejection with a per-turn cap, bare-line tool-call leaks                                           |
+| Seventh run  | Session 011                 | `7b4d55d..HEAD`    | One action per combatant per turn, combat hand-offs, carried items in the DM prompt, turn announcements, checker allows a miss |
 
 ### Next steps, in order
 
-1. **Run session 011** (`npm run sim -- run --campaign avalon --session 11 --target-minutes 60`, backgrounded, teed to `campaigns/avalon/logs/`). Watch for `duplicate_narration` and `dm_retell_limit` flags (are they all real retellings?), any HP/health/initiative readout or tool syntax in `script.md`, checker flags on enemy blows, `hand_off` errors, and whether a fight happens and death saves finally fire.
+1. **Run session 012** (`npm run sim -- run --campaign avalon --session 12 --target-minutes 60`, backgrounded, teed to `campaigns/avalon/logs/`). Watch for: tool errors from the new one-action-per-turn rule (a refused attack costs the rest of that model response, so the count may rise before the DM adapts), whether fights now run one action per combatant per round, checker flags on misses, any readout or tool syntax in `script.md`, and whether death saves finally fire (Kira reached 6/24 in 011).
 2. **Push or merge once a session surfaces no new fix-worthy findings.**
-3. Then the plan work already queued: Plan 2B (lore), the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike.
+3. Consider giving Bram and Tomas starting gear in the Avalon party files, so the DM has something real to spend.
+4. Then the plan work already queued: Plan 2B (lore), the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike.
 
 ### Operating notes from these runs
 
