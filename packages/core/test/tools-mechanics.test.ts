@@ -329,6 +329,68 @@ describe('request_check', () => {
   });
 });
 
+describe('attack and the combat turn', () => {
+  /** A fight where it is Tomas's turn, with the goblin later in the order. */
+  function inCombat(rolls: number[]) {
+    const harness = withGoblin(rolls);
+    harness.recorder.emit({
+      type: 'combat_start',
+      order: [
+        { combatantId: 'tomas', roll: 18, dexMod: 1, total: 19 },
+        { combatantId: 'goblin-1', roll: 10, dexMod: 2, total: 12 },
+        { combatantId: 'kira', roll: 4, dexMod: 2, total: 6 },
+      ],
+    });
+    return harness;
+  }
+
+  it('refuses an attack by anyone but the combatant whose turn it is (session 011)', async () => {
+    const harness = inCombat([12, 3]);
+    const result = await harness.run(attack, {
+      attackerId: 'goblin-1',
+      targetId: 'kira',
+      attackName: 'Scimitar',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain(
+      "It is Tomas Reed's turn (id: tomas), so Goblin cannot attack now"
+    );
+    expect(harness.recorder.events.filter((e) => e.type === 'roll')).toEqual([]);
+  });
+
+  it('allows the attack of the combatant whose turn it is', async () => {
+    const harness = inCombat([12, 3]);
+    const result = await harness.run(attack, {
+      attackerId: 'tomas',
+      targetId: 'goblin-1',
+      attackName: 'Longsword',
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('refuses a spell cast out of turn, and allows one in turn', async () => {
+    const harness = inCombat([12, 3]);
+    const out = await harness.run(castSpell, {
+      casterId: 'kira',
+      spell: 'Sacred Flame',
+      slotLevel: 0,
+      targetIds: ['goblin-1'],
+    });
+    expect(out.ok).toBe(false);
+    expect((out as { error: string }).error).toContain("It is Tomas Reed's turn");
+  });
+
+  it('refuses nothing outside combat, when nobody has a turn', async () => {
+    const harness = withGoblin([12, 3]);
+    const result = await harness.run(attack, {
+      attackerId: 'goblin-1',
+      targetId: 'kira',
+      attackName: 'Scimitar',
+    });
+    expect(result.ok).toBe(true);
+  });
+});
+
 describe('attack', () => {
   it('rolls, applies damage, and reports HP', async () => {
     const harness = withGoblin([12, 3]);

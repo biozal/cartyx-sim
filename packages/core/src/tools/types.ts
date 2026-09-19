@@ -159,6 +159,22 @@ function resolveNpcId(state: GameState, id: string): Combatant | undefined {
   return matches.length === 1 ? ownEntry(state.combatants, matches[0]!) : undefined;
 }
 
+/**
+ * Refuses an action by anyone but the combatant whose turn it is, while combat runs: in session
+ * 011 the DM had one giant rat bite Kira three times in a single turn, taking her from 24 HP to 6.
+ * Outside combat there are no turns, so nothing is refused.
+ */
+export function requireCombatTurn(state: GameState, actor: Combatant, what: string): void {
+  const { combat } = state;
+  if (!combat) return;
+  const currentId = combat.order[combat.turnIndex]?.combatantId;
+  if (!currentId || currentId === actor.id) return;
+  const current = ownEntry(state.combatants, currentId);
+  throw new ToolError(
+    `It is ${current?.name ?? currentId}'s turn (id: ${currentId}), so ${actor.name} cannot ${what} now. Resolve this turn, then end yours with hand_off: initiative brings ${actor.name} round again.`
+  );
+}
+
 export function getCombatant(state: GameState, id: string): Combatant {
   const combatant = ownEntry(state.combatants, id) ?? resolveNpcId(state, id);
   if (!combatant) {

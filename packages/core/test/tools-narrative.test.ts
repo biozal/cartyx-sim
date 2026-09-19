@@ -474,6 +474,30 @@ describe('hand_off', () => {
     expect(harness.recorder.state.pendingResponders).toEqual(['kira', 'tomas']);
   });
 
+  it('takes a hand-off naming only combatants in combat as one to the party (session 011)', async () => {
+    const harness = toolHarness();
+    harness.recorder.emit({
+      type: 'combatant_added',
+      combatant: makeCombatant({ id: 'giant-rat-2', name: 'Giant Rat 2', kind: 'monster' }),
+    });
+    harness.recorder.emit({
+      type: 'combat_start',
+      order: [
+        { combatantId: 'kira', roll: 15, dexMod: 2, total: 17 },
+        { combatantId: 'giant-rat-2', roll: 8, dexMod: 2, total: 10 },
+      ],
+    });
+    const result = await harness.run(handOff, { target: { kind: 'pcs', ids: ['giant-rat-2'] } });
+    expect(result.ok).toBe(true);
+    expect((result as { outcome: { result: string } }).outcome.result).toContain(
+      'giant-rat-2 is not a player character, so initiative decides who acts next.'
+    );
+    expect(harness.recorder.events.at(-1)).toMatchObject({
+      type: 'hand_off',
+      target: { kind: 'party' },
+    });
+  });
+
   it('tells the DM a monster cannot take the spotlight (session 009)', async () => {
     const harness = toolHarness();
     harness.recorder.emit({

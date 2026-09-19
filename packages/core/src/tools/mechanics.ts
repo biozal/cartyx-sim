@@ -18,7 +18,7 @@ import {
 import { z } from 'zod';
 import type { StateField } from '../events';
 import type { EventInput, TurnRecorder } from '../recorder';
-import { defineTool, getCombatant, ToolError } from './types';
+import { defineTool, getCombatant, requireCombatTurn, ToolError } from './types';
 
 export const RollModeArg = z.enum(['normal', 'advantage', 'disadvantage']).default('normal');
 
@@ -163,6 +163,7 @@ export const attack = defineTool({
     if (attacker.dead || attacker.hp === 0) {
       throw new ToolError(`${attacker.name} cannot attack at 0 HP or while dead.`);
     }
+    requireCombatTurn(recorder.state, attacker, 'attack');
     const result = resolveAttack(attacker, target, args.attackName, rng, args.mode);
     const label = `${attacker.name} ${result.attack.name} → ${target.name}`;
     for (const event of attackRollEvents(attacker.id, label, result)) recorder.emit(event);
@@ -208,6 +209,7 @@ export const castSpell = defineTool({
   run(args, { recorder, rng }) {
     const { state } = recorder;
     const caster = getCombatant(state, args.casterId);
+    requireCombatTurn(state, caster, 'cast a spell');
     const targets = args.targetIds.map((id) => getCombatant(state, id));
     // Save and healing effects hit each target once, regardless of duplicate ids; a repeated
     // attack (e.g. Scorching Ray) is a separate ray per id.

@@ -203,22 +203,32 @@ export const handOff = defineTool({
   parameters: z.object({ target: HandOffTargetArg }),
   run(args, { recorder }) {
     const { state } = recorder;
-    const target = normalizeHandOffTarget(args.target);
+    let target = normalizeHandOffTarget(args.target);
+    // A DM in combat hands the spotlight to whoever initiative says is next, monsters included
+    // (session 011 did it four times). Initiative already decides that, so a hand-off naming only
+    // combatants is taken as a hand-off to the party rather than an error.
+    let coerced = '';
     if (target.kind === 'pcs') {
       const unknown = target.ids.filter((id) => !state.partyIds.includes(id));
       if (unknown.length > 0) {
-        const others = unknown.filter(
-          (id) =>
-            ownEntry(state.combatants, id) !== undefined || ownEntry(state.npcs, id) !== undefined
-        );
-        if (others.length > 0) {
+        const combatants = unknown.filter((id) => ownEntry(state.combatants, id) !== undefined);
+        if (state.combat && combatants.length === unknown.length) {
+          coerced = ` ${unknown.join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not a player character, so initiative decides who acts next.`;
+          target = { kind: 'party' };
+        } else {
+          const others = unknown.filter(
+            (id) =>
+              ownEntry(state.combatants, id) !== undefined || ownEntry(state.npcs, id) !== undefined
+          );
+          if (others.length > 0) {
+            throw new ToolError(
+              `Only player characters take the spotlight, and ${others.join(', ')} ${others.length === 1 ? 'is' : 'are'} not one: act for monsters and NPCs with tools during your own turn. Unknown ids: ${unknown.join(', ')}. Hand off to player characters by id, or to the party with {"kind": "party"}; in combat, initiative picks who acts next. Party ids: ${state.partyIds.join(', ')}`
+            );
+          }
           throw new ToolError(
-            `Only player characters take the spotlight, and ${others.join(', ')} ${others.length === 1 ? 'is' : 'are'} not one: act for monsters and NPCs with tools during your own turn. Unknown ids: ${unknown.join(', ')}. Hand off to player characters by id, or to the party with {"kind": "party"}; in combat, initiative picks who acts next. Party ids: ${state.partyIds.join(', ')}`
+            `Unknown player character ids: ${unknown.join(', ')}. Party ids: ${state.partyIds.join(', ')}`
           );
         }
-        throw new ToolError(
-          `Unknown player character ids: ${unknown.join(', ')}. Party ids: ${state.partyIds.join(', ')}`
-        );
       }
     }
     const responders = selectResponders(target, state);
@@ -230,6 +240,6 @@ export const handOff = defineTool({
         'Nobody can respond: no player character you handed off to is able to act. Resolve that in ' +
         'the story (healing, rescue, or a scene change) before handing off again.';
     }
-    return { result, endsBeat: true };
+    return { result: result + coerced, endsBeat: true };
   },
 });
