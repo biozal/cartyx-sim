@@ -93,6 +93,47 @@ describe('cutRepeats', () => {
   });
 });
 
+describe('cutRepeats keeps quotes balanced', () => {
+  it('reopens and recloses a quote whose first and last sentences were cut (session 008)', () => {
+    const out = cutRepeats(
+      '"Silas patches up his own problems usually," the tavern keeper grunts. "But he\'s right about one thing. That place... it\'s been quiet. Too quiet. And the sheep stopped coming near the lower pastures two days ago." He turns his sharp eyes to the party.',
+      {
+        narratedThisBeat: [
+          '"But he\'s right about one thing. And the sheep stopped coming near the lower pastures two days ago."',
+        ],
+        recentPlayerLines: [],
+      }
+    );
+    expect(out.kept).toBe(
+      '"Silas patches up his own problems usually," the tavern keeper grunts. "That place... it\'s been quiet. Too quiet." He turns his sharp eyes to the party.'
+    );
+  });
+
+  it('uses curly marks when the narration does', () => {
+    const out = cutRepeats('“The gate is sealed for good now. Nobody leaves tonight.” He sighs.', {
+      narratedThisBeat: ['“The gate is sealed for good now.'],
+      recentPlayerLines: [],
+    });
+    expect(out.kept).toBe('“Nobody leaves tonight.” He sighs.');
+  });
+
+  it('closes a quote whose closing sentence was cut when nothing follows', () => {
+    const out = cutRepeats('"Stay close. The old gate groans open again."', {
+      narratedThisBeat: ['The old gate groans open again.'],
+      recentPlayerLines: [],
+    });
+    expect(out.kept).toBe('"Stay close."');
+  });
+
+  it('leaves a narration that was unbalanced to begin with as it was', () => {
+    const out = cutRepeats('The old gate groans open again. "Stay close.', {
+      narratedThisBeat: ['The old gate groans open again.'],
+      recentPlayerLines: [],
+    });
+    expect(out.kept).toBe('"Stay close.');
+  });
+});
+
 describe('repeatedSentences', () => {
   it('finds a sentence the speaker already said', () => {
     expect(
