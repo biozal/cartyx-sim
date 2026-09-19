@@ -1,5 +1,5 @@
 import { splitSentences } from './pc-control';
-import { escapeRegExp } from './text';
+import { escapeRegExp, joinKeptSentences } from './text';
 
 export type ViolationRule =
   | 'dm_controls_pc'
@@ -150,37 +150,50 @@ function controlledCharacter(text: string, names: readonly string[]): string | n
 // Prompt state that must never reach narration: a combatant's id parenthetical, an HP block
 // (either digit order, or "HP rises to 19/28"), a hit-point readout ("9 out of 22 hit points",
 // "drops to just 3 hit points", "4 hit points left"; "loses 3 hit points" is a mechanics claim,
-// left to that rule), an AC readout, a bald "whose turn" statement, a turn-order readout
-// ("The order of combat is as follows:"), a transcript tag (e.g. "[combat]", "[hand_off]"), or a
-// hand-off JSON object. Checked one sentence at a time, so the prose around a leak survives.
+// left to that rule, and "drops to 0 hit points" is a PC going down, which everyone sees), an AC
+// readout, a bald "whose turn" statement, a turn-order readout ("Initiative is rolled.", "The
+// order of combat is as follows:", "**Initiative:** Kira 18"), a transcript tag (e.g. "[combat]",
+// "[hand_off]"), or a hand-off JSON object. Checked one sentence at a time, so the prose around a
+// leak survives. "Order of battle" and "turn order" are left alone: story prose uses both.
 const SENTENCE_LEAK_PATTERNS = [
   /\(id:\s*[a-z0-9-]+\)/i,
   /\bHP\b[^.\d\n]{0,30}\d+\s*\/\s*\d+/i,
   /\d+\s*\/\s*\d+\s*HP\b/i,
-  /\b(?:\d+\s+(?:out\s+)?of\s+\d+|(?:to|at|with)\s+(?:just\s+|only\s+)?\d+)\s+(?:hit\s+points?|HP)\b/i,
-  /\b\d+\s+(?:hit\s+points?|HP)\s+(?:left|remaining)\b/i,
+  /\b(?:\d+\s+(?:out\s+)?of\s+\d+|(?:to|at|with)\s+(?:just\s+|only\s+)?[1-9]\d*)\s+(?:hit\s+points?|HP)\b/i,
+  /\b[1-9]\d*\s+(?:hit\s+points?|HP)\s+(?:left|remaining)\b/i,
   /\bAC\s+\d+\b/i,
   /\bIt is [^.]{1,40}['’]s turn\b/i,
-  /\b(?:initiative|turn|combat)\s+order\b|\border\s+of\s+(?:combat|initiative|battle)\b|\binitiative\s+(?:is|has been)\s+rolled\b/i,
+  /\binitiative\s+order\b|\border\s+of\s+(?:combat|initiative)\b|\binitiative\s+(?:is|has been)\s+rolled\b|\binitiative\b\W{0,4}:/i,
   /\[(?:combat|roll|state|scene|npc|lore|invented|hand_off|ooc)\]/i,
   /\{[^}]*"(?:target|kind)"\s*:/,
 ];
 
 // Whole lines of prompt state: the "Current Status" heading the DM writes above its own status
-// readout, and a list item that is only a combatant's name, optionally with its initiative
-// ("1. Mira Ashdown", "- **Shadow Stalker 3** (11)"), which is how the DM reads out turn order.
+// readout, and a turn-order entry, which is how the DM reads out initiative: a numbered item that
+// is only a combatant's name ("1. Mira Ashdown", "3. Shadow Stalker #3"), or a combatant's name
+// with its initiative after it, in a list or not ("- **Bram Holloway** (21)", "Kira Vale — 18",
+// "2. Goblin: 12", "1. Kira Vale (Initiative 18)"). A bulleted name with no number is left alone,
+// since a notice or a roll call lists names that way too.
 const LINE_LEAK_PATTERNS = [/^\s*\*\*Current Status:?\*\*\s*$/i, /^\s*Current Status:?\s*$/i];
-const LIST_ITEM = /^\s*(?:\d+[.)]|[-*•])\s+(.+?)\s*$/;
+const NUMBERED_ITEM = /^\s*\d{1,2}[.)]\s+/;
+const BULLET = /^\s*[-*•]\s+/;
+const INITIATIVE_SUFFIX =
+  /(?:\s*\(\s*(?:initiative\s*:?\s*)?\d{1,2}\s*\)|\s*[—–:-]\s*(?:initiative\s*:?\s*)?\d{1,2})\s*$/i;
 
-function isCombatantListItem(line: string, combatantNames: readonly string[]): boolean {
-  const item = LIST_ITEM.exec(line)?.[1];
-  if (!item) return false;
+function isTurnOrderEntry(line: string, combatantNames: readonly string[]): boolean {
+  if (combatantNames.length === 0) return false;
+  const numbered = NUMBERED_ITEM.test(line);
+  let item = line.replace(NUMBERED_ITEM, '').replace(BULLET, '').trim();
+  const withInitiative = INITIATIVE_SUFFIX.test(item);
+  if (!numbered && !withInitiative) return false;
+  item = item.replace(INITIATIVE_SUFFIX, '');
   const name = item
-    .replace(/\s*\(\s*\d+\s*\)\s*$/, '')
     .replace(/\*\*|__/g, '')
     .replace(/[.:]\s*$/, '')
+    .replace(/\s+#(\d+)$/, ' $1')
     .trim()
     .toLowerCase();
+  if (name.length === 0) return false;
   return combatantNames.some((candidate) => {
     // Numbered copies share one base name: the DM may write "Shadow Stalker 3" for a monster
     // added as "Shadow Stalker", or "Hooded Figure" for one added as "Hooded Figure 1".
@@ -197,10 +210,13 @@ export interface StateLeakStrip {
   removed: string[];
 }
 
+const leaks = (sentence: string) => SENTENCE_LEAK_PATTERNS.some((p) => p.test(sentence));
+
 /**
- * The narration without its prompt-state leaks: a heading or combatant list item goes as a whole
- * line, any other leak goes as the one sentence it sits in, so prose sharing its line survives.
- * Runs of blank lines left behind collapse to one paragraph break.
+ * The narration without its prompt-state leaks: a heading or turn-order entry goes as a whole
+ * line, any other leak goes as the one sentence it sits in, so prose sharing its line survives,
+ * and a quote mark the cut sentence held is added back to the speech left around it. Runs of
+ * blank lines left behind collapse to one paragraph break.
  */
 export function stripStateLeaks(
   text: string,
@@ -210,21 +226,16 @@ export function stripStateLeaks(
   const lines = text.split('\n').map((line) => {
     if (
       LINE_LEAK_PATTERNS.some((pattern) => pattern.test(line)) ||
-      isCombatantListItem(line, combatantNames)
+      isTurnOrderEntry(line, combatantNames)
     ) {
       removed.push(line.trim());
       return '';
     }
     const parts = splitSentences(line);
-    if (!parts.some(({ sentence }) => SENTENCE_LEAK_PATTERNS.some((p) => p.test(sentence)))) {
-      return line;
-    }
-    let kept = '';
-    for (const { sentence, separator } of parts) {
-      if (SENTENCE_LEAK_PATTERNS.some((pattern) => pattern.test(sentence))) removed.push(sentence);
-      else kept += sentence + separator;
-    }
-    return kept.trimEnd();
+    if (!parts.some(({ sentence }) => leaks(sentence))) return line;
+    const cut = parts.map((part) => ({ ...part, keep: !leaks(part.sentence) }));
+    removed.push(...cut.filter((part) => !part.keep).map((part) => part.sentence));
+    return joinKeptSentences(cut);
   });
   const kept = lines
     .join('\n')

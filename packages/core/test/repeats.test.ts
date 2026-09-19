@@ -125,6 +125,17 @@ describe('cutRepeats keeps quotes balanced', () => {
     expect(out.kept).toBe('"Stay close."');
   });
 
+  it('matches the style of the mark that opened the quote, not other marks in the narration', () => {
+    const out = cutRepeats(
+      'She says “fine.” He nods. "Take the long road. The old gate groans open again."',
+      {
+        narratedThisBeat: ['The old gate groans open again.'],
+        recentPlayerLines: [],
+      }
+    );
+    expect(out.kept).toBe('She says “fine.” He nods. "Take the long road."');
+  });
+
   it('leaves a narration that was unbalanced to begin with as it was', () => {
     const out = cutRepeats('The old gate groans open again. "Stay close.', {
       narratedThisBeat: ['The old gate groans open again.'],

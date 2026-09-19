@@ -83,6 +83,11 @@ export interface SplitSentence {
   separator: string;
 }
 
+// A title's period ends no sentence: "Mr. Vale" and "St. Cuthbert" stay whole, so cutting the
+// sentence after them never strands the title.
+const SENTENCE_BREAK =
+  /(?<=[.!?…]["“”‘’')\]]*)(?<!\b(?:Mr|Mrs|Ms|Dr|St|Mt|Jr|Sr|Prof|Capt|Lt|Sgt|Col|Gen|Fr)\.)(\s+)/;
+
 /**
  * Splits a paragraph after sentence-ending punctuation and any closing quotes or brackets,
  * keeping the original separator (a space, a newline, several newlines, …) that followed each
@@ -90,7 +95,7 @@ export interface SplitSentence {
  * always using a single space.
  */
 export function splitSentences(paragraph: string): SplitSentence[] {
-  const parts = paragraph.split(/(?<=[.!?…]["“”‘’')\]]*)(\s+)/);
+  const parts = paragraph.split(SENTENCE_BREAK);
   const result: SplitSentence[] = [];
   for (let i = 0; i < parts.length; i += 2) {
     const sentence = parts[i]!.trim();
@@ -203,20 +208,41 @@ export function verifyFindings(
   return findings.filter((finding) => findingRanges(layout, finding).length > 0);
 }
 
+/** Lowercased words of a name as the checker might write it: "Kira Vale's (rogue)" → "kira vale". */
+function nameWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/['’]s\b/g, '')
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word.length > 0);
+}
+
 /**
- * Keeps only the findings about a party member, named by full name, any single word of it (so
- * "Kira" and "Vale" both count), or id, ignoring case. The checker sometimes flags an NPC walking
- * with the party (session 008 cut "Silas remains poised…" as if Silas were a player character);
- * the DM may play NPCs, so those findings never count.
+ * Keeps only the findings about a party member. The checker sometimes flags an NPC walking with
+ * the party (session 008 cut "Silas remains poised…" as if Silas were a player character), and the
+ * DM may play NPCs, so a finding counts only when its `pc` holds a party member's id or a word of
+ * their name of three or more letters ("Kira", "Vale", "Kira Vale's", "kira-vale", "Kira and
+ * Borin" all count) and is not exactly an NPC's name (so NPC "Kira Stone" never counts for PC
+ * Kira Vale).
  */
 export function partyFindings(
   findings: readonly PcControlFinding[],
-  party: readonly { id: string; name: string }[]
+  party: readonly { id: string; name: string }[],
+  npcNames: readonly string[] = []
 ): PcControlFinding[] {
-  const names = new Set(
-    party.flatMap((pc) => [pc.id, pc.name, ...pc.name.split(/\s+/)].map((n) => n.toLowerCase()))
+  const partyWords = new Set(
+    party.flatMap((pc) => [
+      ...nameWords(pc.id),
+      ...nameWords(pc.name).filter((word) => word.length >= 3),
+    ])
   );
-  return findings.filter((finding) => names.has(finding.pc.trim().toLowerCase()));
+  const npcs = new Set(npcNames.map((name) => nameWords(name).join(' ')));
+  return findings.filter((finding) => {
+    const words = nameWords(finding.pc);
+    if (npcs.has(words.join(' '))) return false;
+    return words.some((word) => partyWords.has(word));
+  });
 }
 
 /**

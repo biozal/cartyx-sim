@@ -263,6 +263,63 @@ describe('validateDmText', () => {
     });
 
     it.each([
+      ['Borin grins. "The order of combat is simple. We hit hard."', 'Borin grins. "We hit hard."'],
+      [
+        '"You there. Stop. It is Kira\'s turn to talk," Borin says. The fire crackles.',
+        '"You there. Stop." The fire crackles.',
+      ],
+      [
+        'He nods. “Bram sits at 19/28 HP. We ride at dawn.” She agrees.',
+        'He nods. “We ride at dawn.” She agrees.',
+      ],
+    ])('keeps the quote marks around speech a leak cut runs through: "%s"', (text, kept) => {
+      const violation = validateDmText(text, { pcNames, mechanicsToolCalled: true });
+      expect(violation?.strip?.kept).toBe(kept);
+    });
+
+    it('keeps a title with the sentence after it when that sentence leaks', () => {
+      const violation = validateDmText('The door opens. Mr. Vale has AC 12 armor.', {
+        pcNames,
+        mechanicsToolCalled: true,
+      });
+      expect(violation?.strip).toEqual({
+        kept: 'The door opens.',
+        removed: ['Mr. Vale has AC 12 armor.'],
+      });
+    });
+
+    it('strips an unnumbered turn-order list whose entries carry initiative', () => {
+      const text =
+        'Initiative Order:\nKira Vale — 18\n- Goblin: 12\n1. Tomas Reed (Initiative 9)\n2. Shadow Stalker #2\nSteel rings out.';
+      const violation = validateDmText(text, {
+        pcNames,
+        mechanicsToolCalled: true,
+        combatantNames: ['Kira Vale', 'Goblin', 'Tomas Reed', 'Shadow Stalker'],
+      });
+      expect(violation?.strip?.kept).toBe('Steel rings out.');
+    });
+
+    it('leaves a bulleted list of names without numbers alone', () => {
+      const text = 'The notice lists:\n- Wolf\n- Borin\n- Honey';
+      expect(
+        validateDmText(text, {
+          pcNames,
+          mechanicsToolCalled: true,
+          combatantNames: ['Wolf', 'Borin'],
+        })
+      ).toBeNull();
+    });
+
+    it.each([
+      'The knights hold the order of battle as the horn sounds.',
+      'He whispers that the turn order of the ritual matters.',
+      'Kira drops to 0 hit points and collapses, her hammer clattering away.',
+      'An order of knights rides past.',
+    ])('leaves story prose that only sounds like bookkeeping alone: "%s"', (text) => {
+      expect(validateDmText(text, { pcNames, mechanicsToolCalled: true })).toBeNull();
+    });
+
+    it.each([
       'Tomas regains 4 hit points.',
       'The creature has hit points to spare.',
       'The order of the day is silence.',

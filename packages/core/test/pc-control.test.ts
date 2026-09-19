@@ -353,15 +353,28 @@ describe('partyFindings', () => {
   ];
   const finding = (pc: string) => ({ pc, sentence: 'She nods.', why: '' });
 
-  it('keeps a finding naming a party member by full name, one word of it, or id, in any case', () => {
-    const findings = ['Kira Vale', 'kira', 'Vale', 'TOMAS', ' Tomas Reed '].map(finding);
+  it('keeps a finding naming a party member however the checker writes it', () => {
+    const findings = [
+      'Kira Vale',
+      'kira',
+      'Vale',
+      'TOMAS',
+      ' Tomas Reed ',
+      "Kira Vale's",
+      'Kira Vale (rogue)',
+      'kira-vale',
+      'Kira and Borin',
+    ].map(finding);
     expect(partyFindings(findings, party)).toEqual(findings);
   });
 
   it('drops a finding about anyone outside the party', () => {
-    expect(partyFindings(['Silas', 'Silas Vane', 'Kira Reed Vale'].map(finding), party)).toEqual(
-      []
-    );
+    expect(partyFindings(['Silas', 'Silas Vane', 'the innkeeper'].map(finding), party)).toEqual([]);
+  });
+
+  it("drops a finding naming an NPC who shares a party member's first name", () => {
+    expect(partyFindings([finding('Kira Stone')], party, ['Kira Stone', 'Borin'])).toEqual([]);
+    expect(partyFindings([finding('Kira')], party, ['Kira Stone'])).toEqual([finding('Kira')]);
   });
 });
 

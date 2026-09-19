@@ -223,7 +223,6 @@ function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-/** `text` with every line in `lines` removed, trimmed. Returns '' when nothing remains. */
 /** What a checker trim cost a narration, held until the trimmed narration is really narrated. */
 interface CheckerTrim {
   /** The cut sentences, as the note and the tool message list them. */
@@ -1181,7 +1180,16 @@ export class Director {
       return { findings: [] };
     }
     this.checkerFailures = 0;
-    return { findings: verifyFindings(narration, partyFindings(findings, members)), reply };
+    const npcNames = [
+      ...Object.values(this.state.npcs).map((npc) => npc.name),
+      ...Object.values(this.state.combatants)
+        .filter((combatant) => combatant.kind !== 'pc')
+        .map((combatant) => combatant.name),
+    ];
+    return {
+      findings: verifyFindings(narration, partyFindings(findings, members, npcNames)),
+      reply,
+    };
   }
 
   private dmInstruction(

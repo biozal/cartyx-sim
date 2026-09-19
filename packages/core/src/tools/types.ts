@@ -166,7 +166,7 @@ export function getCombatant(state: GameState, id: string): Combatant {
     const npc = ownEntry(state.npcs, id);
     if (npc) {
       throw new ToolError(
-        `"${id}" is ${npc.name}, an NPC who is not a combatant, so the engine holds no stats to roll for them. Decide their outcome in narration, or roll for a party member instead. Known combatant ids: ${known}`
+        `"${id}" is ${npc.name}, an NPC who is not a combatant, so the engine holds no stats for them. Decide what happens to them in narration, or add them with start_combat if they fight. Known combatant ids: ${known}`
       );
     }
     throw new ToolError(`Unknown combatant id "${id}". Known ids: ${known}`);
