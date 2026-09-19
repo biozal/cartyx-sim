@@ -94,17 +94,20 @@ describe('start_combat initiative', () => {
 });
 
 describe('start_combat and the session clock', () => {
-  it('refuses a new fight once the clock has hit hard_stop', async () => {
-    const { state, history } = startedState();
-    const harness = toolHarness({ state, history, clockPhase: 'hard_stop' });
-    const result = await harness.run(startCombat, goblins);
-    expect(result).toMatchObject({
-      ok: false,
-      error: 'Time is up: no new fight can start. Close the scene and call scene_change.',
-    });
-  });
+  it.each(['end_at_scene_break', 'hard_stop'] as const)(
+    'refuses a new fight once the clock has hit %s',
+    async (clockPhase) => {
+      const { state, history } = startedState();
+      const harness = toolHarness({ state, history, clockPhase });
+      const result = await harness.run(startCombat, goblins);
+      expect(result).toMatchObject({
+        ok: false,
+        error: 'Time is up: no new fight can start. Close the scene and call scene_change.',
+      });
+    }
+  );
 
-  it.each(['running', 'wrap_up', 'end_at_scene_break'] as const)(
+  it.each(['running', 'wrap_up'] as const)(
     'still starts a fight at clock phase %s',
     async (clockPhase) => {
       const { state, history } = startedState();

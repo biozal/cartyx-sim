@@ -27,7 +27,10 @@ export const startCombat = defineTool({
   run(args, { recorder, rng, clockPhase }) {
     const { state } = recorder;
     if (state.combat) throw new ToolError('Combat is already running. Call end_combat first.');
-    if (clockPhase() === 'hard_stop') {
+    // From the target on, the session ends at the next scene change, so a fight started now
+    // would be cut off before its first round (session 008 rolled initiative, then ended).
+    const phase = clockPhase();
+    if (phase === 'end_at_scene_break' || phase === 'hard_stop') {
       throw new ToolError(
         'Time is up: no new fight can start. Close the scene and call scene_change.'
       );
