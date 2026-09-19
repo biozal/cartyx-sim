@@ -222,13 +222,37 @@ Findings 1–6 above are fixed on `feat/dm-pc-control-checker`; finding 7 (death
 | Windows PC (5070 Ti) | Player bram                       |                           |
 | Alienware            | Avoid (loud fans)                 |                           |
 
-## Next steps
+## Where we are (2026-09-19)
 
-1. Fix what the 1-hour run broke (above), then re-run a 1-hour session.
-2. Write Plan 2B (lore: ingest `cartyx-lore`, embeddings, `sim index`, `sim audit`).
-3. Start the Avalon Artificers Academy lore expansion (in `cartyx-lore`) before Plan 2C, since chargen drafts the party from it. It can run alongside Plan 2B.
-4. Write Plan 2C (SRD import, production prompts, scribe, `sim chargen`, `sim prep`, 5-minute smoke run), using the real-run findings above.
-5. Optionally run the Plan 3 Ampere ARM64 spike (ComfyUI and TTS) early; it needs no code from Plans 1–2.
+**Branch `feat/dm-pc-control-checker`: 90 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1093 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
+
+The expected failure is deliberate: it documents the quote-majority split's known cost (`"Who's next?" I nod to You.`), and will start passing only if that rule is revisited.
+
+**The release gate is open.** Three 1-hour sessions have run (005, 006, 007), each followed by a reviewed batch of fixes; the third batch is reviewed and probed but has only been exercised live by a one-minute smoke session (`sessions/099`, safe to delete). The decision waiting on Aaron: merge to `main` locally, push and open a PR, or keep the branch.
+
+### What each batch did
+
+| Batch        | Trigger                     | Commits            | What changed                                                                                                                  |
+| ------------ | --------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Script stage | Reviews of sessions 002–004 | `cc4eb6e..bf09ef5` | The ten script findings, including the speech-direction grammar (5 review rounds)                                             |
+| First run    | Session 005                 | `347f6d7..dd50ea2` | Death saves, combat closing, state-leak strip, repeat cutting, NPC continuity, tool-error logging                             |
+| Second run   | Session 006                 | `2deb439..86cdeb0` | Combat narration caps, player repeat re-prompt, tool-shape coercions, hard-stop rule, read-aloud labels                       |
+| Third run    | Session 007                 | `1d2f823..643befb` | Wider leak patterns, strict `hand_off` shape, attacks in the DM prompt, NPC-id resolution, cross-beat repeats, checker tuning |
+
+### Next steps, in order
+
+1. **Decide the branch**: merge to `main` locally, push and open a PR, or keep it. Nothing is pushed yet.
+2. **Run session 008** (`npm run sim -- run --campaign avalon --session 8 --target-minutes 60`, backgrounded, teed to `campaigns/avalon/logs/`). It is the first run on the third batch of fixes. Watch for: the DM's share of words (70% → 64% → 72%), wall time (80 → 69 → 154 min), checker flags (13 → 7 → 27, expected to fall after the prompt tuning), any leaked state (`dm_state_leak` should now catch it), and whether a character ever drops to 0 HP so death saves finally fire live.
+3. **Script it** (`npm run sim -- script --campaign avalon --session 8`) and read `script.md` for anything voiced that should not be.
+4. Then the plan work already queued: Plan 2B (lore), the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike.
+
+### Operating notes from these runs
+
+- **A run takes 1–2.5 hours of wall time** for 60 spoken minutes. Shorter narration makes the word-based clock advance more slowly, so the caps added in the second batch lengthen wall time.
+- **The DM's LM Studio wedged once** mid-`GENERATING`, answering nothing while still listing its model. `lms unload` then `lms load` fixed it; run `sim bench` before every session.
+- **The Ampere machine dropped off the network** mid-session 007 (Mira's seat, the checker's primary). `--resume` picked up cleanly once it was back.
+- **`player-bram` has a fallback target** in `campaign.json` after its seat paused session 005 by answering four times without a tool call.
+- The SDD workspaces for all four batches are under `.superpowers/sdd/` (git-ignored) with their ledgers, briefs, reports and review packages.
 
 ## Open backlog
 
