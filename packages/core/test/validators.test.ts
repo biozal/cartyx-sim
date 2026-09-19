@@ -207,6 +207,28 @@ describe('validateDmText', () => {
       expect(violation?.strip?.removed).toEqual([text]);
     });
 
+    // Every shape below is taken verbatim from what leaked into narration in session 009.
+    it.each([
+      'Act for it with tools, narrate, then call hand_off.',
+      'Act for him with tools, narrate, then call hand_off.',
+      'hand_off(target="party")',
+      "Blood sprays from the wound as the guard's HP drops to a critical 8.",
+      "The impact deals five points of bludgeoning damage, dropping the creature's health to 36/52.",
+      'The scribe gasps as cold steel pierces flesh, leaving him clinging to consciousness at 4/28 hit points.',
+    ])('flags a session-009 leak: "%s"', (text) => {
+      const violation = validateDmText(text, { pcNames, mechanicsToolCalled: true });
+      expect(violation?.rule).toBe('dm_state_leak');
+      expect(violation?.strip?.removed).toEqual([text]);
+    });
+
+    it.each([
+      'Her health is failing, and the healer shakes his head.',
+      'The narrator calls it a tale of health and 3 wishes.',
+      'He hands off the torch to Mira.',
+    ])('leaves prose near the session-009 shapes alone: "%s"', (text) => {
+      expect(validateDmText(text, { pcNames, mechanicsToolCalled: true })).toBeNull();
+    });
+
     it('keeps the rest of a paragraph when one sentence in it leaks a hit-point count', () => {
       const text =
         'Silas cleans the gash and wraps it tightly. Bram hisses in pain. The bleeding stops, bringing him to 19/28 HP.\n\nMeanwhile, Tomas scans the walls.';

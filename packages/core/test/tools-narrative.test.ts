@@ -474,6 +474,25 @@ describe('hand_off', () => {
     expect(harness.recorder.state.pendingResponders).toEqual(['kira', 'tomas']);
   });
 
+  it('tells the DM a monster cannot take the spotlight (session 009)', async () => {
+    const harness = toolHarness();
+    harness.recorder.emit({
+      type: 'combatant_added',
+      combatant: makeCombatant({
+        id: 'hooded-merchant-1',
+        name: 'Hooded Merchant',
+        kind: 'monster',
+      }),
+    });
+    const result = await harness.run(handOff, {
+      target: { kind: 'pcs', ids: ['hooded-merchant-1'] },
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain(
+      '"hooded-merchant-1" is not a player character, so it cannot take the spotlight'
+    );
+  });
+
   it('rejects unknown PC ids', async () => {
     const harness = toolHarness();
     expect(await harness.run(handOff, { target: { kind: 'pcs', ids: ['oona'] } })).toEqual({

@@ -207,6 +207,12 @@ export const handOff = defineTool({
     if (target.kind === 'pcs') {
       const unknown = target.ids.filter((id) => !state.partyIds.includes(id));
       if (unknown.length > 0) {
+        const monster = unknown.find((id) => ownEntry(state.combatants, id) !== undefined);
+        if (monster) {
+          throw new ToolError(
+            `"${monster}" is not a player character, so it cannot take the spotlight: act for it with tools during your own turn. Hand off to the party with {"kind": "party"}; in combat, initiative picks who acts next. Party ids: ${state.partyIds.join(', ')}`
+          );
+        }
         throw new ToolError(
           `Unknown player character ids: ${unknown.join(', ')}. Party ids: ${state.partyIds.join(', ')}`
         );
