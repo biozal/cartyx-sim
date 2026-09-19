@@ -109,7 +109,11 @@ Before each session the DM model uses lore retrieval to write a DM-only outline 
 
 ### 5.3 Combat loop
 
-`start_combat` rolls initiative (engine) and fixes turn order. On a PC's turn, that player declares; on a monster's turn, the DM acts through tools. Action economy (one action, one bonus action, movement, one reaction per round) is tracked loosely and noted, not spatially simulated. `end_combat` returns to the exploration loop.
+`start_combat` rolls initiative (engine) and fixes turn order. On a PC's turn, that player declares; on a monster's turn, the DM acts through tools. `end_combat` returns to the exploration loop.
+
+**One fight a session.** A session has room for a single fight: once one has started, `start_combat` refuses for the rest of the session, and the DM is told to resolve later danger in the story — a stand-off, a chase, a surrender, a retreat, or a threat that withdraws. The session is a script to read, and a second fight crowds out the talking, searching, and travelling that carry the lore being tested.
+
+**One action a turn.** While combat runs, `attack` and `cast_spell` accept only the combatant whose turn it is, and only once per turn: the engine models no multiattack, and nobody acts out of the initiative order. A combatant outside the order (a trap, a hazard, an NPC watching) is not bound by either rule. Action economy beyond that (bonus actions, movement, reactions) is tracked loosely and noted, not spatially simulated.
 
 ### 5.4 Tools
 

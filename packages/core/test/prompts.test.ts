@@ -108,6 +108,17 @@ describe('basicPrompts.dm', () => {
     );
   });
 
+  it('says whether the session still has its one fight', () => {
+    const { state } = startedState();
+    const [system, user] = basicPrompts.dm({ state, transcript: '', instruction: 'Begin.' });
+    expect(system!.content).toContain('A session has room for one fight.');
+    expect(user!.content).toContain('This session has not had its fight yet.');
+
+    const fought = { ...state, fightsSoFar: 1 };
+    const [, afterUser] = basicPrompts.dm({ state: fought, transcript: '', instruction: 'Begin.' });
+    expect(afterUser!.content).toContain('This session has had its fight. No new fight can start');
+  });
+
   it('lists what a combatant carries, or "nothing" (session 011 spent items nobody had)', () => {
     const { state } = startedState([
       {

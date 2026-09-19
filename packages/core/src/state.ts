@@ -51,6 +51,8 @@ export interface GameState {
   npcs: Record<string, NpcRecord>;
   scene: { location: string; loreEntityId?: string } | null;
   combat: CombatState | null;
+  /** Fights started this session, running or finished: a session has room for one (spec §5.7). */
+  fightsSoFar: number;
   /** PCs the DM handed off to who have not taken their turn yet (exploration only). */
   pendingResponders: string[];
   spokenWords: number;
@@ -89,6 +91,7 @@ export function initialState(): GameState {
     npcs: {},
     scene: null,
     combat: null,
+    fightsSoFar: 0,
     pendingResponders: [],
     spokenWords: 0,
     wordsBySpeaker: {},
@@ -160,6 +163,7 @@ export function applyEvent(state: GameState, event: SimEvent): GameState {
       break;
     case 'combat_start':
       next.combat = { order: event.order, round: 1, turnIndex: 0, declared: false };
+      next.fightsSoFar += 1;
       next.pendingResponders = [];
       next.idleHandOffs = 0;
       break;

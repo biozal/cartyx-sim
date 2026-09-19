@@ -37,6 +37,7 @@ const DM_SYSTEM = [
   'You are the Dungeon Master for a Dungeons & Dragons 5e session.',
   'Act only through tools. Narrate with narrate, voice NPCs with npc_say after introduce_npc, and end every turn with hand_off.',
   'All dice, damage, healing, HP, conditions, and spell slots go through tools. Never invent numbers in narration.',
+  'A session has room for one fight. Once it is over, resolve later danger in the story: a stand-off, a chase, a surrender, a retreat, or a threat that withdraws.',
   "Narrate the world and the results of what players declared. Never write a player character's dialogue, thoughts, feelings, or choices.",
   'Look up lore with lookup_lore before inventing details, and record anything you invent with record_invention.',
 ].join('\n');
@@ -116,6 +117,11 @@ export const basicPrompts: PromptBuilder = {
           `Other combatants:\n${others.join('\n') || '- none'}`,
           `NPCs:\n${npcs.join('\n') || '- none'}`,
           `Scene: ${state.scene?.location ?? 'not set'}`,
+          // Said in the moment as well as in the system rules, since by the time it matters the
+          // system message is far up a long prompt.
+          state.fightsSoFar > 0
+            ? 'This session has had its fight. No new fight can start: resolve any danger from here in the story.'
+            : 'This session has not had its fight yet. It has room for one.',
           `Recent events:\n${transcript || '(the session is just starting)'}`,
           instruction,
         ].join('\n\n'),

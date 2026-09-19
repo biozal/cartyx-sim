@@ -1399,7 +1399,7 @@ describe('Director', () => {
     ).toBe(true);
   });
 
-  it("G2.1: keeps the new fight's own initiative when combat ends and restarts in one beat", async () => {
+  it('G2.1: refuses a second fight in one session, leaving the first one ended', async () => {
     const { deps: built, sink } = deps(
       {
         dm: [
@@ -1412,27 +1412,33 @@ describe('Director', () => {
             toolCall('start_combat', { monsters: [monsterSpec('Orc')] }),
             toolCall('hand_off', { target: { kind: 'party' } })
           ),
+          // Told it cannot start a second fight, the DM turns the orc into a stand-off instead.
+          respond(
+            toolCall('narrate', { text: 'An orc watches from the ridge, and does not come down.' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
         ],
         'player-kira': [respond(toolCall('act', { intent: 'size up the goblin' }))],
       },
-      // initiative 1: kira 22, tomas 16, goblin 2 (kira acts, hands to DM to resolve)
-      // initiative 2: kira 4, tomas 4, orc 20 -> orc, kira, tomas
       { rolls: [20, 15, 2, 2, 3, 20] }
     );
     const director = await Director.create(config(), built);
 
     await director.run(4);
 
-    const state = director.currentState;
-    expect(state.combat).not.toBeNull();
-    expect(state.combat!.turnIndex).toBe(0);
-    expect(state.combat!.order[0]).toMatchObject({ combatantId: 'orc-1' });
-    expect(nextActor(state)).toMatchObject({
-      kind: 'dm',
-      reason: 'monster',
-      combatantId: 'orc-1',
-    });
-    expect(foldEvents(sink.events)).toEqual(state);
+    expect(sink.events.filter((e) => e.type === 'combat_start')).toHaveLength(1);
+    expect(sink.events.filter((e) => e.type === 'combat_end')).toHaveLength(1);
+    expect(director.currentState.fightsSoFar).toBe(1);
+    expect(sink.events).toContainEqual(
+      expect.objectContaining({
+        type: 'ooc_note',
+        text: expect.stringContaining('This session has already had its fight'),
+      })
+    );
+    expect(sink.events.filter((e) => e.type === 'narration').map((e) => e.text)).toContain(
+      'An orc watches from the ridge, and does not come down.'
+    );
+    expect(foldEvents(sink.events)).toEqual(director.currentState);
   });
 
   it("caps a monster turn's instruction at three sentences of narration", async () => {

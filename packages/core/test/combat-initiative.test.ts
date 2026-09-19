@@ -93,6 +93,36 @@ describe('start_combat initiative', () => {
   });
 });
 
+describe('one fight a session', () => {
+  it('refuses a second fight, running or ended (spec §5.3)', async () => {
+    const { state, history } = startedState();
+    const harness = toolHarness({ state, history, rng: scriptedRng([15, 10, 5]) });
+    expect((await harness.run(startCombat, goblins)).ok).toBe(true);
+    harness.recorder.emit({ type: 'combat_end' });
+
+    const second = await harness.run(startCombat, goblins);
+    expect(second).toMatchObject({
+      ok: false,
+      error:
+        'This session has already had its fight, and a session has room for one. Resolve this danger in the story instead: a stand-off, a chase, a surrender, a retreat, or a threat that withdraws.',
+    });
+  });
+
+  it('counts a fight from an earlier beat, not just this one', async () => {
+    const { state, history } = startedState();
+    const first = toolHarness({ state, history, rng: scriptedRng([15, 10, 5]) });
+    await first.run(startCombat, goblins);
+    first.recorder.emit({ type: 'combat_end' });
+
+    const later = toolHarness({
+      state: first.recorder.state,
+      history: [...history, ...first.recorder.events],
+      rng: scriptedRng([15, 10, 5]),
+    });
+    expect((await later.run(startCombat, goblins)).ok).toBe(false);
+  });
+});
+
 describe('start_combat and the session clock', () => {
   it.each(['end_at_scene_break', 'hard_stop'] as const)(
     'refuses a new fight once the clock has hit %s',

@@ -19,14 +19,24 @@ const MonsterSpec = z.object({
   attacks: z.array(Attack).min(1),
 });
 
+/** Fights allowed in one session. The engine refuses `start_combat` past this (spec §5.7). */
+export const FIGHTS_PER_SESSION = 1;
+
 export const startCombat = defineTool({
   name: 'start_combat',
   description:
-    'Start combat with the given monsters. The engine adds them, rolls initiative for every living combatant (a party member at 0 HP joins the order and spends their turns rolling death saving throws), and fixes turn order.',
+    "Start the session's one fight with the given monsters. The engine adds them, rolls initiative for every living combatant (a party member at 0 HP joins the order and spends their turns rolling death saving throws), and fixes turn order. A session has room for one fight, so once this one is over no other can start.",
   parameters: z.object({ monsters: z.array(MonsterSpec).min(1) }),
   run(args, { recorder, rng, clockPhase }) {
     const { state } = recorder;
     if (state.combat) throw new ToolError('Combat is already running. Call end_combat first.');
+    // One fight a session (spec §5.7): the session is a story to read, and a second fight crowds
+    // out the talking, searching, and travelling that carry the lore being tested.
+    if (state.fightsSoFar >= FIGHTS_PER_SESSION) {
+      throw new ToolError(
+        'This session has already had its fight, and a session has room for one. Resolve this danger in the story instead: a stand-off, a chase, a surrender, a retreat, or a threat that withdraws.'
+      );
+    }
     // From the target on, the session ends at the next scene change, so a fight started now
     // would be cut off before its first round (session 008 rolled initiative, then ended).
     const phase = clockPhase();
