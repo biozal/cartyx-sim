@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1138 tests plus 1 expected failure), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1158 tests plus 1 expected failure), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -241,6 +241,31 @@ Findings 1–6 are fixed (`bc334ff..656f4ce`); finding 7 is still open.
 
 The batch had one review; its findings (a leak cut breaking quotes, over-broad `order of battle`/`0 hit points`/bulleted-name matches, titles splitting sentences, exact-only checker name matching, turn-order shapes missed) are fixed in the follow-up commit.
 
+## Sixth 1-hour run (session 010, 2026-09-19)
+
+Run on HEAD `95785ad`, after the fifth batch of fixes. It reached `target_reached` at ~64 spoken minutes in **77 wall minutes** with no pauses (the Ampere stayed up).
+
+| Measure               | 008        | 009                 | 010      |
+| --------------------- | ---------- | ------------------- | -------- |
+| Wall / spoken minutes | 63.1 / ~65 | 83 / ~65            | 77 / ~64 |
+| Pauses                | none       | 1 (machine offline) | none     |
+| DM share              | 71%        | 65%                 | 66%      |
+| Fights                | 1 (+1 cut) | 1                   | 0        |
+| Checker flags         | 10         | 13                  | 6        |
+| Tool errors           | 2          | 7                   | 2        |
+
+A puzzle session at a monolith and a chasm, with no fight, so the combat-side fixes were not exercised and death saves had no chance to fire. No HP, AC, health, or initiative readout was voiced, no `hand_off` went to a monster, and the script stage gave 17 model labels with no fallbacks and 6 stage directions dropped. Findings:
+
+1. **The DM retold one moment seven times in a turn.** Kira counting "One... two... three!" and stepping toward the monolith was narrated seven times, each in new words, until the DM hit its 24-call limit and the engine forced a hand-off (`dm_step_limit`); it also rolled the same two Perception checks twice. Exact-sentence repeat cuts (12 this run) trimmed pieces but let every paraphrase through, and the tool reply "Narrated. Removed repeated sentences: …" seemed to invite another try. Replaying sessions 005–010 found the same loop in 007 (one miss told seven ways) and single retellings in every session.
+2. **A tool call written as bare lines was voiced.** Two narrations ended in `hand_off` and `target: party` on their own lines; the script voiced "hand_off target: party."
+
+### Fixes after the sixth run
+
+Both fixed (`c75717c`, `fe392b8`, and a follow-up after review).
+
+1. A narration is turned away (`duplicate_narration`, re-prompted) when, after exact repeats are cut, 60% or more of its content words (at least 5 distinct words of four or more letters, filler dropped, possessives folded) were already narrated this turn since the last game event, and the shared words are a quarter or more of both texts together. After three retellings in one turn the turn ends with a forced hand-off (`dm_retell_limit`). The check runs before the checker, so a retelling no longer costs a checker call, and the repeat-cut tool reply now says the cut text was already told. The review caught two false-positive shapes in the first version — a new beat after a long opening, and a second monster's attack in the same turn — which the game-event window and the two-sided share now spare. Replaying sessions 005–010 flags 15 narrations, all retellings.
+2. `dm_state_leak` strips a sentence that opens with a snake_case tool name (`hand_off`) or a tool-argument key (`target:`, `kind:`, `ids:`).
+
 ## Fifth 1-hour run (session 009, 2026-09-19)
 
 Run on HEAD `0bb260d`, after the fourth batch of fixes. It reached `target_reached` at ~65 spoken minutes in **83 wall minutes**, including one pause of about 10 minutes when the Ampere machine (Mira's seat, the checker's primary) dropped off the network again; `--resume` continued cleanly.
@@ -290,11 +315,11 @@ Findings 1–4 are fixed in `197b339` plus a follow-up after review; finding 5 i
 
 ## Where we are (2026-09-19)
 
-**Branch `feat/dm-pc-control-checker`: 101 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1146 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
+**Branch `feat/dm-pc-control-checker`: 105 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1158 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
 
 The expected failure is deliberate: it documents the quote-majority split's known cost (`"Who's next?" I nod to You.`), and will start passing only if that rule is revisited.
 
-**The release gate is open.** Five 1-hour sessions have run (005–009), each followed by a reviewed batch of fixes. Session 009 confirmed the fourth batch live; its own fixes (leak shapes, checker wording, `hand_off` to monsters) are reviewed and tested but not yet run live. The decision waiting on Aaron: merge to `main` locally, push and open a PR, keep the branch, or run session 010 first.
+**Not pushing until a live session comes back clean.** Aaron is in no rush to check in. Six 1-hour sessions have run (005–010), each followed by a reviewed batch of fixes, and each batch has been smaller than the last. Session 010 had no voiced stat leaks and no fight; its two findings (a paraphrase loop and a bare-line tool call) are fixed and reviewed but not yet run live.
 
 ### What each batch did
 
@@ -305,12 +330,13 @@ The expected failure is deliberate: it documents the quote-majority split's know
 | Second run   | Session 006                 | `2deb439..86cdeb0` | Combat narration caps, player repeat re-prompt, tool-shape coercions, hard-stop rule, read-aloud labels                       |
 | Third run    | Session 007                 | `1d2f823..643befb` | Wider leak patterns, strict `hand_off` shape, attacks in the DM prompt, NPC-id resolution, cross-beat repeats, checker tuning |
 | Fourth run   | Session 008                 | `bc334ff..0bb260d` | Sentence-level leak strip, HP-in-prose and turn-order leaks, NPC checker findings, no fight past the target, quote repair     |
-| Fifth run    | Session 009                 | `197b339..HEAD`    | Instruction-echo and HP/health leaks, checker allows enemy blows on PCs, `hand_off` to monsters explained                     |
+| Fifth run    | Session 009                 | `197b339..95785ad` | Instruction-echo and HP/health leaks, checker allows enemy blows on PCs, `hand_off` to monsters explained                     |
+| Sixth run    | Session 010                 | `c75717c..HEAD`    | Retelling (paraphrase loop) rejection with a per-turn cap, bare-line tool-call leaks                                          |
 
 ### Next steps, in order
 
-1. **Decide the branch**: merge to `main` locally, push and open a PR, keep it, or run session 010 first to exercise the fifth batch live. Nothing is pushed yet.
-2. **If running session 010** (`npm run sim -- run --campaign avalon --session 10 --target-minutes 60`, backgrounded, teed to `campaigns/avalon/logs/`): watch for HP or health readouts and instruction echoes in `script.md`, checker flags on enemy blows, `hand_off` tool errors, and whether death saves finally fire (Tomas reached 4/28 in 009).
+1. **Run session 011** (`npm run sim -- run --campaign avalon --session 11 --target-minutes 60`, backgrounded, teed to `campaigns/avalon/logs/`). Watch for `duplicate_narration` and `dm_retell_limit` flags (are they all real retellings?), any HP/health/initiative readout or tool syntax in `script.md`, checker flags on enemy blows, `hand_off` errors, and whether a fight happens and death saves finally fire.
+2. **Push or merge once a session surfaces no new fix-worthy findings.**
 3. Then the plan work already queued: Plan 2B (lore), the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike.
 
 ### Operating notes from these runs
