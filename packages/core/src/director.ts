@@ -17,6 +17,7 @@ import {
   declarationsSinceDm,
   describeFindings,
   parseCheckerReply,
+  partyFindings,
   verifyFindings,
   type PcControlFinding,
 } from './pc-control';
@@ -223,15 +224,6 @@ function collapseWhitespace(text: string): string {
 }
 
 /** `text` with every line in `lines` removed, trimmed. Returns '' when nothing remains. */
-function stripLeakedLines(text: string, lines: readonly string[]): string {
-  const drop = new Set(lines);
-  return text
-    .split('\n')
-    .filter((line) => !drop.has(line))
-    .join('\n')
-    .trim();
-}
-
 /** What a checker trim cost a narration, held until the trimmed narration is really narrated. */
 interface CheckerTrim {
   /** The cut sentences, as the note and the tool message list them. */
@@ -553,6 +545,9 @@ export class Director {
       name: ownEntry(this.state.combatants, id)?.name ?? id,
     }));
     const pcNames = partyForHandOff.map((pc) => pc.name);
+    // Read at call time: start_combat can add monsters mid-turn, and the DM may list them next.
+    const combatantNames = () =>
+      Object.values(recorder.state.combatants).map((combatant) => combatant.name);
     let mechanicsCalled = false;
     let rejections = 0;
     let ended = false;
@@ -666,6 +661,7 @@ export class Director {
         let violation = text
           ? validateDmText(text, {
               pcNames,
+              combatantNames: combatantNames(),
               mechanicsToolCalled: mechanicsCalled,
               // The checker replaces this rule only while it is still working; once it has
               // disabled itself for the run, the verb list resumes so something is still watching.
@@ -677,24 +673,24 @@ export class Director {
         // survives. Only narrate calls are trimmed this way, matching the checker's trim path
         // below; a leak in another DM text path falls through to the ordinary violation handling.
         if (call.name === 'narrate' && violation?.rule === 'dm_state_leak') {
-          const leaked = violation.strip ?? [];
+          const { kept: stripped, removed: leaked } = violation.strip ?? { kept: '', removed: [] };
           const listed = leaked.join(' | ');
-          const stripped = stripLeakedLines(text!, leaked);
           if (!stripped) {
             // Nothing survives, so there is nothing left to reject: the trim is final here.
             this.noteStateLeak(recorder, seat, listed);
             fullyCutNarrations.add(collapseWhitespace(text!));
             messages.push(
-              toolMessage(call, `Not narrated: every line leaked prompt state. ${listed}`)
+              toolMessage(call, `Not narrated: all of it leaked prompt state. ${listed}`)
             );
             continue;
           }
           leakTrim = listed;
           args = { ...(prepared.args as Record<string, unknown>), text: stripped };
-          removed = ` Removed lines that leaked prompt state: ${listed}`;
+          removed = ` Removed text that leaked prompt state: ${listed}`;
           text = stripped;
           violation = validateDmText(text, {
             pcNames,
+            combatantNames: combatantNames(),
             mechanicsToolCalled: mechanicsCalled,
             skipPcControl: Boolean(this.config.seats.checker) && !this.checkerDisabled,
           });
@@ -1140,9 +1136,12 @@ export class Director {
   ): Promise<{ findings: PcControlFinding[]; reply?: string }> {
     const seat = this.config.seats.checker;
     if (!seat || this.checkerDisabled) return { findings: [] };
-    const party = this.state.partyIds.map((id) => ownEntry(this.state.combatants, id)?.name ?? id);
+    const members = this.state.partyIds.map((id) => ({
+      id,
+      name: ownEntry(this.state.combatants, id)?.name ?? id,
+    }));
     const messages = this.deps.prompts.pcControlCheck({
-      party,
+      party: members.map((pc) => pc.name),
       declarations: declarationsSinceDm(this.history, this.state),
       narration,
     });
@@ -1182,7 +1181,7 @@ export class Director {
       return { findings: [] };
     }
     this.checkerFailures = 0;
-    return { findings: verifyFindings(narration, findings), reply };
+    return { findings: verifyFindings(narration, partyFindings(findings, members)), reply };
   }
 
   private dmInstruction(

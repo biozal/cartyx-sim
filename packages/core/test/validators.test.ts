@@ -91,7 +91,7 @@ describe('validateDmText', () => {
     ])('flags a leaked prompt-state line: "%s"', (text) => {
       const violation = validateDmText(text, { pcNames, mechanicsToolCalled: false });
       expect(violation?.rule).toBe('dm_state_leak');
-      expect(violation?.strip).toEqual([text]);
+      expect(violation?.strip?.removed).toEqual([text]);
     });
 
     it('names only the leaked lines in strip, leaving surrounding prose out of it', () => {
@@ -103,7 +103,7 @@ describe('validateDmText', () => {
       ].join('\n');
       const violation = validateDmText(text, { pcNames, mechanicsToolCalled: false });
       expect(violation?.rule).toBe('dm_state_leak');
-      expect(violation?.strip).toEqual([
+      expect(violation?.strip?.removed).toEqual([
         'Kira Vale (id: kira) | HP 24/24, AC 15',
         'Bram Holloway (id: bram) | HP 28/28, AC 16',
         "It is Kira's turn.",
@@ -136,7 +136,7 @@ describe('validateDmText', () => {
     ])('flags a leaked prompt-state line: "%s"', (text) => {
       const violation = validateDmText(text, { pcNames, mechanicsToolCalled: false });
       expect(violation?.rule).toBe('dm_state_leak');
-      expect(violation?.strip).toEqual([text]);
+      expect(violation?.strip?.removed).toEqual([text]);
     });
 
     it('names every leaked line from a real session-007 narration, leaving the prose out of it', () => {
@@ -153,7 +153,7 @@ describe('validateDmText', () => {
       ].join('\n');
       const violation = validateDmText(text, { pcNames, mechanicsToolCalled: false });
       expect(violation?.rule).toBe('dm_state_leak');
-      expect(violation?.strip).toEqual([
+      expect(violation?.strip?.removed).toEqual([
         '**Current Status:**',
         '- Kira: 20/24 HP (Dagger wound)',
         '- All three Hooded Figures: 11 HP each, AC 12',
@@ -172,18 +172,109 @@ describe('validateDmText', () => {
       expect(validateDmText(text, { pcNames, mechanicsToolCalled: false })).toBeNull();
     });
 
-    it('flags a tag leak that shares a line with good prose instead of only a line-start tag', () => {
+    it('strips only the sentence holding a tag leak, keeping the prose that shares its line', () => {
       const text = 'The mercenaries fall back. [combat] Round 2 begins.';
       const violation = validateDmText(text, { pcNames, mechanicsToolCalled: false });
       expect(violation?.rule).toBe('dm_state_leak');
-      expect(violation?.strip).toEqual([text]);
+      expect(violation?.strip).toEqual({
+        kept: 'The mercenaries fall back.',
+        removed: ['[combat] Round 2 begins.'],
+      });
     });
 
-    it('flags a JSON leak that shares a line with good prose instead of only a line-start object', () => {
+    it('strips only the sentence holding a JSON leak, keeping the prose that shares its line', () => {
       const text = 'Handing off now. {"target": {"kind": "party"}}';
       const violation = validateDmText(text, { pcNames, mechanicsToolCalled: false });
       expect(violation?.rule).toBe('dm_state_leak');
-      expect(violation?.strip).toEqual([text]);
+      expect(violation?.strip).toEqual({
+        kept: 'Handing off now.',
+        removed: ['{"target": {"kind": "party"}}'],
+      });
+    });
+
+    // Every shape below is taken verbatim from what leaked into narration in session 008.
+    it.each([
+      "Silas's work is far superior to Mira's clumsy efforts, and Bram's HP rises to 19/28 as the bleeding stops and some of his vitality returns.",
+      'The strike lands true, forcing the creature to stagger back into the gloom with its health dwindled to 9 out of 22 hit points.',
+      'The creature shudders, its form destabilizing as it drops to just 3 hit points, teetering on the brink of dissolution.',
+      "The bleeding stops, and Silas's careful work restores some of Bram's vitality, bringing him to 19/28 HP.",
+      'Initiative is rolled.',
+      'The order of combat is as follows:',
+      '**Initiative Order:**',
+    ])('flags a session-008 leak: "%s"', (text) => {
+      const violation = validateDmText(text, { pcNames, mechanicsToolCalled: true });
+      expect(violation?.rule).toBe('dm_state_leak');
+      expect(violation?.strip?.removed).toEqual([text]);
+    });
+
+    it('keeps the rest of a paragraph when one sentence in it leaks a hit-point count', () => {
+      const text =
+        'Silas cleans the gash and wraps it tightly. Bram hisses in pain. The bleeding stops, bringing him to 19/28 HP.\n\nMeanwhile, Tomas scans the walls.';
+      const violation = validateDmText(text, { pcNames, mechanicsToolCalled: true });
+      expect(violation?.strip).toEqual({
+        kept: 'Silas cleans the gash and wraps it tightly. Bram hisses in pain.\n\nMeanwhile, Tomas scans the walls.',
+        removed: ['The bleeding stops, bringing him to 19/28 HP.'],
+      });
+    });
+
+    it('strips a turn-order list of combatant names, from session 008, as whole lines', () => {
+      const text = [
+        'The chamber erupts into chaos.',
+        '',
+        'Initiative is rolled. The order of combat is as follows:',
+        '1. Mira Ashdown',
+        '2. Kira Vale',
+        '3. Shadow Stalker 3',
+        '4. **Bram Holloway** (9)',
+        '- Shadow Stalker (15)',
+        '',
+        '**Mira Ashdown**, it is your turn. What do you do?',
+      ].join('\n');
+      const violation = validateDmText(text, {
+        pcNames,
+        mechanicsToolCalled: true,
+        combatantNames: ['Mira Ashdown', 'Kira Vale', 'Bram Holloway', 'Shadow Stalker'],
+      });
+      expect(violation?.strip).toEqual({
+        kept: 'The chamber erupts into chaos.\n\n**Mira Ashdown**, it is your turn. What do you do?',
+        removed: [
+          'Initiative is rolled.',
+          'The order of combat is as follows:',
+          '1. Mira Ashdown',
+          '2. Kira Vale',
+          '3. Shadow Stalker 3',
+          '4. **Bram Holloway** (9)',
+          '- Shadow Stalker (15)',
+        ],
+      });
+    });
+
+    it('strips a list item naming a numbered monster by its base name (session 007)', () => {
+      const text = 'Steel flashes.\n1. Tomas Reed\n2. Hooded Figure (2)\n3. Hooded Figure 3';
+      const violation = validateDmText(text, {
+        pcNames,
+        mechanicsToolCalled: true,
+        combatantNames: ['Tomas Reed', 'Hooded Figure 1', 'Hooded Figure 2'],
+      });
+      expect(violation?.strip).toEqual({
+        kept: 'Steel flashes.',
+        removed: ['1. Tomas Reed', '2. Hooded Figure (2)', '3. Hooded Figure 3'],
+      });
+    });
+
+    it.each([
+      'Tomas regains 4 hit points.',
+      'The creature has hit points to spare.',
+      'The order of the day is silence.',
+      'Kira rolls initiative in her head, counting heartbeats.',
+      '1. The mill',
+    ])('leaves prose and mechanics claims to other rules: "%s"', (text) => {
+      const violation = validateDmText(text, {
+        pcNames,
+        mechanicsToolCalled: true,
+        combatantNames: ['Mira Ashdown', 'Shadow Stalker'],
+      });
+      expect(violation).toBeNull();
     });
 
     it.each([

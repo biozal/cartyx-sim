@@ -5,6 +5,7 @@ import {
   declarationsSinceDm,
   describeFindings,
   parseCheckerReply,
+  partyFindings,
   verifyFindings,
   type PcControlFinding,
 } from '../src/pc-control';
@@ -342,6 +343,25 @@ describe('cutSentences', () => {
         finding('Kira smiles and says, "Yes."'),
       ])
     ).toBe('The old man grins. "Yes."');
+  });
+});
+
+describe('partyFindings', () => {
+  const party = [
+    { id: 'kira', name: 'Kira Vale' },
+    { id: 'tomas', name: 'Tomas Reed' },
+  ];
+  const finding = (pc: string) => ({ pc, sentence: 'She nods.', why: '' });
+
+  it('keeps a finding naming a party member by full name, one word of it, or id, in any case', () => {
+    const findings = ['Kira Vale', 'kira', 'Vale', 'TOMAS', ' Tomas Reed '].map(finding);
+    expect(partyFindings(findings, party)).toEqual(findings);
+  });
+
+  it('drops a finding about anyone outside the party', () => {
+    expect(partyFindings(['Silas', 'Silas Vane', 'Kira Reed Vale'].map(finding), party)).toEqual(
+      []
+    );
   });
 });
 

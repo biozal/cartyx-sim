@@ -237,6 +237,18 @@ describe('DM player-character control checker', () => {
     expect(ofType(sink.events, 'ooc_note')).toEqual([]);
   });
 
+  it('ignores a finding about an NPC, which the DM may play (session 008 flagged Silas)', async () => {
+    const text = 'Silas remains poised, his dagger ready, his eyes darting to the shadows.';
+    const { director, sink } = setup({
+      dm: [respond(narrate(text), handOffTomas())],
+      checker: [flagged(text, 'Silas')],
+    });
+    await playDmBeat(director);
+
+    expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual([text]);
+    expect(ofType(sink.events, 'validator_flag')).toEqual([]);
+  });
+
   it('narrates unchecked with a note when the checker fails or its reply is unreadable', async () => {
     const { director, sink } = setup({
       dm: [respond(narrate('The door creaks open.'), narrate('The wind rises.'), handOffTomas())],
@@ -380,7 +392,7 @@ describe('DM player-character control checker', () => {
     const result = dmRequests[2]!.messages.at(-1);
     expect(result).toMatchObject({
       role: 'tool',
-      content: expect.stringContaining('Removed lines that leaked prompt state'),
+      content: expect.stringContaining('Removed text that leaked prompt state'),
     });
     expect(result).toMatchObject({
       role: 'tool',

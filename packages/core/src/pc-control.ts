@@ -204,6 +204,22 @@ export function verifyFindings(
 }
 
 /**
+ * Keeps only the findings about a party member, named by full name, any single word of it (so
+ * "Kira" and "Vale" both count), or id, ignoring case. The checker sometimes flags an NPC walking
+ * with the party (session 008 cut "Silas remains poised…" as if Silas were a player character);
+ * the DM may play NPCs, so those findings never count.
+ */
+export function partyFindings(
+  findings: readonly PcControlFinding[],
+  party: readonly { id: string; name: string }[]
+): PcControlFinding[] {
+  const names = new Set(
+    party.flatMap((pc) => [pc.id, pc.name, ...pc.name.split(/\s+/)].map((n) => n.toLowerCase()))
+  );
+  return findings.filter((finding) => names.has(finding.pc.trim().toLowerCase()));
+}
+
+/**
  * The narration without the sentences a finding's text overlaps (wherever that full text occurs),
  * so a finding spanning several sentences removes all of them, a finding that is one clause
  * removes its whole sentence, and sentences it does not touch stay. Findings are matched as in

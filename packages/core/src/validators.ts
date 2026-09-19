@@ -1,3 +1,4 @@
+import { splitSentences } from './pc-control';
 import { escapeRegExp } from './text';
 
 export type ViolationRule =
@@ -10,8 +11,8 @@ export type ViolationRule =
 export interface Violation {
   rule: ViolationRule;
   message: string;
-  /** Only for `dm_state_leak`: the narration's offending lines, verbatim, for the caller to strip. */
-  strip?: string[];
+  /** Only for `dm_state_leak`: the narration with its leaks removed, and what was removed. */
+  strip?: StateLeakStrip;
 }
 
 // Present and past tense, so "Kira draws" and "Kira drew" both count.
@@ -146,28 +147,90 @@ function controlledCharacter(text: string, names: readonly string[]): string | n
   return null;
 }
 
-// Lines of prompt state that must never reach narration: a combatant's id parenthetical, an HP
-// block (either digit order), an AC readout, a bald "whose turn" statement, a transcript tag line
-// (e.g. "[combat]", "[hand_off]"), a hand-off JSON object, or the "Current Status" heading the DM
-// writes above its own status readout. Checked one line at a time, so surrounding prose that does
-// not match survives.
-const STATE_LEAK_PATTERNS = [
+// Prompt state that must never reach narration: a combatant's id parenthetical, an HP block
+// (either digit order, or "HP rises to 19/28"), a hit-point readout ("9 out of 22 hit points",
+// "drops to just 3 hit points", "4 hit points left"; "loses 3 hit points" is a mechanics claim,
+// left to that rule), an AC readout, a bald "whose turn" statement, a turn-order readout
+// ("The order of combat is as follows:"), a transcript tag (e.g. "[combat]", "[hand_off]"), or a
+// hand-off JSON object. Checked one sentence at a time, so the prose around a leak survives.
+const SENTENCE_LEAK_PATTERNS = [
   /\(id:\s*[a-z0-9-]+\)/i,
-  /\bHP\s+\d+\s*\/\s*\d+/i,
+  /\bHP\b[^.\d\n]{0,30}\d+\s*\/\s*\d+/i,
   /\d+\s*\/\s*\d+\s*HP\b/i,
+  /\b(?:\d+\s+(?:out\s+)?of\s+\d+|(?:to|at|with)\s+(?:just\s+|only\s+)?\d+)\s+(?:hit\s+points?|HP)\b/i,
+  /\b\d+\s+(?:hit\s+points?|HP)\s+(?:left|remaining)\b/i,
   /\bAC\s+\d+\b/i,
   /\bIt is [^.]{1,40}['’]s turn\b/i,
+  /\b(?:initiative|turn|combat)\s+order\b|\border\s+of\s+(?:combat|initiative|battle)\b|\binitiative\s+(?:is|has been)\s+rolled\b/i,
   /\[(?:combat|roll|state|scene|npc|lore|invented|hand_off|ooc)\]/i,
   /\{[^}]*"(?:target|kind)"\s*:/,
-  /^\s*\*\*Current Status:?\*\*\s*$/i,
-  /^\s*Current Status:?\s*$/i,
 ];
 
-/** The lines of `text` that leak prompt state, in order, or `[]` when none do. */
-function stateLeakLines(text: string): string[] {
-  return text
-    .split('\n')
-    .filter((line) => STATE_LEAK_PATTERNS.some((pattern) => pattern.test(line)));
+// Whole lines of prompt state: the "Current Status" heading the DM writes above its own status
+// readout, and a list item that is only a combatant's name, optionally with its initiative
+// ("1. Mira Ashdown", "- **Shadow Stalker 3** (11)"), which is how the DM reads out turn order.
+const LINE_LEAK_PATTERNS = [/^\s*\*\*Current Status:?\*\*\s*$/i, /^\s*Current Status:?\s*$/i];
+const LIST_ITEM = /^\s*(?:\d+[.)]|[-*•])\s+(.+?)\s*$/;
+
+function isCombatantListItem(line: string, combatantNames: readonly string[]): boolean {
+  const item = LIST_ITEM.exec(line)?.[1];
+  if (!item) return false;
+  const name = item
+    .replace(/\s*\(\s*\d+\s*\)\s*$/, '')
+    .replace(/\*\*|__/g, '')
+    .replace(/[.:]\s*$/, '')
+    .trim()
+    .toLowerCase();
+  return combatantNames.some((candidate) => {
+    // Numbered copies share one base name: the DM may write "Shadow Stalker 3" for a monster
+    // added as "Shadow Stalker", or "Hooded Figure" for one added as "Hooded Figure 1".
+    const base = candidate.toLowerCase().replace(/\s+\d+$/, '');
+    return name === base || new RegExp(`^${escapeRegExp(base)}\\s+\\d+$`).test(name);
+  });
+}
+
+/** What `stripStateLeaks` removed from a narration, and what is left. */
+export interface StateLeakStrip {
+  /** The narration without its leaked lines and sentences; '' when nothing is left. */
+  kept: string;
+  /** The removed lines and sentences, verbatim and in order. */
+  removed: string[];
+}
+
+/**
+ * The narration without its prompt-state leaks: a heading or combatant list item goes as a whole
+ * line, any other leak goes as the one sentence it sits in, so prose sharing its line survives.
+ * Runs of blank lines left behind collapse to one paragraph break.
+ */
+export function stripStateLeaks(
+  text: string,
+  combatantNames: readonly string[] = []
+): StateLeakStrip {
+  const removed: string[] = [];
+  const lines = text.split('\n').map((line) => {
+    if (
+      LINE_LEAK_PATTERNS.some((pattern) => pattern.test(line)) ||
+      isCombatantListItem(line, combatantNames)
+    ) {
+      removed.push(line.trim());
+      return '';
+    }
+    const parts = splitSentences(line);
+    if (!parts.some(({ sentence }) => SENTENCE_LEAK_PATTERNS.some((p) => p.test(sentence)))) {
+      return line;
+    }
+    let kept = '';
+    for (const { sentence, separator } of parts) {
+      if (SENTENCE_LEAK_PATTERNS.some((pattern) => pattern.test(sentence))) removed.push(sentence);
+      else kept += sentence + separator;
+    }
+    return kept.trimEnd();
+  });
+  const kept = lines
+    .join('\n')
+    .replace(/\n[ \t]*(?:\n[ \t]*)+/g, '\n\n')
+    .trim();
+  return { kept, removed };
 }
 
 export function validateDmText(
@@ -177,14 +240,16 @@ export function validateDmText(
     mechanicsToolCalled: boolean;
     /** True when a checker seat is configured: it replaces this verb-list rule. Default false. */
     skipPcControl?: boolean;
+    /** Every combatant's name, so a turn-order list of them counts as a leak. Default none. */
+    combatantNames?: readonly string[];
   }
 ): Violation | null {
-  const leaked = stateLeakLines(text);
-  if (leaked.length > 0) {
+  const leaked = stripStateLeaks(text, context.combatantNames);
+  if (leaked.removed.length > 0) {
     return {
       rule: 'dm_state_leak',
       message:
-        'Narration must not include prompt state such as combatant ids, HP blocks, or whose-turn lines; describe the scene in prose instead.',
+        'Narration must not include prompt state such as combatant ids, HP counts, turn-order lists, or whose-turn lines; describe the scene in prose instead.',
       strip: leaked,
     };
   }
