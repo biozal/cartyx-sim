@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1128 tests plus 1 expected failure), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1138 tests plus 1 expected failure), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -241,6 +241,36 @@ Findings 1–6 are fixed (`bc334ff..656f4ce`); finding 7 is still open.
 
 The batch had one review; its findings (a leak cut breaking quotes, over-broad `order of battle`/`0 hit points`/bulleted-name matches, titles splitting sentences, exact-only checker name matching, turn-order shapes missed) are fixed in the follow-up commit.
 
+## Fifth 1-hour run (session 009, 2026-09-19)
+
+Run on HEAD `0bb260d`, after the fourth batch of fixes. It reached `target_reached` at ~65 spoken minutes in **83 wall minutes**, including one pause of about 10 minutes when the Ampere machine (Mira's seat, the checker's primary) dropped off the network again; `--resume` continued cleanly.
+
+| Measure               | 007                 | 008        | 009                 |
+| --------------------- | ------------------- | ---------- | ------------------- |
+| Wall / spoken minutes | 154.4 / 60.7        | 63.1 / ~65 | 83 / ~65            |
+| Pauses                | 1 (machine offline) | none       | 1 (machine offline) |
+| DM share              | 72%                 | 71%        | 65%                 |
+| Fights                | 3                   | 1 (+1 cut) | 1                   |
+| Checker flags         | 27                  | 10         | 13                  |
+| Tool errors           | 19                  | 2          | 7                   |
+
+The fourth batch held: no checker finding named an NPC, the session closed on a scene change with no fight started past the target, a leak cut removed one sentence and kept its paragraph ("The heavy blow drops Bram to 16/28 HP…"), and no initiative list was voiced. The script stage gave 32 model labels, no rules fallbacks, and dropped 2 stage directions. Findings:
+
+1. **The DM echoes its own engine instruction.** "Act for it with tools, narrate, then call hand_off." — the monster-turn instruction from `director.ts` — was voiced twice.
+2. **More hit-point shapes reach the story.** The fight against a Silverscale Enforcer voiced its health after almost every blow ("dropping the creature's health to 36/52", then 30/52, 19/52, 13/52, 8/52), plus "the guard's HP drops to a critical 8" and "clinging to consciousness at 4/28 hit points".
+3. **The checker flags an enemy's blow landing on a PC.** "The enforcer's greatsword … slams into Tomas" was cut because Tomas "declared nothing" (it was the monster's turn), and "Mira sidesteps the blow" cost a rewrite. The other flags were real (invented Kira dialogue, a Bram attack he never declared).
+4. **The DM hands off to monsters.** Three `hand_off` calls named `hooded-merchant-1` or `silverscale-enforcer-1` and got a bare "Unknown player character ids" error.
+5. **Death saves have still never fired live.** Tomas fell to 4/28, the closest yet.
+
+### Fixes after the fifth run
+
+Findings 1–4 are fixed in `197b339` plus a follow-up after review; finding 5 is still open.
+
+1. `dm_state_leak` catches the instruction echo (`Act for … with tools`, `then call hand_off`, `Continue with other tools`) and tool-call syntax (`hand_off(`, `attack(goblin-1)`).
+2. It catches any `HP` figure (`HP drops to a critical 8`), and `health` or `hit points` with a readout against a two-digit maximum (`health to 36/52`, `36/52 health`, `at 4/28 hit points`, `hit points: 36 of 52`), so `3/4 of a vial` stays. Replaying the strip over sessions 005–009 removes only real leaks.
+3. The checker prompt says the result of an enemy's action on a PC (a hit, miss, wound, or knockback) is allowed and that players declare nothing on a monster's turn, while a reaction, spell, or line the player did not declare is still a violation.
+4. `hand_off` naming a monster or NPC explains that only player characters take the spotlight, lists every bad id at once, and points to handing off by id or to the party.
+
 ## What Plan 2A added
 
 - **Engine hardening:** a runaway-loop backstop (12 stalled turns, 3 idle hand-offs, 24 DM tool calls per beat), a validator flag for every DM outcome, a player-safe `PlayerView` for prompts, downed PCs kept in initiative, turn ids and tool choice on model requests, an event schema version, a Node-free typecheck for `core` and `rules`, and recovery from a torn final log line.
@@ -260,11 +290,11 @@ The batch had one review; its findings (a leak cut breaking quotes, over-broad `
 
 ## Where we are (2026-09-19)
 
-**Branch `feat/dm-pc-control-checker`: 98 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1128 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
+**Branch `feat/dm-pc-control-checker`: 101 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1146 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
 
 The expected failure is deliberate: it documents the quote-majority split's known cost (`"Who's next?" I nod to You.`), and will start passing only if that rule is revisited.
 
-**The release gate is open.** Four 1-hour sessions have run (005–008), each followed by a reviewed batch of fixes. Session 008 was the cleanest yet (63 wall minutes, no pauses, 10 checker flags, 2 tool errors); its fix batch is reviewed and tested but has not run live. The decision waiting on Aaron: merge to `main` locally, push and open a PR, keep the branch, or run session 009 first.
+**The release gate is open.** Five 1-hour sessions have run (005–009), each followed by a reviewed batch of fixes. Session 009 confirmed the fourth batch live; its own fixes (leak shapes, checker wording, `hand_off` to monsters) are reviewed and tested but not yet run live. The decision waiting on Aaron: merge to `main` locally, push and open a PR, keep the branch, or run session 010 first.
 
 ### What each batch did
 
@@ -274,19 +304,20 @@ The expected failure is deliberate: it documents the quote-majority split's know
 | First run    | Session 005                 | `347f6d7..dd50ea2` | Death saves, combat closing, state-leak strip, repeat cutting, NPC continuity, tool-error logging                             |
 | Second run   | Session 006                 | `2deb439..86cdeb0` | Combat narration caps, player repeat re-prompt, tool-shape coercions, hard-stop rule, read-aloud labels                       |
 | Third run    | Session 007                 | `1d2f823..643befb` | Wider leak patterns, strict `hand_off` shape, attacks in the DM prompt, NPC-id resolution, cross-beat repeats, checker tuning |
-| Fourth run   | Session 008                 | `bc334ff..HEAD`    | Sentence-level leak strip, HP-in-prose and turn-order leaks, NPC checker findings, no fight past the target, quote repair     |
+| Fourth run   | Session 008                 | `bc334ff..0bb260d` | Sentence-level leak strip, HP-in-prose and turn-order leaks, NPC checker findings, no fight past the target, quote repair     |
+| Fifth run    | Session 009                 | `197b339..HEAD`    | Instruction-echo and HP/health leaks, checker allows enemy blows on PCs, `hand_off` to monsters explained                     |
 
 ### Next steps, in order
 
-1. **Decide the branch**: merge to `main` locally, push and open a PR, keep it, or run session 009 first to exercise the fourth batch live. Nothing is pushed yet.
-2. **If running session 009** (`npm run sim -- run --campaign avalon --session 9 --target-minutes 60`, backgrounded, teed to `campaigns/avalon/logs/`): watch for any HP, AC, or initiative readout in `script.md`, checker flags naming NPCs, a fight started after the target, and whether death saves finally fire.
+1. **Decide the branch**: merge to `main` locally, push and open a PR, keep it, or run session 010 first to exercise the fifth batch live. Nothing is pushed yet.
+2. **If running session 010** (`npm run sim -- run --campaign avalon --session 10 --target-minutes 60`, backgrounded, teed to `campaigns/avalon/logs/`): watch for HP or health readouts and instruction echoes in `script.md`, checker flags on enemy blows, `hand_off` tool errors, and whether death saves finally fire (Tomas reached 4/28 in 009).
 3. Then the plan work already queued: Plan 2B (lore), the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike.
 
 ### Operating notes from these runs
 
 - **A run takes 1–2.5 hours of wall time** for 60 spoken minutes. Shorter narration makes the word-based clock advance more slowly, so the caps added in the second batch lengthen wall time.
 - **The DM's LM Studio wedged once** mid-`GENERATING`, answering nothing while still listing its model. `lms unload` then `lms load` fixed it; run `sim bench` before every session.
-- **The Ampere machine dropped off the network** mid-session 007 (Mira's seat, the checker's primary). `--resume` picked up cleanly once it was back.
+- **The Ampere machine dropped off the network** mid-session 007 and again mid-session 009 (back within ~10–30 minutes both times) (Mira's seat, the checker's primary). `--resume` picked up cleanly once it was back.
 - **`player-bram` has a fallback target** in `campaign.json` after its seat paused session 005 by answering four times without a tool call.
 - The SDD workspaces for all four batches are under `.superpowers/sdd/` (git-ignored) with their ledgers, briefs, reports and review packages.
 
