@@ -212,6 +212,11 @@ describe('validateDmText', () => {
       'Act for it with tools, narrate, then call hand_off.',
       'Act for him with tools, narrate, then call hand_off.',
       'hand_off(target="party")',
+      'Continue with other tools, or call hand_off.',
+      'Now call `hand_off`.',
+      'attack(goblin-1)',
+      'The ogre has 36/52 health.',
+      'Its hit points: 36 of 52.',
       "Blood sprays from the wound as the guard's HP drops to a critical 8.",
       "The impact deals five points of bludgeoning damage, dropping the creature's health to 36/52.",
       'The scribe gasps as cold steel pierces flesh, leaving him clinging to consciousness at 4/28 hit points.',
@@ -225,6 +230,9 @@ describe('validateDmText', () => {
       'Her health is failing, and the healer shakes his head.',
       'The narrator calls it a tale of health and 3 wishes.',
       'He hands off the torch to Mira.',
+      "I'll act for them with tools, the smith says.",
+      'The healer mutters about health as she measures 3/4 of a vial.',
+      'The herald begins to narrate (in a booming voice) the tale.',
     ])('leaves prose near the session-009 shapes alone: "%s"', (text) => {
       expect(validateDmText(text, { pcNames, mechanicsToolCalled: true })).toBeNull();
     });

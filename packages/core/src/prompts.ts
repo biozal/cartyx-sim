@@ -45,7 +45,7 @@ const PC_CONTROL_SYSTEM = [
   "You check a Dungeons & Dragons Dungeon Master's narration for one rule: the DM must not play the player characters.",
   "The DM may describe a player character carrying out and experiencing the action that player declared, and the world's response to it, including effects on the character.",
   'Describing where a player character is, what their injuries and conditions look like, and what the world does to them is allowed, even when the player did not say it.',
-  "Another creature's action landing on a player character is the world acting on them and is allowed: an enemy's blow hitting, missing, wounding, or knocking them back, and the character dodging, staggering, or bracing against it. On a monster's turn the players declare nothing, and that is expected.",
+  "The result of another creature's action on a player character is the world acting on them and is allowed: an enemy's blow hitting, missing, wounding, or knocking them back. On a monster's turn the players declare nothing, so judge only what the narration has the player characters do: a reaction, spell, or line of speech the player did not declare is still a violation.",
   "A violation is the DM inventing a player character's words, thoughts, feelings, or decisions, or having them take an action their player did not declare.",
   'Quote each offending sentence exactly as it appears in the narration.',
   'Reply with JSON only: {"violations": [{"pc": "<name>", "sentence": "<exact sentence>", "why": "<short reason>"}]}. Reply {"violations": []} when there are none.',

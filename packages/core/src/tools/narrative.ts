@@ -207,10 +207,13 @@ export const handOff = defineTool({
     if (target.kind === 'pcs') {
       const unknown = target.ids.filter((id) => !state.partyIds.includes(id));
       if (unknown.length > 0) {
-        const monster = unknown.find((id) => ownEntry(state.combatants, id) !== undefined);
-        if (monster) {
+        const others = unknown.filter(
+          (id) =>
+            ownEntry(state.combatants, id) !== undefined || ownEntry(state.npcs, id) !== undefined
+        );
+        if (others.length > 0) {
           throw new ToolError(
-            `"${monster}" is not a player character, so it cannot take the spotlight: act for it with tools during your own turn. Hand off to the party with {"kind": "party"}; in combat, initiative picks who acts next. Party ids: ${state.partyIds.join(', ')}`
+            `Only player characters take the spotlight, and ${others.join(', ')} ${others.length === 1 ? 'is' : 'are'} not one: act for monsters and NPCs with tools during your own turn. Unknown ids: ${unknown.join(', ')}. Hand off to player characters by id, or to the party with {"kind": "party"}; in combat, initiative picks who acts next. Party ids: ${state.partyIds.join(', ')}`
           );
         }
         throw new ToolError(

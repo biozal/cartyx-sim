@@ -485,11 +485,12 @@ describe('hand_off', () => {
       }),
     });
     const result = await harness.run(handOff, {
-      target: { kind: 'pcs', ids: ['hooded-merchant-1'] },
+      target: { kind: 'pcs', ids: ['hooded-merchant-1', 'zzz'] },
     });
     expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain('Unknown ids: hooded-merchant-1, zzz');
     expect((result as { error: string }).error).toContain(
-      '"hooded-merchant-1" is not a player character, so it cannot take the spotlight'
+      'Only player characters take the spotlight, and hooded-merchant-1 is not one'
     );
   });
 

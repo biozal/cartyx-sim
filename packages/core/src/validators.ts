@@ -154,15 +154,17 @@ function controlledCharacter(text: string, names: readonly string[]): string | n
 // readout, a bald "whose turn" statement, a turn-order readout ("Initiative is rolled.", "The
 // order of combat is as follows:", "**Initiative:** Kira 18"), a transcript tag (e.g. "[combat]",
 // "[hand_off]"), a hand-off JSON object, or the DM echoing its engine instruction ("Act for it
-// with tools, narrate, then call hand_off.") or a tool call ("hand_off(target=…)"). An HP figure
-// counts in any wording ("HP drops to a critical 8"), since "HP" is never story prose, and so does
-// "health" with an x/y readout ("health to 36/52"). Checked one sentence at a time, so the prose
+// with tools, narrate, then call hand_off.", "Continue with other tools, or call hand_off.") or a
+// tool call ("hand_off(target=…)", "attack(goblin-1)"). "HP" followed by a figure counts in any
+// wording ("HP drops to a critical 8"), since "HP" is never story prose; "health" or "hit points"
+// counts with a readout against a two-digit maximum ("health to 36/52", "36/52 health", "hit
+// points 36 of 52"), so "3/4 of a vial" stays. Checked one sentence at a time, so the prose
 // around a leak survives. "Order of battle" and "turn order" are left alone: story prose uses both.
 const SENTENCE_LEAK_PATTERNS = [
   /\(id:\s*[a-z0-9-]+\)/i,
   /\bHP\b[^.\d\n]{0,30}\d/i,
-  /\bhealth\b[^.\d\n]{0,30}\d+\s*\/\s*\d+/i,
-  /\d+\s*\/\s*\d+\s*(?:HP|hit\s+points?)\b/i,
+  /\b(?:health|hit\s+points?)\b[^.\d\n]{0,30}\d+\s*(?:\/|(?:out\s+)?of)\s*\d{2,}/i,
+  /\d+\s*\/\s*\d+\s*(?:HP|hit\s+points?|health)\b/i,
   /\b(?:\d+\s+(?:out\s+)?of\s+\d+|(?:to|at|with)\s+(?:just\s+|only\s+)?[1-9]\d*)\s+(?:hit\s+points?|HP)\b/i,
   /\b[1-9]\d*\s+(?:hit\s+points?|HP)\s+(?:left|remaining)\b/i,
   /\bAC\s+\d+\b/i,
@@ -170,7 +172,7 @@ const SENTENCE_LEAK_PATTERNS = [
   /\binitiative\s+order\b|\border\s+of\s+(?:combat|initiative)\b|\binitiative\s+(?:is|has been)\s+rolled\b|\binitiative\b\W{0,4}:/i,
   /\[(?:combat|roll|state|scene|npc|lore|invented|hand_off|ooc)\]/i,
   /\{[^}]*"(?:target|kind)"\s*:/,
-  /\bAct for (?:him|her|it|them) with tools\b|\bthen call hand_off\b|\b(?:hand_off|narrate|scene_change|start_combat|end_combat)\s*\(/i,
+  /^Act for [^.,]{1,40} with tools\b|\b(?:then|now|or)\s+call\s+`?hand_off\b|^Continue with other tools\b|\b(?:narrate|attack)\(|\b[a-z]+_[a-z_]+\(/i,
 ];
 
 // Whole lines of prompt state: the "Current Status" heading the DM writes above its own status
