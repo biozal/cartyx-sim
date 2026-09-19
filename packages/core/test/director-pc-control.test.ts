@@ -249,6 +249,29 @@ describe('DM player-character control checker', () => {
     expect(ofType(sink.events, 'validator_flag')).toEqual([]);
   });
 
+  it("turns away a paraphrase of this turn's narration before asking the checker (session 010)", async () => {
+    const first =
+      'A thick tendril of cold vapor lashes out from the monolith, wrapping around the ankle of the nearest intruder and hurling magical energy across the clearing.';
+    const retold =
+      'A tendril of cold vapor lashes from the monolith, wrapping the nearest intruder by the ankle as magical energy blasts across the clearing.';
+    const { director, model, sink } = setup({
+      dm: [respond(narrate(first), narrate(retold)), respond(handOffTomas())],
+      checker: [CLEAN],
+    });
+    await playDmBeat(director);
+
+    expect(ofType(sink.events, 'narration').map((e) => e.text)).toEqual([first]);
+    expect(ofType(sink.events, 'validator_flag')).toMatchObject([
+      { rule: 'duplicate_narration', resolution: 're_prompted' },
+    ]);
+    expect(model.requests.filter((request) => request.seat === 'checker')).toHaveLength(1);
+    const dmRequests = model.requests.filter((request) => request.seat === 'dm');
+    expect(dmRequests[1]!.messages.at(-1)).toMatchObject({
+      role: 'tool',
+      content: expect.stringContaining('Not narrated: this retells what you already narrated'),
+    });
+  });
+
   it('narrates unchecked with a note when the checker fails or its reply is unreadable', async () => {
     const { director, sink } = setup({
       dm: [respond(narrate('The door creaks open.'), narrate('The wind rises.'), handOffTomas())],

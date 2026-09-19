@@ -23,7 +23,7 @@ import {
 } from './pc-control';
 import type { PromptBuilder } from './prompts';
 import { TurnRecorder } from './recorder';
-import { cutRepeats, repeatedSentences } from './repeats';
+import { cutRepeats, retellsNarration, repeatedSentences } from './repeats';
 import type { EventSink } from './sink';
 import { advanceCombat, foldEvents, nextActor, ownEntry, takesTurn, type GameState } from './state';
 import { emitCombatantChanges } from './tools/mechanics';
@@ -239,6 +239,13 @@ function narratedThisBeat(recorder: TurnRecorder, text: string): boolean {
   return recorder.events.some(
     (event) => event.type === 'narration' && collapseWhitespace(event.text) === words
   );
+}
+
+/** The DM's narration so far this turn, in order. */
+function dmNarrationsThisBeat(recorder: TurnRecorder): string[] {
+  return recorder.events
+    .filter((event) => event.type === 'narration' && event.speaker === 'dm')
+    .map((event) => (event as Extract<SimEvent, { type: 'narration' }>).text);
 }
 
 /** Public dialogue lines players spoke since the DM's last turn ended: quoting one back is a repeat. */
@@ -565,6 +572,8 @@ export class Director {
     };
     const ALREADY_NARRATED =
       'Not narrated again: you already narrated that this turn. Continue with other tools, or call hand_off.';
+    const ALREADY_TOLD =
+      'Not narrated: this retells what you already narrated this turn. Do not describe this moment again; continue with other tools, or call hand_off.';
     const ALREADY_CUT =
       'Not narrated: every sentence of that narration was already cut this turn because it played player characters. Continue with other tools, or call hand_off.';
     // A DM-only note about the synthesized hand_off call, emitted once the loop reaches it and
@@ -698,6 +707,16 @@ export class Director {
           rejectDuplicateNarration(call, ALREADY_NARRATED);
           continue;
         }
+        // A paraphrase of this turn's earlier narration is turned away before it costs a checker
+        // call. Exact repeats are left to the repeats trim below, so only what they leave counts.
+        if (call.name === 'narrate' && text) {
+          const earlier = dmNarrationsThisBeat(recorder);
+          const fresh = cutRepeats(text, { narratedThisBeat: earlier, recentPlayerLines: [] }).kept;
+          if (fresh && retellsNarration(fresh, earlier)) {
+            rejectDuplicateNarration(call, ALREADY_TOLD);
+            continue;
+          }
+        }
         if (violation && call.id === proseCallId) {
           // Prose the engine turned into narration is dropped on a violation, without costing a
           // retry or blocking the calls the model actually made. A DM-only note keeps a record.
@@ -810,7 +829,7 @@ export class Director {
             }
             repeatsTrim = listed;
             args = { ...(args as Record<string, unknown>), text: repeats.kept };
-            removed += ` Removed repeated sentences: ${listed}`;
+            removed += ` Removed repeated sentences: ${listed}. They were already told; do not retell this moment.`;
           }
         }
         // The call is past every rejection and every later trim, so the trims above really did

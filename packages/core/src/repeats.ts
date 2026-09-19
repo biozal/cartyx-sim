@@ -84,3 +84,41 @@ export function cutRepeats(text: string, options: CutRepeatsOptions): CutRepeats
   }
   return { kept: joinKeptSentences(parts), removed };
 }
+
+// Short, common words that say nothing about what a narration describes.
+const FILLER = new Set(
+  (
+    'that this with from into their there they them then than your have been were what when ' +
+    'where which while about over under after before again also just only very more most some ' +
+    'such each other these those will would could should upon onto like even still back down ' +
+    'toward towards across through around against between within without behind beneath along ' +
+    'among whose'
+  ).split(' ')
+);
+
+/** The distinct content words of `text`: four or more letters, lowercased, filler dropped. */
+function contentWords(text: string): Set<string> {
+  const words = text.toLowerCase().match(/[\p{L}'’]+/gu) ?? [];
+  return new Set(words.filter((word) => word.length >= 4 && !FILLER.has(word)));
+}
+
+/** How many content words a narration needs before `retellsNarration` judges it. */
+const RETELL_MIN_WORDS = 5;
+/** The share of a narration's content words already narrated this turn that makes it a retelling. */
+const RETELL_SHARE = 0.6;
+
+/**
+ * Whether `text` retells narration the DM already gave this turn: 60% or more of its content
+ * words (at least 5 of them) already appear there. Catches the paraphrase loop exact-sentence
+ * repeats miss, where the DM describes one moment again and again in new words (session 010 told
+ * Kira counting "One... two... three!" seven times in one turn; session 007 told one miss seven
+ * ways). Replaying sessions 005–010 at this share flags only retellings.
+ */
+export function retellsNarration(text: string, earlier: readonly string[]): boolean {
+  const words = contentWords(text);
+  if (words.size < RETELL_MIN_WORDS || earlier.length === 0) return false;
+  const told = contentWords(earlier.join(' '));
+  let shared = 0;
+  for (const word of words) if (told.has(word)) shared++;
+  return shared / words.size >= RETELL_SHARE;
+}

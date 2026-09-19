@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cutRepeats, repeatedSentences } from '../src/repeats';
+import { cutRepeats, repeatedSentences, retellsNarration } from '../src/repeats';
 
 describe('cutRepeats', () => {
   it('cuts a sentence the DM already narrated this beat', () => {
@@ -169,5 +169,42 @@ describe('repeatedSentences', () => {
 
   it('returns nothing when the speaker has not said anything yet', () => {
     expect(repeatedSentences('My numbers are what you breathe on.', [])).toEqual([]);
+  });
+});
+
+describe('retellsNarration', () => {
+  // Session 010: the DM told Kira's step toward the monolith, then told it again in new words.
+  const told =
+    "She steps forward on the beat. The mist does not part. A thick tendril of cold vapor lashes out from the base of the monolith, wrapping around Kira's ankle with surprising strength. It yanks her off balance, and a wave of magical energy blasts against her chest, sending her skidding back five paces.";
+
+  it('flags a paraphrase of narration already told this turn (session 010)', () => {
+    expect(
+      retellsNarration(
+        'Kira calls out the count, raising her hammer as she measures the rhythm. On the third beat, she steps forward. A tendril of cold vapor lashes out from the monolith and wraps her ankle, and magical energy blasts her back five paces.',
+        [told]
+      )
+    ).toBe(true);
+  });
+
+  it('flags a miss told again in other words (session 007)', () => {
+    expect(
+      retellsNarration("Mira's light hammer swings wide, missing the hooded figure entirely.", [
+        "Mira's light hammer flies wide, striking the wall with a dull thud as the hooded figure sidesteps the attack.",
+      ])
+    ).toBe(true);
+  });
+
+  it('keeps narration that moves the story on, even when it names the same things', () => {
+    expect(
+      retellsNarration(
+        'Behind Kira, the monolith cracks down its center. Silver light spills across the clearing, and somewhere beyond the trees a bell begins to toll.',
+        [told]
+      )
+    ).toBe(false);
+  });
+
+  it('never judges a short line or the first narration of a turn', () => {
+    expect(retellsNarration('Kira, what do you do?', [told])).toBe(false);
+    expect(retellsNarration(told, [])).toBe(false);
   });
 });
