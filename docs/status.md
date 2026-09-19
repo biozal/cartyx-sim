@@ -1,6 +1,6 @@
 # cartyx-sim status
 
-_Last updated: 2026-09-18_
+_Last updated: 2026-09-19_
 
 cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on local models) built to test the Cartyx lore in `cartyx-lore`. It records a session as an event log, and later plans add voices, art, and a video-call-style playback page for recording. See the spec (`docs/superpowers/specs/2026-09-13-cartyx-sim-v1-design.md`) and the roadmap (`docs/superpowers/plans/2026-09-13-cartyx-sim-v1-roadmap.md`).
 
@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1082 tests plus 1 expected failure), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1128 tests plus 1 expected failure), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -205,6 +205,42 @@ Findings 1–6 above are fixed on `feat/dm-pc-control-checker`; finding 7 (death
 5. **The checker rejected or trimmed 27 narrations.** The checker prompt now says outright that describing a player character's position, injuries, and conditions is allowed even when the player didn't say so, and narrows a violation to the DM inventing a PC's words, thoughts, feelings, or decisions, or having them act without their player declaring it. Whether this brings the catch rate back down (7 in session 006, 27 in 007) is worth watching on the next run.
 6. **The DM repeats itself across beats.** The repeat check that already caught a sentence repeated within one beat now also checks the DM's narration from the previous 3 committed beats, so a sentence like "The room is utterly silent." repeated one beat later is cut and flagged `repeated_text`; a repeat from five beats back is out of the window and kept.
 
+## Fourth 1-hour run (session 008, 2026-09-19)
+
+Run on HEAD `d083871`, after the third batch of fixes. It reached `target_reached` in **63 wall minutes** (the fastest of the four) with no pauses; every seat benched 5/5 beforehand.
+
+| Measure               | 005         | 006         | 007                 | 008        |
+| --------------------- | ----------- | ----------- | ------------------- | ---------- |
+| Wall / spoken minutes | 80.5 / 63.7 | 68.8 / 63.0 | 154.4 / 60.7        | 63.1 / ~65 |
+| Pauses                | 1 (seat)    | none        | 1 (machine offline) | none       |
+| DM share              | 70%         | 64%         | 72%                 | 71%        |
+| Fights                | 1           | 1           | 3                   | 1 (+1 cut) |
+| Checker flags         | 13          | 7           | 27                  | 10         |
+| Tool errors           | 12          | 5           | 19                  | 2          |
+
+The third batch held: checker flags fell from 27 to 10, tool errors from 19 to 2, no `[tag]` or JSON line leaked, and no weapon was invented. The script stage gave 72 model labels, no rules fallbacks, and dropped 12 stage directions. Findings:
+
+1. **Hit points and turn order still reach the story in prose.** "its health dwindled to 9 out of 22 hit points", "it drops to just 3 hit points" (monster HP, which players must never hear), and "Bram's HP rises to 19/28" were all voiced, and so were two full initiative readouts (`**Initiative Order:**` with `1. Bram Holloway (21)` … and "Initiative is rolled. The order of combat is as follows:" with seven numbered names).
+2. **A correct leak cut took a whole paragraph.** "…bringing him to 19/28 HP." ended a five-sentence paragraph on Silas dressing Bram's wound, and `dm_state_leak` strips whole lines, so all five sentences went (the backlog item, now seen live).
+3. **The checker flags NPCs as player characters.** Two of its 10 flags were about Silas Vane ("Silas remains poised, his dagger ready…"), costing a rewrite and a cut. The other 8 were real, the DM writing PC lines ("Contact!" Bram shouts; "Clear," Kira calls back).
+4. **A fight started in the closing beat.** Past the target, the DM called `scene_change` and then `start_combat` in the same turn; the session ended at that scene change with initiative rolled and no round played. `start_combat` was refused only past 115%.
+5. **A repeat cut broke an NPC's quote.** The DM re-narrated Borin's line; cutting its repeated first and last sentences also cut the quote marks, so "That place... it's been quiet. Too quiet." was voiced as DM narration.
+6. **`request_check` for an NPC outside combat** failed with a bare "Unknown combatant id" (the DM recovered on its own).
+7. **Death saves have still never fired live.** Bram's 15/28 was the lowest anyone fell.
+
+### Fixes after the fourth run
+
+Findings 1–6 are fixed (`bc334ff..656f4ce`); finding 7 is still open.
+
+1. **Hit points and turn order in prose.** `dm_state_leak` now catches hit-point readouts (`HP rises to 19/28`, `9 out of 22 hit points`, `to just 3 hit points`, `4 hit points left`) and turn-order sentences (`initiative order`, `order of combat`, `initiative is rolled`, `Initiative:`), and removes turn-order entries as whole lines: a numbered item that is only a combatant's name (`1. Mira Ashdown`, `3. Shadow Stalker #3`) or a name followed by its initiative (`2. Hooded Figure (2)`, `Kira Vale — 18`). Left alone on purpose: "Kira loses 3 hit points." (the mechanics rule's), "drops to 0 hit points" (a PC going down is public), "order of battle", "turn order", and bulleted names with no number. Replaying the strip over sessions 005–008 removes only real leaks.
+2. **Whole-paragraph cuts.** Leaks are now stripped one sentence at a time, and a quote mark the cut sentence held is added back to the speech around it. Only the `Current Status` heading and turn-order entries go as whole lines. Sentence splitting no longer breaks after a title (`Mr.`, `St.`, `Dr.` …), so a cut never strands one.
+3. **Checker findings about NPCs.** A finding counts only when it names a party member — an id, or any name word of three or more letters, however written (`Kira Vale's`, `kira-vale`) — and is not exactly an NPC's name.
+4. **A fight in the closing beat.** `start_combat` is refused from 100% of the target on, not only past 115%.
+5. **Broken quotes after a repeat cut.** `cutRepeats` adds back a quote mark a cut sentence held, in the style of the mark that opened that quote.
+6. **Tools aimed at an NPC outside combat.** The error now says the NPC is not a combatant and has no stats, and tells the DM to decide what happens in narration or add them with `start_combat`.
+
+The batch had one review; its findings (a leak cut breaking quotes, over-broad `order of battle`/`0 hit points`/bulleted-name matches, titles splitting sentences, exact-only checker name matching, turn-order shapes missed) are fixed in the follow-up commit.
+
 ## What Plan 2A added
 
 - **Engine hardening:** a runaway-loop backstop (12 stalled turns, 3 idle hand-offs, 24 DM tool calls per beat), a validator flag for every DM outcome, a player-safe `PlayerView` for prompts, downed PCs kept in initiative, turn ids and tool choice on model requests, an event schema version, a Node-free typecheck for `core` and `rules`, and recovery from a torn final log line.
@@ -224,11 +260,11 @@ Findings 1–6 above are fixed on `feat/dm-pc-control-checker`; finding 7 (death
 
 ## Where we are (2026-09-19)
 
-**Branch `feat/dm-pc-control-checker`: 90 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1093 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
+**Branch `feat/dm-pc-control-checker`: 98 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1128 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
 
 The expected failure is deliberate: it documents the quote-majority split's known cost (`"Who's next?" I nod to You.`), and will start passing only if that rule is revisited.
 
-**The release gate is open.** Three 1-hour sessions have run (005, 006, 007), each followed by a reviewed batch of fixes; the third batch is reviewed and probed but has only been exercised live by a one-minute smoke session (`sessions/099`, safe to delete). The decision waiting on Aaron: merge to `main` locally, push and open a PR, or keep the branch.
+**The release gate is open.** Four 1-hour sessions have run (005–008), each followed by a reviewed batch of fixes. Session 008 was the cleanest yet (63 wall minutes, no pauses, 10 checker flags, 2 tool errors); its fix batch is reviewed and tested but has not run live. The decision waiting on Aaron: merge to `main` locally, push and open a PR, keep the branch, or run session 009 first.
 
 ### What each batch did
 
@@ -238,13 +274,13 @@ The expected failure is deliberate: it documents the quote-majority split's know
 | First run    | Session 005                 | `347f6d7..dd50ea2` | Death saves, combat closing, state-leak strip, repeat cutting, NPC continuity, tool-error logging                             |
 | Second run   | Session 006                 | `2deb439..86cdeb0` | Combat narration caps, player repeat re-prompt, tool-shape coercions, hard-stop rule, read-aloud labels                       |
 | Third run    | Session 007                 | `1d2f823..643befb` | Wider leak patterns, strict `hand_off` shape, attacks in the DM prompt, NPC-id resolution, cross-beat repeats, checker tuning |
+| Fourth run   | Session 008                 | `bc334ff..HEAD`    | Sentence-level leak strip, HP-in-prose and turn-order leaks, NPC checker findings, no fight past the target, quote repair     |
 
 ### Next steps, in order
 
-1. **Decide the branch**: merge to `main` locally, push and open a PR, or keep it. Nothing is pushed yet.
-2. **Run session 008** (`npm run sim -- run --campaign avalon --session 8 --target-minutes 60`, backgrounded, teed to `campaigns/avalon/logs/`). It is the first run on the third batch of fixes. Watch for: the DM's share of words (70% → 64% → 72%), wall time (80 → 69 → 154 min), checker flags (13 → 7 → 27, expected to fall after the prompt tuning), any leaked state (`dm_state_leak` should now catch it), and whether a character ever drops to 0 HP so death saves finally fire live.
-3. **Script it** (`npm run sim -- script --campaign avalon --session 8`) and read `script.md` for anything voiced that should not be.
-4. Then the plan work already queued: Plan 2B (lore), the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike.
+1. **Decide the branch**: merge to `main` locally, push and open a PR, keep it, or run session 009 first to exercise the fourth batch live. Nothing is pushed yet.
+2. **If running session 009** (`npm run sim -- run --campaign avalon --session 9 --target-minutes 60`, backgrounded, teed to `campaigns/avalon/logs/`): watch for any HP, AC, or initiative readout in `script.md`, checker flags naming NPCs, a fight started after the target, and whether death saves finally fire.
+3. Then the plan work already queued: Plan 2B (lore), the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike.
 
 ### Operating notes from these runs
 
