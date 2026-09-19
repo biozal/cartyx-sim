@@ -198,6 +198,29 @@ describe('getCombatant resolves an npc- prefixed id to its combatant', () => {
     expect((result as { error: string }).error).toContain('Unknown combatant id "npc-silas-vane"');
   });
 
+  it('says an introduced NPC who is not fighting has no stats to roll (session 008)', async () => {
+    const { state, history } = startedState([kira, tomas]);
+    const harness = toolHarness({ state, history, rng: scriptedRng([10]) });
+    harness.recorder.emit({
+      type: 'npc_introduced',
+      npcId: 'npc-silas-vane',
+      name: 'Silas Vane',
+      description: 'A hooded warden.',
+      invented: true,
+    });
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-silas-vane',
+      checkType: 'ability',
+      ability: 'wis',
+      dc: 12,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain(
+      '"npc-silas-vane" is Silas Vane, an NPC who is not a combatant'
+    );
+  });
+
   it('keeps the "Unknown combatant id" error for an unrelated unknown id', async () => {
     const harness = withSilasVane();
     const result = await harness.run(requestCheck, {
