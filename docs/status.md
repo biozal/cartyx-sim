@@ -261,7 +261,7 @@ A puzzle session at a monolith and a chasm, with no fight, so the combat-side fi
 
 ### Fixes after the sixth run
 
-Both fixed (`c75717c`, `fe392b8`, and a follow-up after review).
+Both fixed (`c75717c`, `c321063`, and a follow-up after review).
 
 1. A narration is turned away (`duplicate_narration`, re-prompted) when, after exact repeats are cut, 60% or more of its content words (at least 5 distinct words of four or more letters, filler dropped, possessives folded) were already narrated this turn since the last game event, and the shared words are a quarter or more of both texts together. After three retellings in one turn the turn ends with a forced hand-off (`dm_retell_limit`). The check runs before the checker, so a retelling no longer costs a checker call, and the repeat-cut tool reply now says the cut text was already told. The review caught two false-positive shapes in the first version — a new beat after a long opening, and a second monster's attack in the same turn — which the game-event window and the two-sided share now spare. Replaying sessions 005–010 flags 15 narrations, all retellings.
 2. `dm_state_leak` strips a sentence that opens with a snake_case tool name (`hand_off`) or a tool-argument key (`target:`, `kind:`, `ids:`).
