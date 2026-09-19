@@ -212,7 +212,9 @@ export const handOff = defineTool({
       const unknown = target.ids.filter((id) => !state.partyIds.includes(id));
       if (unknown.length > 0) {
         const combatants = unknown.filter((id) => ownEntry(state.combatants, id) !== undefined);
-        if (state.combat && combatants.length === unknown.length) {
+        // Only when every id is a combatant: a hand-off naming a player character as well means
+        // the DM wants that character, so dropping them for the party would lose the instruction.
+        if (state.combat && combatants.length === target.ids.length) {
           coerced = ` ${unknown.join(', ')} ${unknown.length === 1 ? 'is' : 'are'} not a player character, so initiative decides who acts next.`;
           target = { kind: 'party' };
         } else {

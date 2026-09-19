@@ -157,13 +157,13 @@ export const attack = defineTool({
     attackName: z.string().trim().min(1).max(200),
     mode: RollModeArg,
   }),
-  run(args, { recorder, rng }) {
+  run(args, { recorder, rng, history }) {
     const attacker = getCombatant(recorder.state, args.attackerId);
     const target = getCombatant(recorder.state, args.targetId);
     if (attacker.dead || attacker.hp === 0) {
       throw new ToolError(`${attacker.name} cannot attack at 0 HP or while dead.`);
     }
-    requireCombatTurn(recorder.state, attacker, 'attack');
+    requireCombatTurn(recorder.state, attacker, 'attack', history, recorder);
     const result = resolveAttack(attacker, target, args.attackName, rng, args.mode);
     const label = `${attacker.name} ${result.attack.name} → ${target.name}`;
     for (const event of attackRollEvents(attacker.id, label, result)) recorder.emit(event);
@@ -206,11 +206,11 @@ export const castSpell = defineTool({
     healing: z.string().min(1).optional(),
     mode: RollModeArg,
   }),
-  run(args, { recorder, rng }) {
+  run(args, { recorder, rng, history }) {
     const { state } = recorder;
     const caster = getCombatant(state, args.casterId);
-    requireCombatTurn(state, caster, 'cast a spell');
     const targets = args.targetIds.map((id) => getCombatant(state, id));
+    requireCombatTurn(state, caster, 'cast a spell', history, recorder);
     // Save and healing effects hit each target once, regardless of duplicate ids; a repeated
     // attack (e.g. Scorching Ray) is a separate ray per id.
     const seenIds = new Set<string>();

@@ -159,20 +159,60 @@ function resolveNpcId(state: GameState, id: string): Combatant | undefined {
   return matches.length === 1 ? ownEntry(state.combatants, matches[0]!) : undefined;
 }
 
+/** Whether `actor` has already attacked or cast since the combat turn now running began. */
+function actedThisTurn(
+  actorId: string,
+  history: readonly SimEvent[],
+  recorder: TurnRecorder
+): boolean {
+  const events = [...history, ...recorder.events];
+  // The turn began at the last combat_turn, or at combat_start for the first turn of a fight.
+  let start = 0;
+  events.forEach((event, index) => {
+    if (event.type === 'combat_turn' || event.type === 'combat_start') start = index + 1;
+  });
+  return events
+    .slice(start)
+    .some(
+      (event) =>
+        event.type === 'roll' &&
+        event.actor === actorId &&
+        (event.kind === 'attack' || event.kind === 'damage' || event.kind === 'healing')
+    );
+}
+
 /**
- * Refuses an action by anyone but the combatant whose turn it is, while combat runs: in session
- * 011 the DM had one giant rat bite Kira three times in a single turn, taking her from 24 HP to 6.
- * Outside combat there are no turns, so nothing is refused.
+ * Refuses an attack or spell out of turn, or a second one on the same turn, while combat runs:
+ * in session 011 one giant rat bit Kira four times across a single round, taking her from 24 HP
+ * to 6, because nothing tied an action to the initiative order or counted it. A turn is one
+ * action, since the engine models no multiattack. Outside combat there are no turns, so nothing
+ * is refused.
  */
-export function requireCombatTurn(state: GameState, actor: Combatant, what: string): void {
+export function requireCombatTurn(
+  state: GameState,
+  actor: Combatant,
+  what: string,
+  history: readonly SimEvent[],
+  recorder: TurnRecorder
+): void {
   const { combat } = state;
   if (!combat) return;
   const currentId = combat.order[combat.turnIndex]?.combatantId;
-  if (!currentId || currentId === actor.id) return;
-  const current = ownEntry(state.combatants, currentId);
-  throw new ToolError(
-    `It is ${current?.name ?? currentId}'s turn (id: ${currentId}), so ${actor.name} cannot ${what} now. Resolve this turn, then end yours with hand_off: initiative brings ${actor.name} round again.`
-  );
+  if (!currentId) return;
+  // Someone outside the initiative order is not taking turns at all — a trap, a glyph, or an NPC
+  // watching the fight — so nothing stops them.
+  if (!combat.order.some((entry) => entry.combatantId === actor.id)) return;
+  if (currentId !== actor.id) {
+    const current = ownEntry(state.combatants, currentId);
+    throw new ToolError(
+      `The spotlight is on ${current?.name ?? currentId}, whose id is ${currentId}, so ${actor.name} cannot ${what} now — and apply_damage is not a way round the initiative order. Resolve what is happening, then end your turn with hand_off: initiative brings ${actor.name} round again.`
+    );
+  }
+  if (actedThisTurn(actor.id, history, recorder)) {
+    throw new ToolError(
+      `${actor.name} has already acted this turn and cannot ${what} again. Narrate what happens, then end your turn with hand_off: initiative brings ${actor.name} round again next round.`
+    );
+  }
 }
 
 export function getCombatant(state: GameState, id: string): Combatant {

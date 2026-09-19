@@ -274,6 +274,10 @@ describe('validateDmText', () => {
       'She waits her turn at the well.',
       // Table talk, not bookkeeping: a DM saying this aloud belongs in the story.
       'Kira Vale, it is your turn. What do you do?',
+      // Prose that happens to use the same words, which an unanchored pattern would cut.
+      'The mill wheel groans, and before its turn is complete the rope snaps.',
+      "She waits until the sentry's patrol turn is over, then slips past.",
+      'Bram grunts: "Wait your turn — his turn is over."',
     ])('leaves ordinary turns of phrase and table talk alone: "%s"', (text) => {
       expect(validateDmText(text, { pcNames, mechanicsToolCalled: true })).toBeNull();
     });

@@ -353,7 +353,7 @@ describe('attack and the combat turn', () => {
     });
     expect(result.ok).toBe(false);
     expect((result as { error: string }).error).toContain(
-      "It is Tomas Reed's turn (id: tomas), so Goblin cannot attack now"
+      'The spotlight is on Tomas Reed, whose id is tomas, so Goblin cannot attack now'
     );
     expect(harness.recorder.events.filter((e) => e.type === 'roll')).toEqual([]);
   });
@@ -377,7 +377,71 @@ describe('attack and the combat turn', () => {
       targetIds: ['goblin-1'],
     });
     expect(out.ok).toBe(false);
-    expect((out as { error: string }).error).toContain("It is Tomas Reed's turn");
+    expect((out as { error: string }).error).toContain('The spotlight is on Tomas Reed');
+  });
+
+  it('refuses a second attack on the same turn, since the engine models no multiattack', async () => {
+    const harness = inCombat([12, 3, 15, 4]);
+    expect(
+      (
+        await harness.run(attack, {
+          attackerId: 'tomas',
+          targetId: 'goblin-1',
+          attackName: 'Longsword',
+        })
+      ).ok
+    ).toBe(true);
+    const again = await harness.run(attack, {
+      attackerId: 'tomas',
+      targetId: 'goblin-1',
+      attackName: 'Longsword',
+    });
+    expect(again.ok).toBe(false);
+    expect((again as { error: string }).error).toContain(
+      'Tomas Reed has already acted this turn and cannot attack again'
+    );
+  });
+
+  it('counts an attack from an earlier beat of the same turn, so an ambusher gets one swing', async () => {
+    const harness = inCombat([12, 3, 15, 4]);
+    expect(
+      (
+        await harness.run(attack, {
+          attackerId: 'tomas',
+          targetId: 'goblin-1',
+          attackName: 'Longsword',
+        })
+      ).ok
+    ).toBe(true);
+    // A new beat of the same turn: the rolls above are history now, not this recorder's events.
+    const next = toolHarness({
+      state: harness.recorder.state,
+      history: [...harness.recorder.events],
+      rng: scriptedRng([15, 4]),
+    });
+    const again = await next.run(attack, {
+      attackerId: 'tomas',
+      targetId: 'goblin-1',
+      attackName: 'Longsword',
+    });
+    expect(again.ok).toBe(false);
+    expect((again as { error: string }).error).toContain('has already acted this turn');
+  });
+
+  it('lets the next combatant act once the turn moves on', async () => {
+    const harness = inCombat([12, 3, 15, 4]);
+    await harness.run(attack, {
+      attackerId: 'tomas',
+      targetId: 'goblin-1',
+      attackName: 'Longsword',
+    });
+    harness.recorder.emit({ type: 'combat_turn', round: 1, turnIndex: 1, combatantId: 'goblin-1' });
+    const result = await harness.run(attack, {
+      attackerId: 'goblin-1',
+      targetId: 'kira',
+      attackName: 'Scimitar',
+    });
+    expect(result.ok).toBe(true);
   });
 
   it('refuses nothing outside combat, when nobody has a turn', async () => {
