@@ -96,23 +96,39 @@ const FILLER = new Set(
   ).split(' ')
 );
 
-/** The distinct content words of `text`: four or more letters, lowercased, filler dropped. */
+/**
+ * The distinct content words of `text`: four or more letters, lowercased, filler dropped, with a
+ * possessive "'s" removed and curly apostrophes made straight, so "Kira's" and "Kira’s" both count
+ * as "kira".
+ */
 function contentWords(text: string): Set<string> {
-  const words = text.toLowerCase().match(/[\p{L}'’]+/gu) ?? [];
+  const words =
+    text
+      .toLowerCase()
+      .replace(/’/g, "'")
+      .replace(/'s\b/g, '')
+      .match(/[\p{L}\p{M}']+/gu) ?? [];
   return new Set(words.filter((word) => word.length >= 4 && !FILLER.has(word)));
 }
 
 /** How many content words a narration needs before `retellsNarration` judges it. */
 const RETELL_MIN_WORDS = 5;
-/** The share of a narration's content words already narrated this turn that makes it a retelling. */
+/** The share of a narration's content words already told that makes it a retelling. */
 const RETELL_SHARE = 0.6;
+/**
+ * The least overlap, as a share of both texts together (2 × shared / (new + told)), for a
+ * retelling: a short new beat that names a few things from a long opening description shares a
+ * big part of itself but a small part of the whole, and is not a retelling.
+ */
+const RETELL_BOTH = 0.25;
 
 /**
- * Whether `text` retells narration the DM already gave this turn: 60% or more of its content
- * words (at least 5 of them) already appear there. Catches the paraphrase loop exact-sentence
- * repeats miss, where the DM describes one moment again and again in new words (session 010 told
- * Kira counting "One... two... three!" seven times in one turn; session 007 told one miss seven
- * ways). Replaying sessions 005–010 at this share flags only retellings.
+ * Whether `text` retells `earlier`: 60% or more of its content words (at least 5 of them) already
+ * appear there, and the shared words are also a quarter or more of both texts together. Catches
+ * the paraphrase loop exact-sentence repeats miss, where the DM describes one moment again and
+ * again in new words (session 010 told Kira counting "One... two... three!" seven times in one
+ * turn; session 007 told one miss seven ways). The caller passes only narration told since the
+ * last thing happened in the game, so a new attack or check is never compared with the last one.
  */
 export function retellsNarration(text: string, earlier: readonly string[]): boolean {
   const words = contentWords(text);
@@ -120,5 +136,7 @@ export function retellsNarration(text: string, earlier: readonly string[]): bool
   const told = contentWords(earlier.join(' '));
   let shared = 0;
   for (const word of words) if (told.has(word)) shared++;
-  return shared / words.size >= RETELL_SHARE;
+  return (
+    shared / words.size >= RETELL_SHARE && (2 * shared) / (words.size + told.size) >= RETELL_BOTH
+  );
 }

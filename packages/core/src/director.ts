@@ -241,11 +241,25 @@ function narratedThisBeat(recorder: TurnRecorder, text: string): boolean {
   );
 }
 
-/** The DM's narration so far this turn, in order. */
-function dmNarrationsThisBeat(recorder: TurnRecorder): string[] {
-  return recorder.events
-    .filter((event) => event.type === 'narration' && event.speaker === 'dm')
-    .map((event) => (event as Extract<SimEvent, { type: 'narration' }>).text);
+/**
+ * The DM's narration this turn since the last thing happened in the game (a roll, a state change,
+ * a combat step, a scene change, an NPC introduced or speaking), in order: what a new narration
+ * could only be retelling, since anything before that event described something else.
+ */
+function narrationSinceLastEvent(recorder: TurnRecorder): string[] {
+  const texts: string[] = [];
+  for (const event of recorder.events) {
+    if (event.type === 'narration') {
+      if (event.speaker === 'dm') texts.push(event.text);
+    } else if (
+      event.type !== 'ooc_note' &&
+      event.type !== 'validator_flag' &&
+      !event.type.startsWith('lore_')
+    ) {
+      texts.length = 0;
+    }
+  }
+  return texts;
 }
 
 /** Public dialogue lines players spoke since the DM's last turn ended: quoting one back is a repeat. */
@@ -572,6 +586,7 @@ export class Director {
     };
     const ALREADY_NARRATED =
       'Not narrated again: you already narrated that this turn. Continue with other tools, or call hand_off.';
+    const MAX_RETELLS = 3;
     const ALREADY_TOLD =
       'Not narrated: this retells what you already narrated this turn. Do not describe this moment again; continue with other tools, or call hand_off.';
     const ALREADY_CUT =
@@ -600,7 +615,13 @@ export class Director {
       });
     };
 
-    for (let step = 0; step < this.maxDmStepsPerBeat && !ended && !callLimitHit; step++) {
+    let retells = 0;
+    let retellLimitHit = false;
+    for (
+      let step = 0;
+      step < this.maxDmStepsPerBeat && !ended && !callLimitHit && !retellLimitHit;
+      step++
+    ) {
       const response = await this.callModel(seat, recorder.turnId, messages, DM_TOOL_SCHEMAS);
       const { calls: rawCalls, proseCallId } = dmCallsFromResponse(
         response,
@@ -632,12 +653,14 @@ export class Director {
         if (counted && !ended && !skipRest && toolCalls >= this.maxDmToolCallsPerBeat) {
           callLimitHit = true;
         }
-        if (ended || skipRest || callLimitHit) {
+        if (ended || skipRest || callLimitHit || retellLimitHit) {
           const why = ended
             ? 'your turn already ended with hand_off'
             : callLimitHit
               ? 'you reached the tool call limit for this turn'
-              : 'an earlier call was rejected';
+              : retellLimitHit
+                ? 'you kept retelling the same moment, so your turn is over'
+                : 'an earlier call was rejected';
           messages.push(toolMessage(call, `Not executed: ${why}.`));
           noteProseHandOff(handOffProse, call, why);
           continue;
@@ -710,10 +733,14 @@ export class Director {
         // A paraphrase of this turn's earlier narration is turned away before it costs a checker
         // call. Exact repeats are left to the repeats trim below, so only what they leave counts.
         if (call.name === 'narrate' && text) {
-          const earlier = dmNarrationsThisBeat(recorder);
+          const earlier = narrationSinceLastEvent(recorder);
           const fresh = cutRepeats(text, { narratedThisBeat: earlier, recentPlayerLines: [] }).kept;
           if (fresh && retellsNarration(fresh, earlier)) {
+            retells++;
             rejectDuplicateNarration(call, ALREADY_TOLD);
+            // A DM stuck retelling one moment is not going to stop by itself (session 010 went on
+            // until the tool-call limit), so after a few turned-away retellings the turn ends.
+            if (retells >= MAX_RETELLS) retellLimitHit = true;
             continue;
           }
         }
@@ -861,7 +888,11 @@ export class Director {
     }
 
     if (!ended) {
-      const rule = callLimitHit ? 'dm_tool_call_limit' : 'dm_step_limit';
+      const rule = retellLimitHit
+        ? 'dm_retell_limit'
+        : callLimitHit
+          ? 'dm_tool_call_limit'
+          : 'dm_step_limit';
       this.flag(recorder, seat, rule, rejections, 'forced_hand_off');
       const forced = prepareToolCall(
         { id: 'forced-hand-off', name: 'hand_off', args: { target: { kind: 'party' } } },

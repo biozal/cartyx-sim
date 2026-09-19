@@ -203,6 +203,29 @@ describe('retellsNarration', () => {
     ).toBe(false);
   });
 
+  it('keeps a short new beat after a long opening that named the same places', () => {
+    // Session 010's real opening narration (268 words).
+    const opening =
+      "The party moves forward in formation. Kira takes point, her light hammer gripped tight as she steps onto the pale stone path. The mist parts cleanly at her boots, revealing the smooth, bone-white surface beneath. She pauses occasionally, watching the vapors curl and retreat, before continuing deeper into the woods.\n\nTomas falls to the rear, his longsword held ready, his gaze constantly scanning the dense, shadowed tree line for any sign of movement. Mira and Bram walk side-by-side in the middle, their footsteps muffled by the thickening fog that clings to their ankles but refuses to rise above their knees.\n\nThe ancient oaks tower overhead, their interlocking branches blotting out the morning sun. As they walk deeper, the silence of the woods begins to shift. A low, whispering sound rises from the mist\u2014a hushed, echoing murmur that sounds like voices speaking in a language just out of reach. The air grows noticeably colder, carrying the sharp scent of damp earth and ozone.\n\nAfter several minutes of tense walking, the canopy suddenly breaks. The path opens into a small, perfectly circular clearing bathed in an eerie, shadowless light. At its center stands a massive stone monolith, ancient and moss-draped, covered in spiraling carvings that seem to shift and twist when viewed from the corner of the eye. The mist pools thickly around the base of the stone, swirling like a slow, breathing entity.\n\nThe group halts at the edge of the clearing. The whispering fades to a near-silence, leaving only the sound of wind through the leaves and the group's own breathing. The monolith stands waiting, silent and imposing.";
+    expect(
+      retellsNarration(
+        'The mist around the base of the monolith stirs. A pale figure steps out of the stone, its carvings glowing as it raises a hand toward the party.',
+        [opening]
+      )
+    ).toBe(false);
+  });
+
+  it('counts a possessive and either apostrophe as the same word', () => {
+    const told =
+      "Kira's hammer strikes the ghoul's skull with a sickening crack, and the ghoul reels.";
+    expect(
+      retellsNarration(
+        'Kira’s hammer strikes the ghoul’s skull with a sickening crack; the ghoul reels.',
+        [told]
+      )
+    ).toBe(true);
+  });
+
   it('never judges a short line or the first narration of a turn', () => {
     expect(retellsNarration('Kira, what do you do?', [told])).toBe(false);
     expect(retellsNarration(told, [])).toBe(false);

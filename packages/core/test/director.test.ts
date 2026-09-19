@@ -1740,6 +1740,65 @@ describe('Director', () => {
     });
   });
 
+  describe('retold narration', () => {
+    const swing =
+      'The goblin swings its rusted scimitar at Kira, the jagged blade biting into her shoulder as the goblin cackles.';
+    const swingAgain =
+      'The goblin swings its rusted scimitar at Kira again, the jagged blade biting her shoulder while the goblin cackles.';
+
+    it('judges a narration only against what was told since the last roll, so a second attack narrates', async () => {
+      const { deps: built, sink } = deps({
+        dm: [
+          respond(
+            toolCall('narrate', { text: swing }),
+            toolCall('attack', { attackerId: 'tomas', targetId: 'kira', attackName: 'sword' }),
+            toolCall('narrate', { text: swingAgain }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      });
+      const director = await Director.create(config(), { ...built, rng: scriptedRng([12, 3]) });
+      await director.step(); // session_start
+      await director.step(); // DM beat
+      expect(sink.events.filter((e) => e.type === 'narration').map((e) => e.text)).toEqual([
+        swing,
+        swingAgain,
+      ]);
+    });
+
+    it('turns away a retelling, and ends the turn after three (session 010 retold one moment seven times)', async () => {
+      const {
+        deps: built,
+        model,
+        sink,
+      } = deps({
+        dm: [
+          respond(toolCall('narrate', { text: swing })),
+          respond(toolCall('narrate', { text: swingAgain })),
+          respond(toolCall('narrate', { text: swingAgain })),
+          respond(toolCall('narrate', { text: swingAgain })),
+          respond(toolCall('hand_off', { target: { kind: 'party' } })),
+        ],
+      });
+      const director = await Director.create(config(), built);
+      await director.step(); // session_start
+      await director.step(); // DM beat
+      expect(sink.events.filter((e) => e.type === 'narration').map((e) => e.text)).toEqual([swing]);
+      expect(
+        sink.events
+          .filter((e) => e.type === 'validator_flag')
+          .map((e) => (e as { rule: string }).rule)
+      ).toEqual([
+        'duplicate_narration',
+        'duplicate_narration',
+        'duplicate_narration',
+        'dm_retell_limit',
+      ]);
+      expect(model.requests.filter((request) => request.seat === 'dm')).toHaveLength(4);
+      expect(sink.events.filter((e) => e.type === 'hand_off')).toHaveLength(1);
+    });
+  });
+
   describe('F5: malformed model responses', () => {
     const malformed = (value: unknown) => value as ScriptedResponse;
 
