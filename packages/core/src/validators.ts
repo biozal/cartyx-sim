@@ -158,6 +158,8 @@ function controlledCharacter(text: string, names: readonly string[]): string | n
 // tool call ("hand_off(target=…)", "attack(goblin-1)", or session 010's "hand_off" and
 // "target: party" as bare lines). "HP" followed by a figure counts in any
 // wording ("HP drops to a critical 8"), since "HP" is never story prose; "health" or "hit points"
+// (session 011 announced them as "Giant Rat 2's turn is complete." as well; "Kira, it is your
+// turn. What do you do?" is table talk, not bookkeeping, and stays), and "health" or "hit points"
 // counts with a readout against a two-digit maximum ("health to 36/52", "36/52 health", "hit
 // points 36 of 52"), so "3/4 of a vial" stays. Checked one sentence at a time, so the prose
 // around a leak survives. "Order of battle" and "turn order" are left alone: story prose uses both.
@@ -169,7 +171,7 @@ const SENTENCE_LEAK_PATTERNS = [
   /\b(?:\d+\s+(?:out\s+)?of\s+\d+|(?:to|at|with)\s+(?:just\s+|only\s+)?[1-9]\d*)\s+(?:hit\s+points?|HP)\b/i,
   /\b[1-9]\d*\s+(?:hit\s+points?|HP)\s+(?:left|remaining)\b/i,
   /\bAC\s+\d+\b/i,
-  /\bIt is [^.]{1,40}['’]s turn\b/i,
+  /\bIt is [^.]{1,40}['’]s turn\b|\bturn is (?:complete|over|done|finished)\b/i,
   /\binitiative\s+order\b|\border\s+of\s+(?:combat|initiative)\b|\binitiative\s+(?:is|has been)\s+rolled\b|\binitiative\b\W{0,4}:/i,
   /\[(?:combat|roll|state|scene|npc|lore|invented|hand_off|ooc)\]/i,
   /\{[^}]*"(?:target|kind)"\s*:/,

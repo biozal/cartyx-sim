@@ -259,6 +259,25 @@ describe('validateDmText', () => {
       }
     );
 
+    // Bookkeeping the DM read out in its own words in session 011.
+    it.each(["Giant Rat 2's turn is complete.", "Kira Vale's turn is over."])(
+      'flags a session-011 turn announcement: "%s"',
+      (text) => {
+        const violation = validateDmText(text, { pcNames, mechanicsToolCalled: true });
+        expect(violation?.rule).toBe('dm_state_leak');
+        expect(violation?.strip?.removed).toEqual([text]);
+      }
+    );
+
+    it.each([
+      'The mill wheel turns as the water rises.',
+      'She waits her turn at the well.',
+      // Table talk, not bookkeeping: a DM saying this aloud belongs in the story.
+      'Kira Vale, it is your turn. What do you do?',
+    ])('leaves ordinary turns of phrase and table talk alone: "%s"', (text) => {
+      expect(validateDmText(text, { pcNames, mechanicsToolCalled: true })).toBeNull();
+    });
+
     it('keeps the rest of a paragraph when one sentence in it leaks a hit-point count', () => {
       const text =
         'Silas cleans the gash and wraps it tightly. Bram hisses in pain. The bleeding stops, bringing him to 19/28 HP.\n\nMeanwhile, Tomas scans the walls.';
