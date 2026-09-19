@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1176 tests plus 1 expected failure), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1179 tests plus 1 expected failure), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -347,7 +347,7 @@ Findings 1–4 are fixed in `197b339` plus a follow-up after review; finding 5 i
 
 ## Where we are (2026-09-19)
 
-**Branch `feat/dm-pc-control-checker`: 112 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1176 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
+**Branch `feat/dm-pc-control-checker`: 114 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1179 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
 
 The expected failure is deliberate: it documents the quote-majority split's known cost (`"Who's next?" I nod to You.`), and will start passing only if that rule is revisited.
 
@@ -366,9 +366,13 @@ The expected failure is deliberate: it documents the quote-majority split's know
 | Sixth run    | Session 010                 | `c75717c..80ac5e0` | Retelling (paraphrase loop) rejection with a per-turn cap, bare-line tool-call leaks                                           |
 | Seventh run  | Session 011                 | `7b4d55d..HEAD`    | One action per combatant per turn, combat hand-offs, carried items in the DM prompt, turn announcements, checker allows a miss |
 
+### Rule added after session 011: one fight a session
+
+Aaron's call (2026-09-19): a session has room for a single fight, as a rule of the simulation, not a nudge. `start_combat` refuses once one has started ("This session has already had its fight…"), the DM prompt says each turn whether the fight is still to come, the tool description says it, and it is written into the spec (§5.3) beside the one-action-a-turn rule. The reason: the session is a script to read, and a second fight crowds out the talking, searching, and travelling that carry the lore. Sessions 007 (three fights) and 011 (two) show how easily a run fills with combat.
+
 ### Next steps, in order
 
-1. **Run session 012** (`npm run sim -- run --campaign avalon --session 12 --target-minutes 60`, backgrounded, teed to `campaigns/avalon/logs/`). Watch for: tool errors from the new one-action-per-turn rule (a refused attack costs the rest of that model response, so the count may rise before the DM adapts), whether fights now run one action per combatant per round, checker flags on misses, any readout or tool syntax in `script.md`, and whether death saves finally fire (Kira reached 6/24 in 011).
+1. **Run session 012**, the first under the one-fight rule (`npm run sim -- run --campaign avalon --session 12 --target-minutes 60`, backgrounded, teed to `campaigns/avalon/logs/`). Watch for: whether the DM takes the refusal gracefully and turns a second threat into a stand-off or chase, tool errors from the new one-action-per-turn rule (a refused attack costs the rest of that model response, so the count may rise before the DM adapts), whether fights now run one action per combatant per round, checker flags on misses, any readout or tool syntax in `script.md`, and whether death saves finally fire (Kira reached 6/24 in 011).
 2. **Push or merge once a session surfaces no new fix-worthy findings.**
 3. Consider giving Bram and Tomas starting gear in the Avalon party files, so the DM has something real to spend.
 4. Then the plan work already queued: Plan 2B (lore), the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike.
