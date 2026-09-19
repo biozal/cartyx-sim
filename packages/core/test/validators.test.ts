@@ -237,6 +237,28 @@ describe('validateDmText', () => {
       expect(validateDmText(text, { pcNames, mechanicsToolCalled: true })).toBeNull();
     });
 
+    it('strips a tool call written as bare lines (session 010)', () => {
+      const text =
+        'The party holds their positions, waiting for the next beat.\n\nhand_off\ntarget: party';
+      expect(validateDmText(text, { pcNames, mechanicsToolCalled: true })?.strip).toEqual({
+        kept: 'The party holds their positions, waiting for the next beat.',
+        removed: ['hand_off', 'target: party'],
+      });
+      expect(
+        validateDmText('The window is closed. hand_off\ntarget: party', {
+          pcNames,
+          mechanicsToolCalled: true,
+        })?.strip
+      ).toEqual({ kept: 'The window is closed.', removed: ['hand_off', 'target: party'] });
+    });
+
+    it.each(['Target: the tallest tower, the old woman says.', 'The ids: carved into the door.'])(
+      'leaves prose that only starts like a tool line alone: "%s"',
+      (text) => {
+        expect(validateDmText(text, { pcNames, mechanicsToolCalled: true })).toBeNull();
+      }
+    );
+
     it('keeps the rest of a paragraph when one sentence in it leaks a hit-point count', () => {
       const text =
         'Silas cleans the gash and wraps it tightly. Bram hisses in pain. The bleeding stops, bringing him to 19/28 HP.\n\nMeanwhile, Tomas scans the walls.';

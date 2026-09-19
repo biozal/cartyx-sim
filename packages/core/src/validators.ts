@@ -155,7 +155,8 @@ function controlledCharacter(text: string, names: readonly string[]): string | n
 // order of combat is as follows:", "**Initiative:** Kira 18"), a transcript tag (e.g. "[combat]",
 // "[hand_off]"), a hand-off JSON object, or the DM echoing its engine instruction ("Act for it
 // with tools, narrate, then call hand_off.", "Continue with other tools, or call hand_off.") or a
-// tool call ("hand_off(target=…)", "attack(goblin-1)"). "HP" followed by a figure counts in any
+// tool call ("hand_off(target=…)", "attack(goblin-1)", or session 010's "hand_off" and
+// "target: party" as bare lines). "HP" followed by a figure counts in any
 // wording ("HP drops to a critical 8"), since "HP" is never story prose; "health" or "hit points"
 // counts with a readout against a two-digit maximum ("health to 36/52", "36/52 health", "hit
 // points 36 of 52"), so "3/4 of a vial" stays. Checked one sentence at a time, so the prose
@@ -172,6 +173,7 @@ const SENTENCE_LEAK_PATTERNS = [
   /\binitiative\s+order\b|\border\s+of\s+(?:combat|initiative)\b|\binitiative\s+(?:is|has been)\s+rolled\b|\binitiative\b\W{0,4}:/i,
   /\[(?:combat|roll|state|scene|npc|lore|invented|hand_off|ooc)\]/i,
   /\{[^}]*"(?:target|kind)"\s*:/,
+  /^`?[a-z]+_[a-z_]+\b|^(?:target|kind|ids)\s*:/,
   /^Act for [^.,]{1,40} with tools\b|\b(?:then|now|or)\s+call\s+`?hand_off\b|^Continue with other tools\b|\b(?:narrate|attack)\(|\b[a-z]+_[a-z_]+\(/i,
 ];
 
