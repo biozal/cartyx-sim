@@ -31,7 +31,13 @@ export const act = defineTool({
     'Declare what your character attempts. Describe the attempt only; the DM decides what happens.',
   parameters: z.object({
     intent: z.string().trim().min(1).max(2000),
-    targetId: z.string().min(1).max(200).optional(),
+    // Models send targetId: "" when they mean no target (sessions 012 and 013 each did once);
+    // an empty string is read as no target rather than a malformed call.
+    targetId: z
+      .string()
+      .max(200)
+      .optional()
+      .transform((value) => (value?.trim() ? value : undefined)),
   }),
   narrativeText: (args) => args.intent,
   run(args, { recorder, actorId }) {

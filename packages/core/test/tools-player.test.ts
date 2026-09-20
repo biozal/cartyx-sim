@@ -87,6 +87,14 @@ describe('player tools', () => {
     });
   });
 
+  it('reads an empty targetId as no target (sessions 012, 013)', async () => {
+    const harness = kiraHarness();
+    const result = await harness.run(act, { intent: 'listen at the door', targetId: '' });
+    expect(result.ok).toBe(true);
+    expect(harness.recorder.events[0]).toMatchObject({ type: 'action', actor: 'kira' });
+    expect(harness.recorder.events[0]).not.toHaveProperty('target', '');
+  });
+
   it('interject overlaps the most recent line from someone else', async () => {
     const harness = kiraHarness({ spoken: true });
     await harness.run(interject, { text: 'Wait—!' });

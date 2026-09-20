@@ -324,8 +324,51 @@ describe('request_check', () => {
         dc: 10,
         reason: 'x',
       })
-    ).toEqual({ ok: false, error: 'checkType "skill" requires skill.' });
+    ).toMatchObject({
+      ok: false,
+      error: expect.stringContaining(
+        'checkType "skill" requires skill, and none was named in the reason'
+      ),
+    });
     expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('takes the skill from the reason when the call leaves it out (sessions 012, 013)', async () => {
+    const harness = toolHarness({ rng: scriptedRng([14]) });
+    const result = await harness.run(requestCheck, {
+      combatantId: 'kira',
+      checkType: 'skill',
+      dc: 10,
+      reason: 'Perception check to spot the tracks in the mist',
+    });
+    expect(result.ok).toBe(true);
+    expect(harness.recorder.events[0]).toMatchObject({
+      type: 'roll',
+      kind: 'check',
+      label: expect.stringContaining('Perception'),
+    });
+  });
+
+  it('reads a two-word skill, and refuses when the reason names two skills', async () => {
+    const harness = toolHarness({ rng: scriptedRng([14]) });
+    expect(
+      (
+        await harness.run(requestCheck, {
+          combatantId: 'kira',
+          checkType: 'skill',
+          dc: 10,
+          reason: 'Sleight of Hand to lift the key',
+        })
+      ).ok
+    ).toBe(true);
+
+    const ambiguous = await harness.run(requestCheck, {
+      combatantId: 'kira',
+      checkType: 'skill',
+      dc: 10,
+      reason: 'stealth or perception, whichever serves',
+    });
+    expect(ambiguous.ok).toBe(false);
   });
 });
 
