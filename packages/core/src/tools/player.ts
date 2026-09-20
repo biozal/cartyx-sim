@@ -36,8 +36,8 @@ export const act = defineTool({
     targetId: z
       .string()
       .max(200)
-      .optional()
-      .transform((value) => (value?.trim() ? value : undefined)),
+      .nullish()
+      .transform((value) => value?.trim() || undefined),
   }),
   narrativeText: (args) => args.intent,
   run(args, { recorder, actorId }) {

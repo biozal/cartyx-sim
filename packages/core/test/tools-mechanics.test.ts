@@ -326,49 +326,21 @@ describe('request_check', () => {
       })
     ).toMatchObject({
       ok: false,
-      error: expect.stringContaining(
-        'checkType "skill" requires skill, and none was named in the reason'
-      ),
+      error: expect.stringContaining('checkType "skill" requires skill. Skills: acrobatics'),
     });
     expect(harness.recorder.events).toHaveLength(0);
   });
 
-  it('takes the skill from the reason when the call leaves it out (sessions 012, 013)', async () => {
+  it('never guesses the skill from the reason, which named another one in real sessions', async () => {
     const harness = toolHarness({ rng: scriptedRng([14]) });
     const result = await harness.run(requestCheck, {
       combatantId: 'kira',
       checkType: 'skill',
       dc: 10,
-      reason: 'Perception check to spot the tracks in the mist',
+      reason: "determine the entity's nature and whether it is a construct",
     });
-    expect(result.ok).toBe(true);
-    expect(harness.recorder.events[0]).toMatchObject({
-      type: 'roll',
-      kind: 'check',
-      label: expect.stringContaining('Perception'),
-    });
-  });
-
-  it('reads a two-word skill, and refuses when the reason names two skills', async () => {
-    const harness = toolHarness({ rng: scriptedRng([14]) });
-    expect(
-      (
-        await harness.run(requestCheck, {
-          combatantId: 'kira',
-          checkType: 'skill',
-          dc: 10,
-          reason: 'Sleight of Hand to lift the key',
-        })
-      ).ok
-    ).toBe(true);
-
-    const ambiguous = await harness.run(requestCheck, {
-      combatantId: 'kira',
-      checkType: 'skill',
-      dc: 10,
-      reason: 'stealth or perception, whichever serves',
-    });
-    expect(ambiguous.ok).toBe(false);
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
   });
 });
 

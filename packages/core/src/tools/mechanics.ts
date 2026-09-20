@@ -19,7 +19,6 @@ import {
 import { z } from 'zod';
 import type { StateField } from '../events';
 import type { EventInput, TurnRecorder } from '../recorder';
-import { escapeRegExp } from '../text';
 import { defineTool, getCombatant, requireCombatTurn, ToolError } from './types';
 
 export const RollModeArg = z.enum(['normal', 'advantage', 'disadvantage']).default('normal');
@@ -115,21 +114,6 @@ function checkRollEvent(combatant: Combatant, result: CheckResult, reason: strin
   };
 }
 
-/** Spaced and lowercased for matching: "sleightOfHand" → "sleight of hand". */
-function skillWords(skill: string): string {
-  return skill.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
-}
-
-/** The one skill named in `reason`, or undefined when none or several are. */
-function skillNamedIn(reason: string): Skill | undefined {
-  const text = reason.toLowerCase();
-  const found = SKILLS.filter((skill) => {
-    const words = skillWords(skill);
-    return new RegExp(`\\b${escapeRegExp(words)}\\b`).test(text);
-  });
-  return found.length === 1 ? found[0] : undefined;
-}
-
 export const requestCheck = defineTool({
   name: 'request_check',
   description:
@@ -147,16 +131,13 @@ export const requestCheck = defineTool({
     const combatant = getCombatant(recorder.state, args.combatantId);
     let spec: CheckSpec;
     if (args.checkType === 'skill') {
-      // Models ask for a skill check and leave `skill` out, naming it in `reason` instead
-      // ("Perception check to spot the tracks") — sessions 012 and 013 did it five times. The
-      // reason is searched before refusing, so the roll happens instead of costing a re-prompt.
-      const skill = args.skill ?? skillNamedIn(args.reason);
-      if (!skill) {
-        throw new ToolError(
-          `checkType "skill" requires skill, and none was named in the reason. Skills: ${SKILLS.join(', ')}.`
-        );
+      // Deliberately not guessed from `reason`: across sessions 001-013 no reason names the skill
+      // being rolled, while two name another one ("determine the entity's nature" for an Arcana
+      // check), so guessing rolled the wrong skill silently. The DM repairs this in one call.
+      if (!args.skill) {
+        throw new ToolError(`checkType "skill" requires skill. Skills: ${SKILLS.join(', ')}.`);
       }
-      spec = { type: 'skill', skill };
+      spec = { type: 'skill', skill: args.skill };
     } else {
       if (!args.ability) throw new ToolError(`checkType "${args.checkType}" requires ability.`);
       spec =
