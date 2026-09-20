@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1179 tests plus 1 expected failure), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1197 tests plus 1 expected failure), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -241,6 +241,43 @@ Findings 1–6 are fixed (`bc334ff..656f4ce`); finding 7 is still open.
 
 The batch had one review; its findings (a leak cut breaking quotes, over-broad `order of battle`/`0 hit points`/bulleted-name matches, titles splitting sentences, exact-only checker name matching, turn-order shapes missed) are fixed in the follow-up commit.
 
+## Eighth 1-hour run (session 012, 2026-09-20)
+
+Run on HEAD `e81074d`, the first under the one-fight rule. It ran 60 wall minutes with no pauses and ended at **`hard_stop`**, not `target_reached`: the DM never closed the scene.
+
+| Measure               | 010      | 011      | 012      |
+| --------------------- | -------- | -------- | -------- |
+| Wall / spoken minutes | 77 / ~64 | 86 / ~66 | 60 / ~74 |
+| Pauses                | none     | none     | none     |
+| DM share              | 66%      | 67%      | **79%**  |
+| Fights                | 0        | 2        | 1        |
+| Checker flags         | 6        | 12       | 8        |
+| Tool errors           | 2        | 11       | 1        |
+
+**The new rules did their job.** The one-action-per-turn rule refused Kira attacking twice and was the session's only tool error; the fight ran clean. The one fight that happened was the session's only one, and the DM never pushed for another, so the one-fight rule cost nothing. No retelling reached the players.
+
+**The session got worse in another way.** Findings:
+
+1. **The DM took 79% of the words**, narrating 187 words a beat against the players' 50, for 8,796 words of narration against a usual ~6,400.
+2. **One scene for the whole session**, where 008–011 had two or three.
+3. **It never closed.** The DM narrated past the closing instruction for 14 spoken minutes until the hard stop cut the session mid-scene.
+4. **"\*\*hand_off\*\* to the party." was voiced** — the tool call in bold, which the sentence-start pattern missed.
+5. **The DM apologized to the engine, in the script**: "My apologies for the error. Let me correct the narration of Kira's turn."
+
+Whether 1–3 follow from the one-fight rule is unproven, but the shape fits: with combat off the table, the DM filled the time with prose instead of handing over.
+
+### Fixes after the eighth run
+
+All five are fixed (`5cc2095..912f2e3`).
+
+1. Past 3,000 words and a 78% share, the DM is told its share and asked for two or three sentences, on scene beats only. Replaying 005–012 word by word, only 012 trips it.
+2. — (see 3: the closing press is what moves a session on).
+3. Past the target, the closing instruction is repeated as its own message after each step instead of sitting at the end of a long prompt; once the scene is cut it becomes "call hand_off now", so no second scene change.
+4. `dm_state_leak` strips a sentence opening with a bold or backticked tool name.
+5. It also strips meta-talk that names what went wrong ("My apologies for the error."), while a correction introduced after a colon keeps its correction, and an NPC's "My apologies, my lady" is untouched.
+
+The review of this batch also caught two traps in the one-fight rule itself: `start_combat` still told a mid-fight DM to call `end_combat` first, which would have destroyed the fight it meant to extend, and a refused `start_combat` threw away the narration and `hand_off` sent with it — a beat that contributes nothing. Its refusals are now recoverable: the rest of the response still runs.
+
 ## Seventh 1-hour run (session 011, 2026-09-19)
 
 Run on HEAD `80ac5e0`, after the sixth batch of fixes. It reached `target_reached` at ~66 spoken minutes in **86 wall minutes** with no pauses.
@@ -345,26 +382,28 @@ Findings 1–4 are fixed in `197b339` plus a follow-up after review; finding 5 i
 | Windows PC (5070 Ti) | Player bram                       |                           |
 | Alienware            | Avoid (loud fans)                 |                           |
 
-## Where we are (2026-09-19)
+## Where we are (2026-09-20)
 
-**Branch `feat/dm-pc-control-checker`: 114 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1179 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
+**Branch `feat/dm-pc-control-checker`: 117 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1197 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
 
 The expected failure is deliberate: it documents the quote-majority split's known cost (`"Who's next?" I nod to You.`), and will start passing only if that rule is revisited.
 
-**Not pushing until a live session comes back clean.** Aaron is in no rush to check in. Seven 1-hour sessions have run (005–011), each followed by a reviewed batch of fixes. Session 011 confirmed the retelling rule costs nothing live (no flags, no cap hits) and that the leak strip catches hit-point readouts before they are voiced; it then turned up a real rules bug — a monster acting four times in one round — which is fixed and reviewed but not yet run live.
+**Not pushing until a live session comes back clean.** Eight 1-hour sessions have run (005–012), each followed by a reviewed batch of fixes. Session 012 was the first under the one-fight rule: the combat rules held and tool errors fell to one, but the DM took 79% of the words, stayed in one scene, and ran to the hard stop without closing. Those fixes are reviewed but not yet run live.
 
 ### What each batch did
 
-| Batch        | Trigger                     | Commits            | What changed                                                                                                                   |
-| ------------ | --------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| Script stage | Reviews of sessions 002–004 | `cc4eb6e..bf09ef5` | The ten script findings, including the speech-direction grammar (5 review rounds)                                              |
-| First run    | Session 005                 | `347f6d7..dd50ea2` | Death saves, combat closing, state-leak strip, repeat cutting, NPC continuity, tool-error logging                              |
-| Second run   | Session 006                 | `2deb439..86cdeb0` | Combat narration caps, player repeat re-prompt, tool-shape coercions, hard-stop rule, read-aloud labels                        |
-| Third run    | Session 007                 | `1d2f823..643befb` | Wider leak patterns, strict `hand_off` shape, attacks in the DM prompt, NPC-id resolution, cross-beat repeats, checker tuning  |
-| Fourth run   | Session 008                 | `bc334ff..0bb260d` | Sentence-level leak strip, HP-in-prose and turn-order leaks, NPC checker findings, no fight past the target, quote repair      |
-| Fifth run    | Session 009                 | `197b339..95785ad` | Instruction-echo and HP/health leaks, checker allows enemy blows on PCs, `hand_off` to monsters explained                      |
-| Sixth run    | Session 010                 | `c75717c..80ac5e0` | Retelling (paraphrase loop) rejection with a per-turn cap, bare-line tool-call leaks                                           |
-| Seventh run  | Session 011                 | `7b4d55d..HEAD`    | One action per combatant per turn, combat hand-offs, carried items in the DM prompt, turn announcements, checker allows a miss |
+| Batch          | Trigger                     | Commits            | What changed                                                                                                                   |
+| -------------- | --------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Script stage   | Reviews of sessions 002–004 | `cc4eb6e..bf09ef5` | The ten script findings, including the speech-direction grammar (5 review rounds)                                              |
+| First run      | Session 005                 | `347f6d7..dd50ea2` | Death saves, combat closing, state-leak strip, repeat cutting, NPC continuity, tool-error logging                              |
+| Second run     | Session 006                 | `2deb439..86cdeb0` | Combat narration caps, player repeat re-prompt, tool-shape coercions, hard-stop rule, read-aloud labels                        |
+| Third run      | Session 007                 | `1d2f823..643befb` | Wider leak patterns, strict `hand_off` shape, attacks in the DM prompt, NPC-id resolution, cross-beat repeats, checker tuning  |
+| Fourth run     | Session 008                 | `bc334ff..0bb260d` | Sentence-level leak strip, HP-in-prose and turn-order leaks, NPC checker findings, no fight past the target, quote repair      |
+| Fifth run      | Session 009                 | `197b339..95785ad` | Instruction-echo and HP/health leaks, checker allows enemy blows on PCs, `hand_off` to monsters explained                      |
+| Sixth run      | Session 010                 | `c75717c..80ac5e0` | Retelling (paraphrase loop) rejection with a per-turn cap, bare-line tool-call leaks                                           |
+| Seventh run    | Session 011                 | `7b4d55d..e036678` | One action per combatant per turn, combat hand-offs, carried items in the DM prompt, turn announcements, checker allows a miss |
+| One-fight rule | Aaron's call after 011      | `3a2606d..e81074d` | One fight a session, in the engine, the prompt and the spec                                                                    |
+| Eighth run     | Session 012                 | `5cc2095..HEAD`    | DM word-share nudge, repeated closing press, bold tool call and meta-talk leaks, recoverable refusals                          |
 
 ### Rule added after session 011: one fight a session
 
@@ -372,9 +411,9 @@ Aaron's call (2026-09-19): a session has room for a single fight, as a rule of t
 
 ### Next steps, in order
 
-1. **Run session 012**, the first under the one-fight rule (`npm run sim -- run --campaign avalon --session 12 --target-minutes 60`, backgrounded, teed to `campaigns/avalon/logs/`). Watch for: whether the DM takes the refusal gracefully and turns a second threat into a stand-off or chase, tool errors from the new one-action-per-turn rule (a refused attack costs the rest of that model response, so the count may rise before the DM adapts), whether fights now run one action per combatant per round, checker flags on misses, any readout or tool syntax in `script.md`, and whether death saves finally fire (Kira reached 6/24 in 011).
+1. **Run session 013.** Watch for: whether the DM's share falls back toward the 64–72% of earlier runs and the session closes on a scene change rather than the hard stop, whether the closing press produces exactly one scene cut, how the DM takes a refused second fight now that its narration and hand_off survive, and whether death saves finally fire (no player has taken damage in the last two sessions).
 2. **Push or merge once a session surfaces no new fix-worthy findings.**
-3. Consider giving Bram and Tomas starting gear in the Avalon party files, so the DM has something real to spend.
+3. Consider giving Bram and Tomas starting gear in the Avalon party files.
 4. Then the plan work already queued: Plan 2B (lore), the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike.
 
 ### Operating notes from these runs
