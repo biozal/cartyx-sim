@@ -156,7 +156,10 @@ function controlledCharacter(text: string, names: readonly string[]): string | n
 // "[hand_off]"), a hand-off JSON object, or the DM echoing its engine instruction ("Act for it
 // with tools, narrate, then call hand_off.", "Continue with other tools, or call hand_off.") or a
 // tool call ("hand_off(target=…)", "attack(goblin-1)", or session 010's "hand_off" and
-// "target: party" as bare lines). "HP" followed by a figure counts in any
+// "target: party" as bare lines, session 012's bold "**hand_off** to the party."), or the DM
+// talking to the engine rather than the table ("My apologies for the error. Let me correct the
+// narration of Kira's turn." reached session 012's script). Meta-talk is matched at the start of
+// a sentence, so an NPC apologizing inside quotes is untouched. "HP" followed by a figure counts in any
 // wording ("HP drops to a critical 8"), since "HP" is never story prose; a whose-turn statement
 // counts in the DM's own words too, but only against a name ("Giant Rat 2's turn is complete."),
 // so "before its turn is complete the rope snaps" and the table talk "Kira, it is your turn. What
@@ -177,7 +180,8 @@ const SENTENCE_LEAK_PATTERNS = [
   /\binitiative\s+order\b|\border\s+of\s+(?:combat|initiative)\b|\binitiative\s+(?:is|has been)\s+rolled\b|\binitiative\b\W{0,4}:/i,
   /\[(?:combat|roll|state|scene|npc|lore|invented|hand_off|ooc)\]/i,
   /\{[^}]*"(?:target|kind)"\s*:/,
-  /^`?[a-z]+_[a-z_]+\b|^(?:target|kind|ids)\s*:/,
+  /^[`*_]{0,2}[a-z]+_[a-z_]+\b|^(?:target|kind|ids)\s*:/,
+  /^[`*_]{0,2}(?:my )?apologies\b|^[`*_]{0,2}correction\b|^[`*_]{0,2}(?:let me|I(?:'ll| will)?) (?:correct|redo|rephrase|fix|adjust|try again|re-?narrate)\b/i,
   /^Act for [^.,]{1,40} with tools\b|\b(?:then|now|or)\s+call\s+`?hand_off\b|^Continue with other tools\b|\b(?:narrate|attack)\(|\b[a-z]+_[a-z_]+\(/i,
 ];
 

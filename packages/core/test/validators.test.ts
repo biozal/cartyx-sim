@@ -237,6 +237,32 @@ describe('validateDmText', () => {
       expect(validateDmText(text, { pcNames, mechanicsToolCalled: true })).toBeNull();
     });
 
+    it('strips the DM apologizing to the engine, keeping the story around it (session 012)', () => {
+      const text =
+        "My apologies for the error. Let me correct the narration of Kira's turn.\n\nThe merchant swings wildly and misses.";
+      expect(validateDmText(text, { pcNames, mechanicsToolCalled: true })?.strip).toEqual({
+        kept: 'The merchant swings wildly and misses.',
+        removed: ['My apologies for the error.', "Let me correct the narration of Kira's turn."],
+      });
+    });
+
+    it.each([
+      '"My apologies, traveller," the innkeeper says, bowing low.',
+      'She lets me correct the ledger before the reeve arrives.',
+      'The correction to the map was made in a careful hand.',
+    ])('leaves an apology or correction inside the story alone: "%s"', (text) => {
+      expect(validateDmText(text, { pcNames, mechanicsToolCalled: true })).toBeNull();
+    });
+
+    it('strips a tool call the DM set in bold (session 012)', () => {
+      const text =
+        'What will the party do next?\n\n**hand_off** to the party.\n\nSilas straightens up.';
+      expect(validateDmText(text, { pcNames, mechanicsToolCalled: true })?.strip).toEqual({
+        kept: 'What will the party do next?\n\nSilas straightens up.',
+        removed: ['**hand_off** to the party.'],
+      });
+    });
+
     it('strips a tool call written as bare lines (session 010)', () => {
       const text =
         'The party holds their positions, waiting for the next beat.\n\nhand_off\ntarget: party';
