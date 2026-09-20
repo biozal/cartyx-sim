@@ -1746,6 +1746,25 @@ describe('Director', () => {
     });
   });
 
+  it('repeats the closing instruction as its own message once the target is reached', async () => {
+    const { deps: built, model } = deps({
+      dm: [
+        respond(toolCall('narrate', { text: 'The bells ring out over the rooftops.' })),
+        respond(toolCall('hand_off', { target: { kind: 'party' } })),
+      ],
+    });
+    const director = await Director.create(config({ targetMinutes: 0.02 }), built);
+    await director.step(); // session_start
+    await director.step(); // DM beat: narrate, then a second step for the hand_off
+
+    const dmRequests = model.requests.filter((request) => request.seat === 'dm');
+    expect(dmRequests).toHaveLength(2);
+    expect(dmRequests[1]!.messages.at(-1)).toMatchObject({
+      role: 'user',
+      content: expect.stringContaining('Time is up'),
+    });
+  });
+
   describe('retold narration', () => {
     const swing =
       'The goblin swings its rusted scimitar at Kira, the jagged blade biting into her shoulder as the goblin cackles.';

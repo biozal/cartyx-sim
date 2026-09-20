@@ -35,3 +35,30 @@ export function clockInstruction(phase: ClockPhase): string {
       return 'Time is up: end combat with end_combat if a fight is running, close the current scene now, and call scene_change to cut to the cliffhanger.';
   }
 }
+
+/** The DM's share of the words spoken so far, 0 when nothing has been spoken. */
+export function dmShare(state: Pick<GameState, 'spokenWords' | 'wordsBySpeaker'>): number {
+  if (state.spokenWords === 0) return 0;
+  return (state.wordsBySpeaker['dm'] ?? 0) / state.spokenWords;
+}
+
+/** Words that must be spoken before the DM's share is worth steering by. */
+const SHARE_FLOOR_WORDS = 1500;
+/** The share above which the DM is told to give the table more room (sessions run 64–79%). */
+const SHARE_LIMIT = 0.72;
+
+/**
+ * An instruction to hand the table more of the session, or '' when the DM's share is fine. The
+ * DM is the loudest voice by design — it describes the world — but session 012 spent 79% of the
+ * words on narration averaging 187 words a beat, which leaves the four players a quarter of their
+ * own session.
+ */
+export function shareInstruction(state: Pick<GameState, 'spokenWords' | 'wordsBySpeaker'>): string {
+  if (state.spokenWords < SHARE_FLOOR_WORDS) return '';
+  const share = dmShare(state);
+  if (share <= SHARE_LIMIT) return '';
+  return (
+    `You have spoken ${Math.round(share * 100)}% of this session's words, and the four players share the rest. ` +
+    'Keep this beat to two or three sentences, end on something the players must answer, and hand off.'
+  );
+}

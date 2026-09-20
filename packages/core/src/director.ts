@@ -1,5 +1,5 @@
 import { DEATH_SAVE_DC, rollD20, rollDeathSave, type Combatant, type Rng } from '@cartyx-sim/rules';
-import { clockInstruction, clockPhase } from './clock';
+import { clockInstruction, clockPhase, shareInstruction } from './clock';
 import { SessionPausedError } from './errors';
 import { EVENT_SCHEMA_VERSION, type HandOffTarget, type SimEvent } from './events';
 import { extractHandOffProse } from './hand-off-prose';
@@ -885,6 +885,13 @@ export class Director {
         messages.push(toolMessage(call, execution.outcome.result + removed));
         noteProseHandOff(handOffProse, call);
       }
+      // Past the target the closing instruction is repeated as its own message after each step:
+      // in the DM's prompt it sits at the end of a long block, and session 012 narrated past it
+      // for 14 spoken minutes until the hard stop cut the session off mid-scene.
+      const phase = clockPhase(recorder.state, this.targetMinutes);
+      if (!ended && (phase === 'end_at_scene_break' || phase === 'hard_stop')) {
+        messages.push({ role: 'user', content: clockInstruction(phase) });
+      }
     }
 
     if (!ended) {
@@ -1266,7 +1273,7 @@ export class Director {
             'Save detail for scene beats.'
           : 'Continue the story: narrate what happens next, resolve any declared actions with tools, then call hand_off.';
     const clock = clockInstruction(clockPhase(this.state, this.targetMinutes));
-    return [nudge, base, clock].filter(Boolean).join(' ');
+    return [nudge, base, shareInstruction(this.state), clock].filter(Boolean).join(' ');
   }
 
   /**
