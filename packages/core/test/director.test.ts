@@ -1412,11 +1412,6 @@ describe('Director', () => {
             toolCall('start_combat', { monsters: [monsterSpec('Orc')] }),
             toolCall('hand_off', { target: { kind: 'party' } })
           ),
-          // Told it cannot start a second fight, the DM turns the orc into a stand-off instead.
-          respond(
-            toolCall('narrate', { text: 'An orc watches from the ridge, and does not come down.' }),
-            toolCall('hand_off', { target: { kind: 'party' } })
-          ),
         ],
         'player-kira': [respond(toolCall('act', { intent: 'size up the goblin' }))],
       },
@@ -1435,9 +1430,9 @@ describe('Director', () => {
         text: expect.stringContaining('This session has already had its fight'),
       })
     );
-    expect(sink.events.filter((e) => e.type === 'narration').map((e) => e.text)).toContain(
-      'An orc watches from the ridge, and does not come down.'
-    );
+    // The refusal is one the DM can simply take, so the hand_off it sent with the refused call
+    // still runs: the beat ends without another model call.
+    expect(sink.events.filter((e) => e.type === 'hand_off')).toHaveLength(2);
     expect(foldEvents(sink.events)).toEqual(director.currentState);
   });
 

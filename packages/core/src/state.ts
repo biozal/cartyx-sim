@@ -51,7 +51,7 @@ export interface GameState {
   npcs: Record<string, NpcRecord>;
   scene: { location: string; loreEntityId?: string } | null;
   combat: CombatState | null;
-  /** Fights started this session, running or finished: a session has room for one (spec §5.7). */
+  /** Fights started this session, running or finished: a session has room for one (spec §5.3). */
   fightsSoFar: number;
   /** PCs the DM handed off to who have not taken their turn yet (exploration only). */
   pendingResponders: string[];

@@ -42,23 +42,30 @@ export function dmShare(state: Pick<GameState, 'spokenWords' | 'wordsBySpeaker'>
   return (state.wordsBySpeaker['dm'] ?? 0) / state.spokenWords;
 }
 
-/** Words that must be spoken before the DM's share is worth steering by. */
-const SHARE_FLOOR_WORDS = 1500;
-/** The share above which the DM is told to give the table more room (sessions run 64–79%). */
-const SHARE_LIMIT = 0.72;
+/**
+ * Words that must be spoken before the DM's share is worth steering by: the DM opens a session
+ * alone, so a floor below this reads the scene-setting as a habit.
+ */
+const SHARE_FLOOR_WORDS = 3000;
+/**
+ * The share above which the DM is told to give the table more room. Sessions 005–011 ended at
+ * 64–72%, and replaying them word by word, this limit leaves six of the seven untouched; session
+ * 012, which ended at 79%, trips it. A tighter limit nudges sessions that were fine.
+ */
+const SHARE_LIMIT = 0.78;
 
 /**
  * An instruction to hand the table more of the session, or '' when the DM's share is fine. The
  * DM is the loudest voice by design — it describes the world — but session 012 spent 79% of the
- * words on narration averaging 187 words a beat, which leaves the four players a quarter of their
- * own session.
+ * words on narration averaging 187 words a beat, which leaves the players a fifth of their own
+ * session.
  */
 export function shareInstruction(state: Pick<GameState, 'spokenWords' | 'wordsBySpeaker'>): string {
   if (state.spokenWords < SHARE_FLOOR_WORDS) return '';
   const share = dmShare(state);
   if (share <= SHARE_LIMIT) return '';
   return (
-    `You have spoken ${Math.round(share * 100)}% of this session's words, and the four players share the rest. ` +
+    `You have spoken ${Math.round(share * 100)}% of this session's words; the players share the rest. ` +
     'Keep this beat to two or three sentences, end on something the players must answer, and hand off.'
   );
 }

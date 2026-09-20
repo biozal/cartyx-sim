@@ -19,7 +19,7 @@ const MonsterSpec = z.object({
   attacks: z.array(Attack).min(1),
 });
 
-/** Fights allowed in one session. The engine refuses `start_combat` past this (spec §5.7). */
+/** Fights allowed in one session. The engine refuses `start_combat` past this (spec §5.3). */
 export const FIGHTS_PER_SESSION = 1;
 
 export const startCombat = defineTool({
@@ -29,20 +29,30 @@ export const startCombat = defineTool({
   parameters: z.object({ monsters: z.array(MonsterSpec).min(1) }),
   run(args, { recorder, rng, clockPhase }) {
     const { state } = recorder;
-    if (state.combat) throw new ToolError('Combat is already running. Call end_combat first.');
-    // One fight a session (spec §5.7): the session is a story to read, and a second fight crowds
-    // out the talking, searching, and travelling that carry the lore being tested.
-    if (state.fightsSoFar >= FIGHTS_PER_SESSION) {
+    if (state.combat) {
+      // Not "call end_combat first" any more: with one fight a session, ending this one ends it
+      // for good, so a DM after reinforcements would destroy the fight it meant to extend.
       throw new ToolError(
-        'This session has already had its fight, and a session has room for one. Resolve this danger in the story instead: a stand-off, a chase, a surrender, a retreat, or a threat that withdraws.'
+        'This fight is already running, and a session has room for one, so ending it ends it for good. Bring any newcomers into this fight in your narration, or leave them out of it. Call end_combat only when the fight is really over.',
+        { recoverable: true }
       );
     }
     // From the target on, the session ends at the next scene change, so a fight started now
-    // would be cut off before its first round (session 008 rolled initiative, then ended).
+    // would be cut off before its first round (session 008 rolled initiative, then ended). Asked
+    // before the one-fight rule, since "time is up" is the more urgent thing to hear.
     const phase = clockPhase();
     if (phase === 'end_at_scene_break' || phase === 'hard_stop') {
       throw new ToolError(
-        'Time is up: no new fight can start. Close the scene and call scene_change.'
+        'Time is up: no new fight can start. Close the scene and call scene_change.',
+        { recoverable: true }
+      );
+    }
+    // One fight a session (spec §5.3): the session is a story to read, and a second fight crowds
+    // out the talking, searching, and travelling that carry the lore being tested.
+    if (state.fightsSoFar >= FIGHTS_PER_SESSION) {
+      throw new ToolError(
+        'This session has already had its fight, and a session has room for one. Resolve this danger in the story instead: a stand-off, a chase, a surrender, a retreat, or a threat that withdraws.',
+        { recoverable: true }
       );
     }
 

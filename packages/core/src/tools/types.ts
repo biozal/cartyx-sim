@@ -32,9 +32,17 @@ export function coercedEmotion(defaultEmotion: Emotion) {
 
 /** A tool misuse the model can correct, e.g. an unknown id. Returned to the model as an error result. */
 export class ToolError extends Error {
-  constructor(message: string) {
+  /**
+   * True when the rest of the DM's response should still run. A refusal the DM can simply take
+   * ("no second fight") leaves its narration and hand_off intact; a malformed or dangerous call
+   * still stops the response, since the calls after it were written expecting it to have worked.
+   */
+  readonly recoverable: boolean;
+
+  constructor(message: string, options: { recoverable?: boolean } = {}) {
     super(message);
     this.name = 'ToolError';
+    this.recoverable = options.recoverable ?? false;
   }
 }
 
@@ -118,14 +126,17 @@ export async function runPreparedCall(
   def: AnyToolDef,
   args: unknown,
   context: ToolContext
-): Promise<{ ok: true; outcome: ToolOutcome } | { ok: false; error: string }> {
+): Promise<{ ok: true; outcome: ToolOutcome } | { ok: false; error: string; recoverable?: true }> {
   const checkpoint = context.recorder.checkpoint();
   try {
     return { ok: true, outcome: await def.run(args, context) };
   } catch (error) {
     if (error instanceof ToolError || error instanceof RulesError) {
       context.recorder.rollback(checkpoint);
-      return { ok: false, error: error.message };
+      // Only set when true, so an ordinary failure still reads as { ok: false, error }.
+      return error instanceof ToolError && error.recoverable
+        ? { ok: false, error: error.message, recoverable: true }
+        : { ok: false, error: error.message };
     }
     if (error instanceof z.ZodError) {
       context.recorder.rollback(checkpoint);

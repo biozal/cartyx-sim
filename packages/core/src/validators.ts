@@ -159,7 +159,9 @@ function controlledCharacter(text: string, names: readonly string[]): string | n
 // "target: party" as bare lines, session 012's bold "**hand_off** to the party."), or the DM
 // talking to the engine rather than the table ("My apologies for the error. Let me correct the
 // narration of Kira's turn." reached session 012's script). Meta-talk is matched at the start of
-// a sentence, so an NPC apologizing inside quotes is untouched. "HP" followed by a figure counts in any
+// a sentence and has to name what went wrong, so an NPC's "My apologies, my lady" and a wright's
+// "Let me correct the ledger" are untouched; a sentence that carries its correction after a colon
+// keeps it, since only the prefix is dropped (see META_PREFIX). "HP" followed by a figure counts in any
 // wording ("HP drops to a critical 8"), since "HP" is never story prose; a whose-turn statement
 // counts in the DM's own words too, but only against a name ("Giant Rat 2's turn is complete."),
 // so "before its turn is complete the rope snaps" and the table talk "Kira, it is your turn. What
@@ -181,7 +183,7 @@ const SENTENCE_LEAK_PATTERNS = [
   /\[(?:combat|roll|state|scene|npc|lore|invented|hand_off|ooc)\]/i,
   /\{[^}]*"(?:target|kind)"\s*:/,
   /^[`*_]{0,2}[a-z]+_[a-z_]+\b|^(?:target|kind|ids)\s*:/,
-  /^[`*_]{0,2}(?:my )?apologies\b|^[`*_]{0,2}correction\b|^[`*_]{0,2}(?:let me|I(?:'ll| will)?) (?:correct|redo|rephrase|fix|adjust|try again|re-?narrate)\b/i,
+  /^[`*_]{0,2}(?:my )?apologies\b[^.\n]{0,40}\b(?:error|mistake|confusion|correction|narration|that)\b|^[`*_]{0,2}(?:let me|I['’]ll|I will) (?:correct|redo|rephrase|re-?narrate)\b[^.\n]{0,40}\b(?:that|this|it|narration|beat|turn|line)\b/i,
   /^Act for [^.,]{1,40} with tools\b|\b(?:then|now|or)\s+call\s+`?hand_off\b|^Continue with other tools\b|\b(?:narrate|attack)\(|\b[a-z]+_[a-z_]+\(/i,
 ];
 
@@ -191,6 +193,11 @@ const SENTENCE_LEAK_PATTERNS = [
 // with its initiative after it, in a list or not ("- **Bram Holloway** (21)", "Kira Vale — 18",
 // "2. Goblin: 12", "1. Kira Vale (Initiative 18)"). A bulleted name with no number is left alone,
 // since a notice or a roll call lists names that way too.
+// Meta-talk that introduces the corrected narration rather than replacing it: only the prefix
+// goes, so "Correction: the goblin dodges." keeps the goblin dodging.
+const META_PREFIX =
+  /^[`*_]{0,2}(?:correction|(?:my )?apologies[^.:\n]{0,40}\b(?:error|mistake|confusion|correction)\b[^.:\n]{0,20}|let me correct that|I['’]ll correct that)\s*:\s*/i;
+
 const LINE_LEAK_PATTERNS = [/^\s*\*\*Current Status:?\*\*\s*$/i, /^\s*Current Status:?\s*$/i];
 const NUMBERED_ITEM = /^\s*\d{1,2}[.)]\s+/;
 const BULLET = /^\s*[-*•]\s+/;
@@ -248,8 +255,15 @@ export function stripStateLeaks(
       removed.push(line.trim());
       return '';
     }
-    const parts = splitSentences(line);
-    if (!parts.some(({ sentence }) => leaks(sentence))) return line;
+    // A meta prefix with the real narration behind it loses only the prefix.
+    const parts = splitSentences(line).map((part) => {
+      const trimmed = part.sentence.replace(META_PREFIX, '');
+      if (trimmed === part.sentence || trimmed.length === 0) return part;
+      removed.push(part.sentence.slice(0, part.sentence.length - trimmed.length).trim());
+      return { ...part, sentence: trimmed };
+    });
+    if (!parts.some(({ sentence }) => leaks(sentence)))
+      return joinKeptSentences(parts.map((part) => ({ ...part, keep: true })));
     const cut = parts.map((part) => ({ ...part, keep: !leaks(part.sentence) }));
     removed.push(...cut.filter((part) => !part.keep).map((part) => part.sentence));
     return joinKeptSentences(cut);

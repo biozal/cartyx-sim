@@ -875,7 +875,10 @@ export class Director {
             text: `Tool error (${call.name}): ${execution.error}`,
           });
           noteProseHandOff(handOffProse, call, execution.error);
-          skipRest = true;
+          // A refusal the DM can simply take (no second fight, no fight past the target) leaves
+          // the rest of its response standing, so its narration and hand_off still run: session
+          // 012's shape, where one refused call cost the whole beat, is what this avoids.
+          skipRest = !execution.recoverable;
           continue;
         }
         // Retries are exhausted: the output stands, flagged only once it actually took effect.
@@ -890,7 +893,15 @@ export class Director {
       // for 14 spoken minutes until the hard stop cut the session off mid-scene.
       const phase = clockPhase(recorder.state, this.targetMinutes);
       if (!ended && (phase === 'end_at_scene_break' || phase === 'hard_stop')) {
-        messages.push({ role: 'user', content: clockInstruction(phase) });
+        // Once the scene is cut, asking again would cut a second one; the beat only needs its
+        // hand_off then.
+        const cut = recorder.events.some((event) => event.type === 'scene_change');
+        messages.push({
+          role: 'user',
+          content: cut
+            ? 'The scene is closed and the session ends here: call hand_off now.'
+            : clockInstruction(phase),
+        });
       }
     }
 
@@ -1273,7 +1284,10 @@ export class Director {
             'Save detail for scene beats.'
           : 'Continue the story: narrate what happens next, resolve any declared actions with tools, then call hand_off.';
     const clock = clockInstruction(clockPhase(this.state, this.targetMinutes));
-    return [nudge, base, shareInstruction(this.state), clock].filter(Boolean).join(' ');
+    // Only on a scene beat: a combat turn is already capped at three sentences, and "end on
+    // something the players must answer" is wrong advice when initiative picks who acts next.
+    const share = reason === 'beat' ? shareInstruction(this.state) : '';
+    return [nudge, base, share, clock].filter(Boolean).join(' ');
   }
 
   /**

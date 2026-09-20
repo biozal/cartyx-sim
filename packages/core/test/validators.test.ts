@@ -246,10 +246,35 @@ describe('validateDmText', () => {
       });
     });
 
+    it('keeps the correction a meta prefix introduces, dropping only the prefix', () => {
+      const violation = validateDmText(
+        'Correction: the goblin dodges and the blade finds only air.',
+        { pcNames, mechanicsToolCalled: true }
+      );
+      expect(violation?.strip).toEqual({
+        kept: 'the goblin dodges and the blade finds only air.',
+        removed: ['Correction:'],
+      });
+      expect(
+        validateDmText('My apologies, the error was mine: the blade misses.', {
+          pcNames,
+          mechanicsToolCalled: true,
+        })?.strip?.kept
+      ).toBe('the blade misses.');
+    });
+
     it.each([
       '"My apologies, traveller," the innkeeper says, bowing low.',
       'She lets me correct the ledger before the reeve arrives.',
       'The correction to the map was made in a careful hand.',
+      // Unquoted NPC lines, which npc_say sends without quote marks.
+      'My apologies, my lady, the steward murmurs, bowing low.',
+      'Apologies, the guard mutters, and steps aside.',
+      "I'll fix the wheel before the rain comes, the wainwright says.",
+      'Let me adjust the lens, Sella mutters, and the beam narrows.',
+      'Let me correct the ledger before the reeve arrives, she says.',
+      'I adjust the strap on my pack.',
+      'Correction, my lord, the scribe says.',
     ])('leaves an apology or correction inside the story alone: "%s"', (text) => {
       expect(validateDmText(text, { pcNames, mechanicsToolCalled: true })).toBeNull();
     });

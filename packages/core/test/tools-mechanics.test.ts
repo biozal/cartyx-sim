@@ -1081,7 +1081,9 @@ describe('start_combat and end_combat', () => {
     await harness.run(startCombat, sentries);
     expect(await harness.run(startCombat, sentries)).toEqual({
       ok: false,
-      error: 'Combat is already running. Call end_combat first.',
+      error:
+        'This fight is already running, and a session has room for one, so ending it ends it for good. Bring any newcomers into this fight in your narration, or leave them out of it. Call end_combat only when the fight is really over.',
+      recoverable: true,
     });
     expect(await harness.run(endCombat)).toEqual({
       ok: true,
