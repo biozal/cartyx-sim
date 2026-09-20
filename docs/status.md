@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1197 tests plus 1 expected failure), and `npm run format:check` all pass.
+**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1202 tests plus 1 expected failure), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -241,6 +241,38 @@ Findings 1–6 are fixed (`bc334ff..656f4ce`); finding 7 is still open.
 
 The batch had one review; its findings (a leak cut breaking quotes, over-broad `order of battle`/`0 hit points`/bulleted-name matches, titles splitting sentences, exact-only checker name matching, turn-order shapes missed) are fixed in the follow-up commit.
 
+## Ninth 1-hour run (session 013, 2026-09-20)
+
+Run on HEAD `bfc3582`, after the session-012 batch. It reached `target_reached` at ~61 spoken minutes, with one pause.
+
+| Measure                | 011      | 012       | 013                   |
+| ---------------------- | -------- | --------- | --------------------- |
+| Wall / spoken minutes  | 86 / ~66 | 60 / ~74  | 84 / ~61              |
+| Pauses                 | none     | none      | 1 (seat, no fallback) |
+| DM share               | 67%      | **79%**   | **70%**               |
+| DM words per narration | 101      | **187**   | **133**               |
+| Ending                 | scene    | hard stop | scene                 |
+| Fights                 | 2        | 1         | 1                     |
+| Checker flags          | 12       | 8         | 11                    |
+| Tool errors            | 11       | 1         | 4                     |
+
+**The script came out with no leaks at all** — the first session where nothing had to be caught: no HP or initiative readout, no tool syntax, no meta-talk. The session-012 fixes did what they were meant to: the DM's share fell from 79% to 70% and its narration from 187 to 133 words a beat, the session closed on a scene change instead of the hard stop, and the closing press produced exactly one scene cut.
+
+**Both combat rules held live.** `attack` refused Bram a second swing in one turn, and `dm_state_leak` cut an initiative list out of narration before it was spoken. One fight, and the DM never asked for another.
+
+Findings:
+
+1. **A seat paused the session.** Tomas's model answered without a tool call until its retries ran out, and it was the only seat with no fallback. One was added (`pc5070` gemma-4-12b) and `--resume` carried on cleanly. This was already a backlog item.
+2. **`request_check` refused three times** for `checkType: "skill"` with no `skill` field, as it has in five earlier sessions.
+3. **A player sent `act` with `targetId: ""`**, which the schema refused.
+
+### Fixes after the ninth run
+
+2 and 3 are fixed (`78a1c28`, `7f44691`); 1 is a campaign-config change, already made.
+
+- `act` reads a blank, padded or null `targetId` as no target, and trims it.
+- `request_check`'s refusal now lists the skills. It deliberately does **not** guess the skill from the reason: the review measured a guess against every `request_check` in sessions 001–013 and found it rescues none of the eight real refusals (a reason describes the attempt, never naming the skill) while mis-picking on two real Arcana checks whose reason says "nature" — a silently wrong roll, where the refusal costs one call the DM already recovers from.
+
 ## Eighth 1-hour run (session 012, 2026-09-20)
 
 Run on HEAD `e81074d`, the first under the one-fight rule. It ran 60 wall minutes with no pauses and ended at **`hard_stop`**, not `target_reached`: the DM never closed the scene.
@@ -384,11 +416,11 @@ Findings 1–4 are fixed in `197b339` plus a follow-up after review; finding 5 i
 
 ## Where we are (2026-09-20)
 
-**Branch `feat/dm-pc-control-checker`: 117 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1197 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
+**Branch `feat/dm-pc-control-checker`: 121 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1202 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
 
 The expected failure is deliberate: it documents the quote-majority split's known cost (`"Who's next?" I nod to You.`), and will start passing only if that rule is revisited.
 
-**Not pushing until a live session comes back clean.** Eight 1-hour sessions have run (005–012), each followed by a reviewed batch of fixes. Session 012 was the first under the one-fight rule: the combat rules held and tool errors fell to one, but the DM took 79% of the words, stayed in one scene, and ran to the hard stop without closing. Those fixes are reviewed but not yet run live.
+**Session 013 is the cleanest run so far: a script with no leaks at all, both combat rules holding live, and a clean close on a scene change.** Its only findings were two tool-call ergonomics issues, both now settled, and one seat that needed a fallback. Nine 1-hour sessions have run (005–013), each followed by a reviewed batch of fixes, and the batches have shrunk each time. The release gate is Aaron's: one more run to confirm a session with nothing to fix, or push now.
 
 ### What each batch did
 
@@ -403,7 +435,8 @@ The expected failure is deliberate: it documents the quote-majority split's know
 | Sixth run      | Session 010                 | `c75717c..80ac5e0` | Retelling (paraphrase loop) rejection with a per-turn cap, bare-line tool-call leaks                                           |
 | Seventh run    | Session 011                 | `7b4d55d..e036678` | One action per combatant per turn, combat hand-offs, carried items in the DM prompt, turn announcements, checker allows a miss |
 | One-fight rule | Aaron's call after 011      | `3a2606d..e81074d` | One fight a session, in the engine, the prompt and the spec                                                                    |
-| Eighth run     | Session 012                 | `5cc2095..HEAD`    | DM word-share nudge, repeated closing press, bold tool call and meta-talk leaks, recoverable refusals                          |
+| Eighth run     | Session 012                 | `5cc2095..912f2e3` | DM word-share nudge, repeated closing press, bold tool call and meta-talk leaks, recoverable refusals                          |
+| Ninth run      | Session 013                 | `78a1c28..HEAD`    | Blank act target; request_check refusal lists the skills and never guesses                                                     |
 
 ### Rule added after session 011: one fight a session
 
@@ -411,17 +444,16 @@ Aaron's call (2026-09-19): a session has room for a single fight, as a rule of t
 
 ### Next steps, in order
 
-1. **Run session 013.** Watch for: whether the DM's share falls back toward the 64–72% of earlier runs and the session closes on a scene change rather than the hard stop, whether the closing press produces exactly one scene cut, how the DM takes a refused second fight now that its narration and hand_off survive, and whether death saves finally fire (no player has taken damage in the last two sessions).
-2. **Push or merge once a session surfaces no new fix-worthy findings.**
-3. Consider giving Bram and Tomas starting gear in the Avalon party files.
-4. Then the plan work already queued: Plan 2B (lore), the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike.
+1. **Decide the release**: push and open a PR, merge to `main` locally, or run session 014 first to confirm a run with nothing to fix. Nothing is pushed yet.
+2. Consider giving Bram and Tomas starting gear in the Avalon party files.
+3. Then the plan work already queued: Plan 2B (lore), the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike.
 
 ### Operating notes from these runs
 
 - **A run takes 1–2.5 hours of wall time** for 60 spoken minutes. Shorter narration makes the word-based clock advance more slowly, so the caps added in the second batch lengthen wall time.
 - **The DM's LM Studio wedged once** mid-`GENERATING`, answering nothing while still listing its model. `lms unload` then `lms load` fixed it; run `sim bench` before every session.
 - **The Ampere machine dropped off the network** mid-session 007 and again mid-session 009 (back within ~10–30 minutes both times) (Mira's seat, the checker's primary). `--resume` picked up cleanly once it was back.
-- **`player-bram` has a fallback target** in `campaign.json` after its seat paused session 005 by answering four times without a tool call.
+- **`player-bram` has a fallback target** in `campaign.json` after its seat paused session 005 by answering four times without a tool call; `player-tomas` got one after session 013 paused the same way. Every player seat now has a fallback.
 - The SDD workspaces for all four batches are under `.superpowers/sdd/` (git-ignored) with their ledgers, briefs, reports and review packages.
 
 ## Open backlog
