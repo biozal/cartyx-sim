@@ -142,6 +142,12 @@ export const SimEvent = z.discriminatedUnion('type', [
     fact: z.string().min(1),
     reason: z.string().min(1),
     query: z.string().optional(),
+    /**
+     * The narration this invention supports, resolved by the recorder when the turn commits: the
+     * DM records an invention before narrating the detail, so the model is never asked for it.
+     * Optional, so logs written before Plan 2B still parse.
+     */
+    narrationSeq: z.number().int().min(0).optional(),
   }),
   z.object({
     ...base,

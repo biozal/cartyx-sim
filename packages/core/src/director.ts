@@ -1362,6 +1362,7 @@ export class Director {
 
   private async commit(recorder: TurnRecorder): Promise<void> {
     if (recorder.events.length === 0) return;
+    recorder.linkInventions();
     await this.deps.sink.append(recorder.events);
     this.history.push(...recorder.events);
     this.state = recorder.state;
