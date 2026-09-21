@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@cartyx-sim/core": "*",
+    "@cartyx-sim/lore": "*",
     "@cartyx-sim/models": "*",
     "@cartyx-sim/rules": "*",
     "@cartyx-sim/script": "*",
