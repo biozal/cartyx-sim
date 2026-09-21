@@ -384,6 +384,64 @@ describe('findContradictions', () => {
       findContradictions({ events, model, seat: 'checker', chunkText })
     ).resolves.toEqual([]);
   });
+
+  it('records only the chunk ids whose text actually resolved and was sent to the checker', async () => {
+    const twoChunkEvents: SimEvent[] = [
+      event({
+        type: 'lore_lookup',
+        query: 'two chunks',
+        hits: [
+          { chunkId: 'c1', source: 'dm/a.md', score: 0.9, entityId: 'kanka-1', entityName: 'A' },
+          { chunkId: 'c2', source: 'dm/b.md', score: 0.8, entityId: 'kanka-2', entityName: 'B' },
+        ],
+        used: ['c1', 'c2'],
+      }),
+      event({ type: 'narration', visibility: 'public', text: 'Some narration.' }),
+    ];
+    // Only c1 resolves: c2 is used by the lookup but has since fallen out of the lore index.
+    const onlyC1 = async (chunkId: string) => (chunkId === 'c1' ? 'text of c1' : undefined);
+
+    const found = await findContradictions({
+      events: twoChunkEvents,
+      chunkText: onlyC1,
+      model: stubModel(['{"conflicts": true, "note": "mismatch"}']),
+      seat: 'checker',
+    });
+
+    expect(found).toEqual([
+      { seq: expect.any(Number), narration: 'Some narration.', chunkIds: ['c1'], note: 'mismatch' },
+    ]);
+  });
+
+  it('asks about only the first narration after a lookup, not a later one in the same streak', async () => {
+    const twoNarrations: SimEvent[] = [
+      event({
+        type: 'lore_lookup',
+        query: 'Professor Sella Vaunt',
+        hits: [
+          {
+            chunkId: 'c1',
+            source: 'dm/avalon.md',
+            score: 0.8,
+            entityId: 'kanka-1',
+            entityName: 'Sella Vaunt',
+          },
+        ],
+        used: ['c1'],
+      }),
+      event({ type: 'narration', visibility: 'public', text: 'Vaunt teaches technical dueling.' }),
+      event({ type: 'narration', visibility: 'public', text: 'She waves her staff.' }),
+    ];
+    let calls = 0;
+    const model: ModelClient = {
+      async complete() {
+        calls++;
+        return { text: '{"conflicts": false}', toolCalls: [], model: 'checker' };
+      },
+    };
+    await findContradictions({ events: twoNarrations, model, seat: 'checker', chunkText });
+    expect(calls).toBe(1);
+  });
 });
 
 describe('runAudit', () => {
@@ -585,6 +643,10 @@ describe('runAudit', () => {
       });
       expect(result.audit.contradictions).toBeNull();
       expect(lines.some((line) => line.includes('no checker seat'))).toBe(true);
+      expect(result.audit.contradictionsSkipped).toContain('no checker seat');
+      const { readFile } = await import('node:fs/promises');
+      const markdown = await readFile(result.markdownPath, 'utf8');
+      expect(markdown).toContain('no checker seat');
     });
 
     it('does not run without a lore index, and says so', async () => {
@@ -599,6 +661,7 @@ describe('runAudit', () => {
       });
       expect(result.audit.contradictions).toBeNull();
       expect(lines.some((line) => line.includes('no lore index'))).toBe(true);
+      expect(result.audit.contradictionsSkipped).toContain('no lore index');
     });
 
     it('stays null with --no-model even when a checker seat and lore index both exist', async () => {
@@ -688,6 +751,57 @@ describe('runAudit', () => {
       // still explicit that the checker ran and simply found nothing checkable.
       expect(result.audit.contradictions).toEqual([]);
       expect(closeSpy).toHaveBeenCalledTimes(1);
+      closeSpy.mockRestore();
+    });
+
+    it('degrades to null, keeping the rest of the audit intact, when the lore store fails', async () => {
+      await writeCampaignJson({ checker: { endpoint: 'local', model: 'checker-model' } });
+      await writeLoreIndex([
+        {
+          chunkId: 'c1',
+          text: 'Sella Vaunt teaches applied crystal engines.',
+          entityId: 'kanka-1',
+        },
+      ]);
+      await writeUsableLookupSession(2);
+
+      // The lore index passed `readMeta` (it exists), but the query itself fails: IO error,
+      // corruption, or lock contention with a concurrent `sim index`. This must not propagate out
+      // of `runAudit` and take the gaps/inventions/coverage sections down with it — those read
+      // only the event log and are meant to stay usable long after the lore has moved on.
+      const byChunkIdSpy = vi
+        .spyOn(LanceStore.prototype, 'byChunkId')
+        .mockRejectedValue(new Error('lance is angry'));
+      const closeSpy = vi.spyOn(LanceStore.prototype, 'close');
+      let modelCalled = false;
+      const model: ModelClient = {
+        async complete() {
+          modelCalled = true;
+          return { text: '{"conflicts": false}', toolCalls: [], model: 'checker' };
+        },
+      };
+
+      const result = await runAudit({
+        campaignsDir,
+        campaign: 'live',
+        session: 2,
+        useModel: true,
+        model,
+      });
+
+      expect(result.audit.contradictions).toBeNull();
+      expect(result.audit.contradictionsSkipped).toContain('lance is angry');
+      expect(modelCalled).toBe(false);
+      // The rest of the audit — built from the event log alone — is untouched by the store
+      // failure: this session's usable lookup still counts as coverage.
+      expect(result.audit.loreCommit).toBe('lore-abc');
+      expect(result.audit.gaps).toEqual([]);
+      expect(result.audit.coverage).toEqual([
+        { entityId: 'kanka-1', entityName: 'Sella Vaunt', entityType: 'unknown', lookups: 1 },
+      ]);
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+
+      byChunkIdSpy.mockRestore();
       closeSpy.mockRestore();
     });
   });

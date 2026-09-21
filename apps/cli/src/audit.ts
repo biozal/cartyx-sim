@@ -74,6 +74,8 @@ export interface Audit {
   scenes: SceneEntry[];
   /** null when the checker pass did not run; the report says why. */
   contradictions: Contradiction[] | null;
+  /** Present exactly when `contradictions` is null: which condition kept the pass from running. */
+  contradictionsSkipped?: string;
 }
 
 const STOP_WORDS = new Set([
@@ -290,11 +292,16 @@ export async function findContradictions(input: {
 
     // The log records chunk ids and scores, never the text. Bare ids tell the checker nothing, so
     // the chunks are re-fetched from the index; a chunk the index no longer holds (the lore moved
-    // on since the session) means there is nothing to compare, and the narration is skipped.
+    // on since the session) is simply left out. `resolvedIds` — not `chunkIds` — is what a finding
+    // records, so it never claims a chunk as evidence that the checker was never actually shown.
+    const resolvedIds: string[] = [];
     const texts: string[] = [];
     for (const chunkId of chunkIds) {
       const text = await input.chunkText(chunkId);
-      if (text !== undefined) texts.push(`[${chunkId}] ${text}`);
+      if (text !== undefined) {
+        resolvedIds.push(chunkId);
+        texts.push(`[${chunkId}] ${text}`);
+      }
     }
     if (texts.length === 0) continue;
 
@@ -332,7 +339,7 @@ export async function findContradictions(input: {
     // An unparseable reply skips the narration rather than failing the audit.
     if (!parsed || !parsed.conflicts) continue;
 
-    found.push({ seq: event.seq, narration: event.text, chunkIds, note: parsed.note });
+    found.push({ seq: event.seq, narration: event.text, chunkIds: resolvedIds, note: parsed.note });
   }
   return found;
 }
@@ -389,7 +396,9 @@ export function renderAuditMarkdown(audit: Audit): string {
 
   lines.push('## Possible contradictions', '');
   if (audit.contradictions === null) {
-    lines.push('Skipped: no checker seat, no lore index, or `--no-model` was passed.', '');
+    const reason =
+      audit.contradictionsSkipped ?? 'no checker seat, no lore index, or `--no-model` was passed';
+    lines.push(`Skipped: ${reason}.`, '');
   } else if (audit.contradictions.length === 0) {
     lines.push('The checker found none.', '');
   } else {
@@ -424,45 +433,58 @@ export interface AuditResult {
   audit: Audit;
 }
 
+/** What `contradictionPass` decided, and why, so `runAudit` can both log and persist the reason. */
+interface ContradictionPassResult {
+  contradictions: Contradiction[] | null;
+  /** Present exactly when `contradictions` is null. */
+  skipped?: string;
+}
+
 /**
  * Runs the contradiction checker when `useModel` is true, the campaign has a `checker` seat, and
- * a lore index exists — otherwise returns `null` after logging which of those was missing.
- * Opens the lore index only for this pass and always closes it before returning, success or not.
+ * a lore index exists — otherwise returns `contradictions: null` with the reason, after logging
+ * it. Opening and querying the lore index can still fail after all three conditions check out —
+ * an IO error, corruption, or lock contention with a concurrent `sim index` — and that failure
+ * must degrade this section exactly like a missing index does, not fail the whole audit: the
+ * other three sections read only the event log and are meant to stay usable long after the lore
+ * has moved on, so a bad lore store can never take them down with it. The lore index, once opened,
+ * is always closed before returning, whichever of those outcomes happens.
  */
 async function contradictionPass(
   options: AuditOptions,
   events: readonly SimEvent[],
   log: (line: string) => void
-): Promise<Contradiction[] | null> {
-  if (!options.useModel) {
-    log('Possible contradictions: skipped (--no-model was passed).');
-    return null;
-  }
+): Promise<ContradictionPassResult> {
+  const skip = (reason: string): ContradictionPassResult => {
+    log(`Possible contradictions: skipped (${reason}).`);
+    return { contradictions: null, skipped: reason };
+  };
+  if (!options.useModel) return skip('--no-model was passed');
   const campaign = await loadCampaign(options.campaignsDir, options.campaign);
   const seat = campaign.seats.checker;
-  if (!seat) {
-    log('Possible contradictions: skipped (campaign.json has no checker seat).');
-    return null;
-  }
+  if (!seat) return skip('campaign.json has no checker seat');
   const indexDir = loreIndexDir(campaign);
   const meta = await readMeta(indexDir);
   if (!meta) {
-    log(
-      `Possible contradictions: skipped (no lore index at ${indexDir}; run \`sim index --campaign ${campaign.id}\`).`
-    );
-    return null;
+    return skip(`no lore index at ${indexDir}; run \`sim index --campaign ${campaign.id}\``);
   }
   const model = options.model ?? new OpenAICompatibleModelClient(campaign.models);
-  const store = await LanceStore.open(indexDir);
+  let store: LanceStore | undefined;
   try {
-    return await findContradictions({
+    store = await LanceStore.open(indexDir);
+    const openedStore = store;
+    const contradictions = await findContradictions({
       events,
       model,
       seat,
-      chunkText: async (chunkId) => (await store.byChunkId(chunkId))?.text,
+      chunkText: async (chunkId) => (await openedStore.byChunkId(chunkId))?.text,
     });
+    return { contradictions };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return skip(`the lore index could not be read (${message})`);
   } finally {
-    await store.close();
+    await store?.close();
   }
 }
 
@@ -499,8 +521,12 @@ export async function runAudit(options: AuditOptions): Promise<AuditResult> {
   }
 
   const built = buildAudit({ campaign: options.campaign, session: options.session, events });
-  const contradictions = await contradictionPass(options, events, log);
-  const audit: Audit = { ...built, contradictions };
+  const { contradictions, skipped } = await contradictionPass(options, events, log);
+  const audit: Audit = {
+    ...built,
+    contradictions,
+    ...(skipped === undefined ? {} : { contradictionsSkipped: skipped }),
+  };
 
   const auditPath = join(dir, 'audit.json');
   const markdownPath = join(dir, 'audit.md');
