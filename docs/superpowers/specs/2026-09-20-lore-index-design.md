@@ -29,7 +29,9 @@ Plan 2B makes lore real: ingest the lore repository, embed it, answer `lookup_lo
 
 **All of it is indexed, the Kanka mirror included.** The mirror duplicates the major entities that `dm/**` describes in depth, which is handled at retrieval time by the entity collapse in §6.3 rather than by leaving material out.
 
-Two exclusions: `node_modules/`, and the Kanka export's 18 `_index.md` and `index.md` files, which are link lists (`- [Brookhaven](102817-102817.md)`) rather than lore.
+Three exclusions, and only three: `node_modules/` and `.git/`, which hold dependencies and version-control internals rather than anything a DM could read; and the Kanka export's 18 `_index.md` and `index.md` files, which are link lists (`- [Brookhaven](102817-102817.md)`) rather than lore.
+
+Nothing else is skipped, including directories that hold no markdown today (`images/`, `kanka-export/_raw/`). Skipping them would be a small speed win on the directory walk, and the cost is that a lore file later added under one of those names disappears from the index with no signal — which is the opposite of what this subsystem exists to do. The walk is cheap; silent omission is not.
 
 ## 4. Package
 
@@ -134,7 +136,8 @@ A campaign with `lorePath` and no `embed` seat is an error too: it would index n
 The value recorded in `session_start.loreCommit` and compared on resume:
 
 - clean tree: the 40-character git sha (`git rev-parse HEAD`);
-- dirty tree: `<sha>-dirty-<digest8>`, where `digest8` is the first 8 characters of the content digest.
+- dirty tree: `<sha>-dirty-<digest8>`, where `digest8` is the first 8 characters of the content digest;
+- the status check itself failed: `<sha>-unknown-<digest8>`. A failed check is not a clean tree, and saying so matters — the whole point of this string is to refuse a resume into changed lore. Because `digest8` fingerprints the content, an `-unknown-` version still compares correctly in both directions: identical content yields an identical string and the resume is allowed, changed content yields a different one and it is refused.
 
 The first 40 characters are always a real commit you can `git show`, and an uncommitted lore edit produces a different version, so resuming into edited lore is correctly refused by the check the director already performs.
 
