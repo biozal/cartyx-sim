@@ -10,6 +10,7 @@
     "@ai-sdk/openai-compatible": "^3.0.48",
     "@cartyx-sim/core": "*",
     "@cartyx-sim/models": "*",
+    "@lancedb/lancedb": "^0.39.0",
     "ai": "^7.0.99",
     "zod": "^4.6.4"
   }
