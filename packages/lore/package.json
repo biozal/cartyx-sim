@@ -7,8 +7,10 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.48",
     "@cartyx-sim/core": "*",
     "@cartyx-sim/models": "*",
+    "ai": "^7.0.99",
     "zod": "^4.6.4"
   }
 }
