@@ -174,6 +174,28 @@ describe('buildAudit', () => {
   });
 });
 
+describe('buildAudit npc invented flag', () => {
+  it("reports the DM's own declared invented flag, not a guess from whether lore was linked", () => {
+    // Invented and loreEntityId are independent questions on npc_introduced (see
+    // packages/core/src/tools/narrative.ts): a lore-less NPC the DM did not mark invented must
+    // not be reported as invented just because it has no loreEntityId.
+    const events: SimEvent[] = [
+      event({
+        type: 'npc_introduced',
+        visibility: 'public',
+        npcId: 'npc-mira',
+        name: 'Mira',
+        description: 'A ferry operator with no lore entry.',
+        invented: false,
+      }),
+    ];
+
+    const audit = buildAudit({ campaign: 'avalon', session: 1, events });
+
+    expect(audit.npcs).toEqual([{ npcId: 'npc-mira', name: 'Mira', invented: false }]);
+  });
+});
+
 describe('buildAudit with a log written before Plan 2B', () => {
   it('keys coverage on chunkId when hits carry no entityId', () => {
     const events: SimEvent[] = [

@@ -207,7 +207,9 @@ export function buildAudit(input: {
       npcId: event.npcId,
       name: event.name,
       ...(event.loreEntityId === undefined ? {} : { loreEntityId: event.loreEntityId }),
-      invented: event.loreEntityId === undefined,
+      // The DM's own declaration, not a guess from whether a lore entity got attached: the two
+      // are independent questions (an NPC can be linked to lore yet still be marked invented).
+      invented: event.invented,
     }));
 
   const scenes: SceneEntry[] = events
