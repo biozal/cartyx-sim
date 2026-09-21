@@ -120,7 +120,7 @@ async function campaignSetup(options: RunOptions): Promise<SessionSetup> {
       // Compares against the actual lore repo too, not only the frozen index: a lore file edited
       // in place after the session started is a real drift even though it hasn't been reindexed
       // yet, and `ensureIndex` must never be called here to find that out.
-      const { loreCommit: current } = await currentIdentity(campaign, embedder, meta.dims);
+      const { loreCommit: current } = await currentIdentity(campaign, embedder);
       const mismatch: { source: string; value: string } | undefined =
         meta.loreCommit !== logged
           ? { source: 'the on-disk index', value: meta.loreCommit }

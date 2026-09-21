@@ -75,10 +75,17 @@ function requireLorePath(campaign: Campaign): string {
   return campaign.lorePath;
 }
 
+/**
+ * The identity the on-disk index is compared against. `dims` is deliberately absent: the live
+ * embedding width is only observable from an embedding response, and deciding staleness must not
+ * require a network call — `sim index --check` has to work with the endpoint down, and a fresh
+ * `sim run` must not add a seat call before the session opens. `IndexIdentity.dims` therefore
+ * stays unmeasured here and is not compared; `sim bench`'s embed trial is what catches an
+ * endpoint that has started answering in a different width.
+ */
 export async function currentIdentity(
   campaign: Campaign,
-  embedder: Embedder,
-  dims: number | undefined
+  embedder: Embedder
 ): Promise<{ identity: IndexIdentity; loreCommit: string }> {
   const lorePath = requireLorePath(campaign);
   const files = await readLoreFiles(lorePath);
@@ -88,9 +95,6 @@ export async function currentIdentity(
       lorePath,
       contentDigest: digest,
       embedModel: embedder.model,
-      // The dimension count is only known after an embedding call, so compare against whatever the
-      // existing index recorded: a model swap is already caught by `embedModel`.
-      dims: dims ?? 0,
       documentPrefix: DOCUMENT_PREFIX,
       queryPrefix: QUERY_PREFIX,
       chunkerVersion: CHUNKER_VERSION,
@@ -106,7 +110,7 @@ export async function ensureIndex(options: IndexOptions): Promise<IndexResult> {
   const embedder = options.embedder ?? embedderFor(campaign);
   const indexDir = loreIndexDir(campaign);
   const existing = await readMeta(indexDir);
-  const { identity, loreCommit } = await currentIdentity(campaign, embedder, existing?.dims);
+  const { identity, loreCommit } = await currentIdentity(campaign, embedder);
   // Whether the index is actually out of date with the lore repo, independent of `--force`: this
   // is what `--check` reports, and `--force` must not make an honestly-fresh index look stale.
   const stale = isStale(existing, identity);

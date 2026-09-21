@@ -34,8 +34,19 @@ export interface IndexMeta {
  * `ambiguous`: an unresolved-name report changing never means the indexed content did. */
 export type IndexIdentity = Omit<
   IndexMeta,
-  'loreCommit' | 'files' | 'chunks' | 'builtAt' | 'ambiguous'
->;
+  'loreCommit' | 'files' | 'chunks' | 'builtAt' | 'ambiguous' | 'dims'
+> & {
+  /**
+   * The embedding model's live dimension count, when the caller has measured it. `undefined`
+   * means unmeasured, and an unmeasured dimension is not compared: the width of a vector is only
+   * observable from an embedding response, and neither `sim index` nor a fresh `sim run` makes a
+   * call before deciding whether to rebuild. Passing the index's own recorded `dims` back in here
+   * would compare a value against itself and could never fire, so callers pass nothing instead.
+   * A model swap is caught by `embedModel`; a same-model width change is caught by `sim bench`'s
+   * embed trial (apps/cli/src/bench.ts).
+   */
+  dims?: number;
+};
 
 export interface BuildOptions {
   lorePath: string;
@@ -65,7 +76,7 @@ export function isStale(meta: IndexMeta | undefined, current: IndexIdentity): bo
     meta.lorePath !== current.lorePath ||
     meta.contentDigest !== current.contentDigest ||
     meta.embedModel !== current.embedModel ||
-    meta.dims !== current.dims ||
+    (current.dims !== undefined && meta.dims !== current.dims) ||
     meta.documentPrefix !== current.documentPrefix ||
     meta.queryPrefix !== current.queryPrefix ||
     meta.chunkerVersion !== current.chunkerVersion

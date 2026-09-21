@@ -20,6 +20,11 @@ export interface EmbedBenchResult {
   model: string;
   reachable: boolean;
   dims: number | null;
+  /**
+   * The dimension count `meta.json` records for the existing lore index, or `null` when there is
+   * no index yet — a first run has nothing to compare the live response against.
+   */
+  expectedDims: number | null;
   latencyMs: number | null;
   errors: string[];
 }
@@ -39,7 +44,10 @@ export function benchPassed(results: readonly BenchResult[], embed?: EmbedBenchR
     (result) =>
       result.reachable && result.toolCallSuccesses + result.textReplies === result.toolCallTrials
   );
-  return seatsPass && (embed === undefined || embed.reachable);
+  // `errors`, not `reachable`: an endpoint that answers with the wrong dimension count is
+  // reachable and still unusable — every lookup against the existing index would fail at
+  // minute 12 of a session, which is exactly what this command exists to catch in seconds.
+  return seatsPass && (embed === undefined || (embed.reachable && embed.errors.length === 0));
 }
 
 export function formatBenchTable(results: readonly BenchResult[]): string[] {
@@ -70,20 +78,35 @@ export function formatBenchTable(results: readonly BenchResult[]): string[] {
 }
 
 /**
- * One embedding call. A misconfigured embedding endpoint otherwise surfaces at the first
- * `lookup_lore`, a dozen minutes into a session.
+ * One embedding call, whose response's dimension count is checked against the one the lore index
+ * was built with (spec §7.3). A misconfigured embedding endpoint — dead, or answering in a
+ * different width than every stored vector — otherwise surfaces at the first `lookup_lore`, a
+ * dozen minutes into a session. `expectedDims` is `undefined` when no index exists yet: a first
+ * run has nothing to compare against, and that is not a failure.
  */
-export async function benchEmbedSeat(embedder: Embedder): Promise<EmbedBenchResult> {
+export async function benchEmbedSeat(
+  embedder: Embedder,
+  expectedDims?: number
+): Promise<EmbedBenchResult> {
   const started = Date.now();
   try {
     const vector = await embedder.embedQuery('who teaches applied crystal engines');
+    const mismatch =
+      expectedDims !== undefined && vector.length !== expectedDims
+        ? [
+            `the endpoint returned ${vector.length} dimensions, but the lore index was built ` +
+              `with ${expectedDims}. Rebuild it (\`sim index --force\`) or restore the ` +
+              'embedding model it was built with.',
+          ]
+        : [];
     return {
       seat: EMBED_SEAT,
       model: embedder.model,
       reachable: true,
       dims: vector.length,
+      expectedDims: expectedDims ?? null,
       latencyMs: Date.now() - started,
-      errors: [],
+      errors: mismatch,
     };
   } catch (error) {
     return {
@@ -91,6 +114,7 @@ export async function benchEmbedSeat(embedder: Embedder): Promise<EmbedBenchResu
       model: embedder.model,
       reachable: false,
       dims: null,
+      expectedDims: expectedDims ?? null,
       latencyMs: null,
       errors: [error instanceof Error ? error.message : String(error)],
     };
@@ -98,9 +122,15 @@ export async function benchEmbedSeat(embedder: Embedder): Promise<EmbedBenchResu
 }
 
 export function formatEmbedBench(result: EmbedBenchResult): string[] {
+  const dims =
+    result.dims === null
+      ? '-'
+      : `${result.dims} dims` +
+        (result.expectedDims === null || result.expectedDims === result.dims
+          ? ''
+          : ` (index: ${result.expectedDims})`);
   const lines = [
-    `${result.seat}  ${result.model}  ${result.reachable ? 'yes' : 'NO'}  ` +
-      `${result.dims === null ? '-' : `${result.dims} dims`}  ` +
+    `${result.seat}  ${result.model}  ${result.reachable ? 'yes' : 'NO'}  ${dims}  ` +
       `${result.latencyMs === null ? '-' : `${result.latencyMs} ms`}`,
   ];
   for (const error of result.errors) lines.push(`  ${result.seat}: ${error}`);
@@ -125,8 +155,13 @@ export async function runBench(options: BenchOptions): Promise<BenchReport> {
   let embed: EmbedBenchResult | undefined;
   if (campaign.embedSeat) {
     log(`Benchmarking ${EMBED_SEAT}...`);
-    const embedder = options.embedder ?? (await import('./index-lore')).embedderFor(campaign);
-    embed = await benchEmbedSeat(embedder);
+    const { embedderFor, loreIndexDir } = await import('./index-lore');
+    const { readMeta } = await import('@cartyx-sim/lore');
+    // `undefined` when the campaign has no index yet, which `benchEmbedSeat` reads as "nothing to
+    // compare against" rather than as a mismatch.
+    const meta = await readMeta(loreIndexDir(campaign));
+    const embedder = options.embedder ?? embedderFor(campaign);
+    embed = await benchEmbedSeat(embedder, meta?.dims);
     for (const line of formatEmbedBench(embed)) log(line);
   }
 

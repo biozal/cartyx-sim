@@ -134,4 +134,16 @@ describe('isStale', () => {
   it('is NOT stale when only the commit moved and no lore file changed', () => {
     expect(isStale({ ...meta, loreCommit: 'different' }, current)).toBe(false);
   });
+
+  it('does not compare dims the caller has not measured', () => {
+    // `sim index` and `sim run` decide staleness without an embedding call, so they pass no
+    // `dims` at all rather than handing the index's own recorded value back for comparison
+    // against itself. An unmeasured width is simply not one of the staleness questions.
+    const { dims: _dims, ...unmeasured } = current;
+    expect(isStale(meta, unmeasured)).toBe(false);
+    expect(isStale({ ...meta, dims: 512 }, unmeasured)).toBe(false);
+    expect(isStale({ ...meta, dims: 512 }, { ...unmeasured, contentDigest: 'sha256:bb' })).toBe(
+      true
+    );
+  });
 });
