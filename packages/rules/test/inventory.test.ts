@@ -36,6 +36,11 @@ describe('inventory', () => {
     expect(() => removeItem(pc, 'Rope')).toThrow('has 0 × "Rope"');
   });
 
+  it('names what the combatant does carry, so the caller can spend that instead', () => {
+    expect(() => removeItem(pc, 'Rope')).toThrow('Carrying: 2 × Healing Potion');
+    expect(() => removeItem({ ...pc, inventory: [] }, 'Rope')).toThrow('Carrying: nothing');
+  });
+
   it('rejects non-positive quantities', () => {
     expect(() => addItem(pc, 'Rope', 0)).toThrow('positive integer');
     expect(() => removeItem(pc, 'Healing Potion', 0)).toThrow('positive integer');

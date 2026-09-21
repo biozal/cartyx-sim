@@ -12,6 +12,7 @@ import { scriptedRng } from '@cartyx-sim/rules';
 import { makeCombatant } from '@cartyx-sim/rules/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OpenAICompatibleModelClient } from '../src/client';
+import { reasoningProviderOptions } from '../src/seat';
 import { startFakeOpenAIServer, type FakeOpenAIServer } from '../src/testing';
 
 const narrateTool: ToolSchema = {
@@ -50,6 +51,16 @@ afterEach(async () => {
 });
 
 describe('OpenAICompatibleModelClient', () => {
+  it('reasoningProviderOptions converts provider names to camelCase keys without warning', () => {
+    expect(reasoningProviderOptions('cartyx-sim', 'none')).toEqual({
+      cartyxSim: { reasoningEffort: 'none' },
+    });
+    expect(reasoningProviderOptions('cartyx-sim-bench', 'medium')).toEqual({
+      cartyxSimBench: { reasoningEffort: 'medium' },
+    });
+    expect(reasoningProviderOptions('cartyx-sim', undefined)).toBeUndefined();
+  });
+
   it('sends an OpenAI chat completion and maps the tool calls back', async () => {
     const fake = await server(() => ({
       text: 'thinking',
@@ -69,6 +80,7 @@ describe('OpenAICompatibleModelClient', () => {
     expect(response).toEqual({
       text: 'thinking',
       toolCalls: [{ id: 'call_1', name: 'narrate', args: { text: 'The lab hums.' } }],
+      model: 'qwen-dm',
     });
     const sent = fake.requests[0]!;
     expect(sent).toMatchObject({
@@ -111,6 +123,7 @@ describe('OpenAICompatibleModelClient', () => {
     expect(await client.complete(request({ toolChoice: 'auto' }))).toEqual({
       text: 'The lab hums.',
       toolCalls: [],
+      model: 'm',
     });
   });
 
@@ -154,6 +167,7 @@ describe('OpenAICompatibleModelClient', () => {
     });
     expect(await client.complete(request())).toMatchObject({
       toolCalls: [{ name: 'narrate', args: { text: 'From the backup.' } }],
+      model: 'small',
     });
     expect(primary.requests).toHaveLength(1);
     expect(backup.requests[0]?.model).toBe('small');
@@ -286,5 +300,128 @@ describe('OpenAICompatibleModelClient', () => {
     const assistant = secondDmCall.messages.find((message) => message.role === 'assistant');
     expect(toolMessage).toMatchObject({ content: 'Narrated.' });
     expect(toolMessage?.tool_call_id).toBe(assistant?.tool_calls?.[0]?.id);
+  });
+
+  it('retries an empty reply on the same target when incompleteReplyAttempts is set', async () => {
+    const fake = await server((_body, index) =>
+      index === 0
+        ? { text: '' }
+        : { toolCalls: [{ name: 'narrate', arguments: { text: 'Second try.' } }] }
+    );
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+
+    const response = await client.complete(
+      request({ incompleteReplyAttempts: 2, toolChoice: 'auto' })
+    );
+
+    expect(response).toMatchObject({
+      toolCalls: [{ name: 'narrate', args: { text: 'Second try.' } }],
+    });
+    expect(fake.requests).toHaveLength(2);
+  });
+
+  it('falls back after every attempt on the primary is cut off by the output-token limit', async () => {
+    const primary = await server(() => ({ text: 'thinking forever', finishReason: 'length' }));
+    const backup = await server(() => ({
+      toolCalls: [{ name: 'narrate', arguments: { text: 'From the backup.' } }],
+    }));
+    const client = new OpenAICompatibleModelClient({
+      dm: {
+        endpoint: { baseURL: primary.baseURL },
+        model: 'big',
+        fallbacks: [{ endpoint: { baseURL: backup.baseURL }, model: 'small' }],
+      },
+    });
+
+    const response = await client.complete(
+      request({ incompleteReplyAttempts: 2, toolChoice: 'auto' })
+    );
+
+    expect(response).toMatchObject({
+      toolCalls: [{ name: 'narrate', args: { text: 'From the backup.' } }],
+    });
+    expect(primary.requests).toHaveLength(2);
+  });
+
+  it('throws naming the incomplete-reply failures when every attempt on every target is incomplete', async () => {
+    const fake = await server(() => ({ text: '', finishReason: 'length' }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+
+    await expect(
+      client.complete(request({ incompleteReplyAttempts: 2, toolChoice: 'auto' }))
+    ).rejects.toThrow(/Every endpoint failed.*incomplete reply \(finish: length\)/s);
+    expect(fake.requests).toHaveLength(2);
+  });
+
+  it('returns an empty reply as-is when incompleteReplyAttempts is unset', async () => {
+    const fake = await server(() => ({ text: '' }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+
+    expect(await client.complete(request({ toolChoice: 'auto' }))).toEqual({
+      text: '',
+      toolCalls: [],
+      model: 'm',
+    });
+    expect(fake.requests).toHaveLength(1);
+  });
+
+  it('does not retry a 500 on the same target even when incompleteReplyAttempts is set', async () => {
+    const primary = await server(() => ({ status: 500 }));
+    const backup = await server(() => ({
+      toolCalls: [{ name: 'narrate', arguments: { text: 'From the backup.' } }],
+    }));
+    const client = new OpenAICompatibleModelClient({
+      dm: {
+        endpoint: { baseURL: primary.baseURL },
+        model: 'big',
+        fallbacks: [{ endpoint: { baseURL: backup.baseURL }, model: 'small' }],
+      },
+    });
+
+    const response = await client.complete(request({ incompleteReplyAttempts: 2 }));
+
+    expect(response).toMatchObject({
+      toolCalls: [{ name: 'narrate', args: { text: 'From the backup.' } }],
+    });
+    expect(primary.requests).toHaveLength(1);
+  });
+
+  it('still makes one call and returns a complete reply when incompleteReplyAttempts is 0', async () => {
+    const fake = await server(() => ({
+      toolCalls: [{ name: 'narrate', arguments: { text: 'The lab hums.' } }],
+    }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+
+    const response = await client.complete(request({ incompleteReplyAttempts: 0 }));
+
+    expect(response).toMatchObject({
+      toolCalls: [{ name: 'narrate', args: { text: 'The lab hums.' } }],
+    });
+    expect(fake.requests).toHaveLength(1);
+  });
+
+  it("sends a seat's reasoning effort as reasoning_effort, and nothing when unset", async () => {
+    const fake = await server(() => ({ text: '{"violations": []}' }));
+    const client = new OpenAICompatibleModelClient({
+      checker: { endpoint: { baseURL: fake.baseURL }, model: 'glm', reasoningEffort: 'none' },
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'qwen-dm' },
+    });
+
+    await client.complete(request({ seat: 'checker', tools: [], toolChoice: 'auto' }));
+    await client.complete(request({ seat: 'dm', toolChoice: 'auto' }));
+
+    expect(fake.requests[0]).toMatchObject({ model: 'glm', reasoning_effort: 'none' });
+    expect(fake.requests[0]).not.toHaveProperty('reasoningEffort');
+    expect(fake.requests[0]).not.toHaveProperty('tools');
+    expect(fake.requests[0]).not.toHaveProperty('tool_choice');
+    expect(fake.requests[1]).not.toHaveProperty('reasoning_effort');
   });
 });

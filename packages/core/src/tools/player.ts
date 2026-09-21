@@ -1,8 +1,7 @@
 import { describeSlots, slotsRemaining } from '@cartyx-sim/rules';
 import { z } from 'zod';
-import { Emotion } from '../events';
 import { countWords } from '../text';
-import { defineTool, getCombatant, SpokenText, ToolError } from './types';
+import { coercedEmotion, defineTool, getCombatant, SpokenText, ToolError } from './types';
 
 export const INTERJECTION_MAX_WORDS = 12;
 
@@ -11,7 +10,7 @@ export const speak = defineTool({
   description: 'Say something out loud, in character, as your own character.',
   parameters: z.object({
     text: SpokenText,
-    emotion: Emotion.default('neutral'),
+    emotion: coercedEmotion('neutral'),
   }),
   narrativeText: (args) => args.text,
   run(args, { recorder, actorId }) {
@@ -32,7 +31,13 @@ export const act = defineTool({
     'Declare what your character attempts. Describe the attempt only; the DM decides what happens.',
   parameters: z.object({
     intent: z.string().trim().min(1).max(2000),
-    targetId: z.string().min(1).max(200).optional(),
+    // Models send targetId: "" when they mean no target (sessions 012 and 013 each did once);
+    // an empty string is read as no target rather than a malformed call.
+    targetId: z
+      .string()
+      .max(200)
+      .nullish()
+      .transform((value) => value?.trim() || undefined),
   }),
   narrativeText: (args) => args.intent,
   run(args, { recorder, actorId }) {
@@ -46,7 +51,7 @@ export const interject = defineTool({
   description: `A short reaction (at most ${INTERJECTION_MAX_WORDS} words) that overlaps the most recent line, like "Wait—!" or a laugh. Does not use up your turn.`,
   parameters: z.object({
     text: SpokenText,
-    emotion: Emotion.default('surprised'),
+    emotion: coercedEmotion('surprised'),
   }),
   narrativeText: (args) => args.text,
   run(args, { recorder, history, actorId }) {

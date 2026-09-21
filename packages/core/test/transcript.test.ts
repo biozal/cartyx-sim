@@ -2,8 +2,8 @@ import { makeCombatant } from '@cartyx-sim/rules/testing';
 import { describe, expect, it } from 'vitest';
 import { SimEvent } from '../src/events';
 import { TurnRecorder } from '../src/recorder';
-import { describeEvent, renderTranscript } from '../src/transcript';
-import { now, startedState } from './helpers';
+import { describeEvent, hpTrend, renderTranscript } from '../src/transcript';
+import { kira, now, startedState, tomas } from './helpers';
 
 function sampleSession() {
   const { state, history } = startedState();
@@ -103,6 +103,80 @@ describe('describeEvent', () => {
       actor: 'constructor',
     });
     expect(describeEvent(event, state, 'dm')).toBe('constructor holds back.');
+  });
+
+  it('shows a death save tally and stabilization to the DM and the players', () => {
+    const { state, history } = startedState([{ ...kira, hp: 0 }, tomas]);
+    const recorder = new TurnRecorder(state, 'turn', now);
+    recorder.emit({
+      type: 'roll',
+      actor: 'kira',
+      kind: 'save',
+      label: 'Kira Vale death saving throw',
+      expr: '1d20',
+      rolls: [12],
+      modifier: 0,
+      total: 12,
+      target: 10,
+      outcome: 'success',
+      mode: 'normal',
+    });
+    recorder.emit({
+      type: 'state_change',
+      entity: 'kira',
+      field: 'deathSaves',
+      before: { successes: 1, failures: 1 },
+      after: { successes: 2, failures: 1 },
+      cause: 'death_save',
+    });
+    recorder.emit({
+      type: 'state_change',
+      entity: 'kira',
+      field: 'stable',
+      before: false,
+      after: true,
+      cause: 'death_save',
+    });
+    const events = [...history, ...recorder.events];
+    for (const audience of ['dm', 'player'] as const) {
+      expect(renderTranscript(events, recorder.state, audience, 3)).toBe(
+        [
+          '[roll] Kira Vale death saving throw: 12 vs 10 — success',
+          '[state] Kira Vale death saves: 2 successes, 1 failure',
+          '[state] Kira Vale is stable',
+        ].join('\n')
+      );
+    }
+  });
+
+  it('counts a single death save success or failure in the singular', () => {
+    const { state } = startedState([{ ...kira, hp: 0 }, tomas]);
+    const recorder = new TurnRecorder(state, 'turn', now);
+    const event = recorder.emit({
+      type: 'state_change',
+      entity: 'kira',
+      field: 'deathSaves',
+      before: { successes: 0, failures: 0 },
+      after: { successes: 1, failures: 0 },
+      cause: 'death_save',
+    });
+    expect(describeEvent(event, recorder.state, 'dm')).toBe(
+      '[state] Kira Vale death saves: 1 success, 0 failures'
+    );
+  });
+
+  it('says nothing when a struck PC stops being stable', () => {
+    const { state } = startedState([{ ...kira, hp: 0, stable: true }, tomas]);
+    const recorder = new TurnRecorder(state, 'turn', now);
+    const event = recorder.emit({
+      type: 'state_change',
+      entity: 'kira',
+      field: 'stable',
+      before: true,
+      after: false,
+      cause: 'attack:goblin-1',
+    });
+    expect(describeEvent(event, recorder.state, 'dm')).toBeNull();
   });
 
   it('defaults to the DM audience when none is given', () => {
@@ -235,5 +309,47 @@ describe('G3.2: monster AC and HP are redacted for players', () => {
   it('still shows PC HP numbers to players', () => {
     const { events, state } = sampleSession();
     expect(renderTranscript(events, state, 'player', 50)).toContain('[state] Tomas Reed HP 12 → 6');
+  });
+
+  it('renders an unchanged monster HP as unchanged for players', () => {
+    const { state, history } = startedState();
+    const goblin = makeCombatant({
+      id: 'goblin-1',
+      name: 'Goblin',
+      kind: 'monster',
+      hp: 4,
+      maxHp: 7,
+    });
+    const recorder = new TurnRecorder(
+      { ...state, combatants: { ...state.combatants, [goblin.id]: goblin } },
+      'turn',
+      now
+    );
+    recorder.emit({
+      type: 'state_change',
+      entity: 'goblin-1',
+      field: 'hp',
+      before: 4,
+      after: 4,
+      cause: 'test',
+    });
+    const events = [...history, ...recorder.events];
+    expect(renderTranscript(events, recorder.state, 'player', 50)).toContain(
+      '[state] Goblin is unchanged'
+    );
+  });
+});
+
+describe('hpTrend', () => {
+  it('classifies before/after HP pairs', () => {
+    expect(hpTrend(5, 5)).toBe('unchanged');
+    expect(hpTrend(3, -2)).toBe('down');
+    expect(hpTrend('x', 3)).toBe('unknown');
+  });
+
+  it('accepts a numeric string but rejects other values Number() would coerce', () => {
+    expect(hpTrend('7', '3')).toBe('wounded');
+    expect(hpTrend(5, null)).toBe('unknown');
+    expect(hpTrend(true, 1)).toBe('unknown');
   });
 });

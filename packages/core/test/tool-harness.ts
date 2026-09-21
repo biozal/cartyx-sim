@@ -1,4 +1,5 @@
 import { scriptedRng, type Rng } from '@cartyx-sim/rules';
+import type { ClockPhase } from '../src/clock';
 import type { SimEvent } from '../src/events';
 import type { LoreHit, LoreIndex } from '../src/model';
 import { TurnRecorder } from '../src/recorder';
@@ -39,6 +40,7 @@ export function toolHarness(
     lore?: LoreIndex;
     actorId?: string;
     seat?: string;
+    clockPhase?: ClockPhase;
   } = {}
 ): ToolHarness {
   const started = options.state
@@ -54,6 +56,7 @@ export function toolHarness(
     loreThreshold: 0.35,
     actorId,
     seat: options.seat ?? actorId,
+    clockPhase: () => options.clockPhase ?? 'running',
   };
   return {
     recorder,

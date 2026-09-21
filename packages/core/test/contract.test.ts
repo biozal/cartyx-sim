@@ -54,6 +54,20 @@ describe('event log contract', () => {
     });
     expect(event).toMatchObject({ resolution: 're_prompted' });
   });
+
+  it('accepts trimmed as a validator_flag resolution', () => {
+    const { state } = startedState();
+    const recorder = new TurnRecorder(state, 'turn', now);
+    const event = recorder.emit({
+      type: 'validator_flag',
+      visibility: 'dm',
+      seat: 'dm',
+      rule: 'dm_controls_pc',
+      retries: 0,
+      resolution: 'trimmed',
+    });
+    expect(event).toMatchObject({ resolution: 'trimmed' });
+  });
 });
 
 describe('model requests', () => {

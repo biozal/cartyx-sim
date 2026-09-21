@@ -1,0 +1,390 @@
+import { makeCombatant } from '@cartyx-sim/rules/testing';
+import { describe, expect, it } from 'vitest';
+import {
+  cutSentences,
+  declarationsSinceDm,
+  describeFindings,
+  parseCheckerReply,
+  partyFindings,
+  verifyFindings,
+  type PcControlFinding,
+} from '../src/pc-control';
+import { TurnRecorder } from '../src/recorder';
+import { kira, now, startedState, tomas } from './helpers';
+
+function historyWith(emit: (recorder: TurnRecorder) => void) {
+  const started = startedState([kira, tomas]);
+  const recorder = new TurnRecorder(started.state, 'turn-2', now);
+  emit(recorder);
+  return { history: [...started.history, ...recorder.events], state: recorder.state };
+}
+
+function finding(sentence: string, pc = 'Kira Vale'): PcControlFinding {
+  return { pc, sentence, why: 'dialogue the player never said' };
+}
+
+describe('declarationsSinceDm', () => {
+  it("lists what players said, declared, or passed on since the DM's last turn ended", () => {
+    const { history, state } = historyWith((recorder) => {
+      recorder.emit({
+        type: 'dialogue',
+        speaker: 'kira',
+        speakerKind: 'pc',
+        text: 'Before the DM spoke.',
+        emotion: 'neutral',
+      });
+      recorder.emit({
+        type: 'narration',
+        speaker: 'dm',
+        text: 'The door opens.',
+        emotion: 'neutral',
+      });
+      recorder.emit({ type: 'turn_end', actor: 'dm' });
+      recorder.emit({
+        type: 'dialogue',
+        speaker: 'kira',
+        speakerKind: 'pc',
+        text: 'Who is there?',
+        emotion: 'afraid',
+      });
+      recorder.emit({ type: 'action', actor: 'kira', intent: 'raise my hammer' });
+      recorder.emit({ type: 'pass', actor: 'tomas' });
+      recorder.emit({
+        type: 'dialogue',
+        speaker: 'npc-guard',
+        speakerKind: 'npc',
+        text: 'Halt!',
+        emotion: 'angry',
+      });
+    });
+
+    expect(declarationsSinceDm(history, state)).toEqual([
+      'Kira Vale says: "Who is there?"',
+      'Kira Vale attempts: raise my hammer',
+      'Tomas Reed holds back.',
+    ]);
+  });
+
+  it('lists everything since the session started when the DM has not had a turn yet', () => {
+    const { history, state } = historyWith((recorder) => {
+      recorder.emit({ type: 'action', actor: 'kira', intent: 'study the runes' });
+    });
+    expect(declarationsSinceDm(history, state)).toEqual(['Kira Vale attempts: study the runes']);
+  });
+
+  it('includes the combat declaration the DM is resolving', () => {
+    const goblin = makeCombatant({ id: 'goblin-1', name: 'Goblin', kind: 'monster' });
+    const { history, state } = historyWith((recorder) => {
+      recorder.emit({ type: 'combatant_added', combatant: goblin });
+      recorder.emit({
+        type: 'combat_start',
+        order: [
+          { combatantId: 'goblin-1', roll: 20, dexMod: 0, total: 20 },
+          { combatantId: 'kira', roll: 10, dexMod: 2, total: 12 },
+          { combatantId: 'tomas', roll: 5, dexMod: 1, total: 6 },
+        ],
+      });
+      recorder.emit({
+        type: 'narration',
+        speaker: 'dm',
+        text: 'The goblin lunges.',
+        emotion: 'neutral',
+      });
+      recorder.emit({ type: 'turn_end', actor: 'dm' });
+      recorder.emit({ type: 'combat_turn', round: 1, turnIndex: 1, combatantId: 'kira' });
+      recorder.emit({ type: 'action', actor: 'kira', intent: 'swing my hammer at the goblin' });
+      recorder.emit({ type: 'turn_end', actor: 'kira' });
+    });
+
+    expect(state.combat).not.toBeNull();
+    expect(declarationsSinceDm(history, state)).toEqual([
+      'Kira Vale attempts: swing my hammer at the goblin',
+    ]);
+  });
+});
+
+describe('parseCheckerReply', () => {
+  const reply =
+    '{"violations": [{"pc": "Kira Vale", "sentence": "Kira nods.", "why": "undeclared"}]}';
+
+  it('reads plain JSON', () => {
+    expect(parseCheckerReply(reply)).toEqual([
+      { pc: 'Kira Vale', sentence: 'Kira nods.', why: 'undeclared' },
+    ]);
+  });
+
+  it('reads JSON inside a code fence or surrounded by text', () => {
+    expect(parseCheckerReply('```json\n' + reply + '\n```')).toHaveLength(1);
+    expect(parseCheckerReply(`Here is my answer: ${reply} Done.`)).toHaveLength(1);
+  });
+
+  it('reads an empty violations list and defaults a missing reason', () => {
+    expect(parseCheckerReply('{"violations": []}')).toEqual([]);
+    expect(
+      parseCheckerReply('{"violations": [{"pc": "Kira Vale", "sentence": "Kira nods."}]}')
+    ).toEqual([{ pc: 'Kira Vale', sentence: 'Kira nods.', why: '' }]);
+  });
+
+  it('reads a reply after a leaked thinking block that holds braces', () => {
+    expect(
+      parseCheckerReply(
+        '<THINK>\nThe format is {"violations": [...]}, so {maybe}.\n</think>\n{"violations": []}'
+      )
+    ).toEqual([]);
+  });
+
+  it('reads a reply followed by text with a brace in it', () => {
+    expect(parseCheckerReply(`${reply}\nI followed the format, which was {violations}.`)).toEqual([
+      { pc: 'Kira Vale', sentence: 'Kira nods.', why: 'undeclared' },
+    ]);
+  });
+
+  it('reads the first valid object when the reply holds two', () => {
+    expect(parseCheckerReply(`{"note": "checking"}\n${reply}\n{"violations": []}`)).toEqual([
+      { pc: 'Kira Vale', sentence: 'Kira nods.', why: 'undeclared' },
+    ]);
+  });
+
+  it('returns null for the wrong shape, cut-off JSON, or no JSON', () => {
+    expect(parseCheckerReply('{"violations": "none"}')).toBeNull();
+    expect(parseCheckerReply('{"violations": [{"pc": "Kira Vale", "sentence": "Kira')).toBeNull();
+    expect(parseCheckerReply('No violations found.')).toBeNull();
+  });
+
+  it('returns null in well under a second for degenerate brace-heavy replies', () => {
+    const degenerate = [
+      '{}'.repeat(3000),
+      '{"a":'.repeat(600) + '}'.repeat(3000),
+      // A start that cannot possibly open JSON (the character after "{" is neither `"` nor `}`)
+      // must be skipped without trying any "}" against it at all.
+      '{'.repeat(10000) + '}'.repeat(10000),
+      '{ x'.repeat(2000) + '}'.repeat(2000),
+    ];
+    for (const reply of degenerate) {
+      const start = performance.now();
+      const result = parseCheckerReply(reply);
+      const elapsed = performance.now() - start;
+      expect(result).toBeNull();
+      expect(elapsed).toBeLessThan(1000);
+    }
+  });
+
+  it('prefers the first (leftmost) valid object over a later one, even one that looks like the key', () => {
+    // The finding's own outer "{" is tried before the later "Example format" one, so the object
+    // that actually holds the finding wins.
+    const withExample =
+      '{"summary": "one", "violations": [{"pc": "Kira Vale", "sentence": "Kira nods.", "why": "x"}]}\n' +
+      'Example format: {"violations": []}';
+    expect(parseCheckerReply(withExample)).toEqual([
+      { pc: 'Kira Vale', sentence: 'Kira nods.', why: 'x' },
+    ]);
+  });
+
+  it('reads a real reply behind format-example junk lines that also mention "violations"', () => {
+    const junkLine = 'Format: {"violations": [...]}\n';
+    const findings = Array.from({ length: 30 }, (_, i) => ({
+      pc: 'Kira Vale',
+      sentence: `Kira does thing ${i}.`,
+      why: 'x',
+    }));
+    const reply = junkLine.repeat(20) + JSON.stringify({ violations: findings });
+    expect(parseCheckerReply(reply)).toEqual(findings);
+  });
+
+  it('returns null when the only valid object is reachable only after more than 2,000 failed parses', () => {
+    // A single "{" that can open JSON (its next character is a quote) followed by a complete,
+    // schema-valid object and then 2,001 stray "}" characters: since the search tries every later
+    // "}" from last to first, this one start alone needs 2,001 failed attempts (each one spanning
+    // into the trailing junk, so parsing the leading valid object but then finding trailing
+    // content) before its 2,002nd attempt — the object's own true closing "}" — would succeed.
+    // With MAX_PARSE_ATTEMPTS at 2,000, the budget runs out two attempts short of ever trying it.
+    const valid = '{"violations": [{"pc": "Kira Vale", "sentence": "Kira nods.", "why": "x"}]}';
+    const reply = valid + '}'.repeat(2001);
+    expect(parseCheckerReply(reply)).toBeNull();
+  });
+
+  it('returns null in well under a second for a huge valid-prefix array followed by many stray braces', () => {
+    // A single "{" that can open JSON (next character is `"`), a several-hundred-thousand-character
+    // valid JSON-array prefix (never closed, so no attempt against it ever succeeds), then 3,000
+    // stray "}" characters. MAX_PARSE_ATTEMPTS alone still allows up to 2,000 attempts here, each
+    // one slicing and parsing a candidate as long as the whole reply, so bounding by attempt count
+    // alone leaves this ~2,000 x reply-length worth of work; MAX_PARSE_CHARS must cut it off well
+    // before that.
+    const reply = '{"violations": [' + '"x",'.repeat(150000) + '"x"' + '}'.repeat(3000);
+    const start = performance.now();
+    const result = parseCheckerReply(reply);
+    const elapsed = performance.now() - start;
+    expect(result).toBeNull();
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  it('still fully parses a realistic ~10,000-character reply of many findings', () => {
+    const findings = Array.from({ length: 90 }, (_, i) => ({
+      pc: 'Kira Vale',
+      sentence: `Kira does thing number ${i} in the story right now.`,
+      why: 'undeclared dialogue',
+    }));
+    const reply = JSON.stringify({ violations: findings });
+    expect(reply.length).toBeGreaterThan(9000);
+    expect(parseCheckerReply(reply)).toEqual(findings);
+  });
+});
+
+describe('verifyFindings', () => {
+  const narration = 'Kira turns to the others.  "I can’t quite grasp it," she admits.';
+
+  it('keeps findings that appear in the narration despite spacing and quote style', () => {
+    const kept = verifyFindings(narration, [
+      finding('Kira turns to the others.'),
+      finding('"I can\'t quite grasp it," she admits.'),
+    ]);
+    expect(kept).toHaveLength(2);
+  });
+
+  it('drops findings that are not in the narration', () => {
+    expect(verifyFindings(narration, [finding('I grip the stone a little harder.')])).toEqual([]);
+  });
+
+  it('matches across ellipsis and dash styles', () => {
+    const styled = 'Kira hesitates\u2026 then speaks \u2014 softly \u2013 to the others.';
+    expect(
+      verifyFindings(styled, [finding('Kira hesitates... then speaks - softly - to the others.')])
+    ).toHaveLength(1);
+    expect(
+      verifyFindings('Kira hesitates... then speaks - softly.', [
+        finding('Kira hesitates\u2026 then speaks \u2014 softly.'),
+      ])
+    ).toHaveLength(1);
+  });
+
+  it('keeps a short finding that is a whole sentence', () => {
+    expect(verifyFindings('The door opens. Kira nods.', [finding('Kira nods.')])).toHaveLength(1);
+  });
+
+  it('drops a name or short fragment that is not a whole sentence', () => {
+    const runes =
+      "Kira presses her palm to the stone. The runes flare under Kira's hand. The hall is silent.";
+    expect(verifyFindings(runes, [finding('Kira')])).toEqual([]);
+    const elder = 'The elder speaks. She nods slowly toward the door. The fire crackles.';
+    expect(verifyFindings(elder, [finding('she nods')])).toEqual([]);
+  });
+
+  it('does not match inside a longer word', () => {
+    expect(verifyFindings('The door opens. Kira nods.', [finding('nod')])).toEqual([]);
+  });
+});
+
+describe('cutSentences', () => {
+  it('removes every sentence of a flagged multi-sentence quote and keeps the rest', () => {
+    const narration =
+      'The runes pulse. Kira turns to the others. "These runes are old. They seem to be a ward."';
+    const cut = cutSentences(narration, [
+      finding('"These runes are old. They seem to be a ward."'),
+    ]);
+    expect(cut).toBe('The runes pulse. Kira turns to the others.');
+  });
+
+  it('removes the whole sentence around a flagged clause and keeps paragraph breaks', () => {
+    const narration =
+      'The fog lifts.\n\nTomas leans against a tree, watching the road. The wind rises.';
+    const cut = cutSentences(narration, [finding('Tomas leans against a tree', 'Tomas Reed')]);
+    expect(cut).toBe('The fog lifts.\n\nThe wind rises.');
+  });
+
+  it('returns an empty string when every sentence is cut', () => {
+    expect(cutSentences('Kira nods.', [finding('Kira nods.')])).toBe('');
+  });
+
+  it('handles curly-quoted multi-sentence dialogue', () => {
+    const narration =
+      'The runes pulse. Kira turns to the others. “These runes are old. They seem to be a ward.” Tomas nods.';
+    const cut = cutSentences(narration, [
+      finding('“These runes are old. They seem to be a ward.”'),
+    ]);
+    expect(cut).toBe('The runes pulse. Kira turns to the others. Tomas nods.');
+  });
+
+  it('cuts nothing for a name or short fragment', () => {
+    const runes =
+      "Kira presses her palm to the stone. The runes flare under Kira's hand. The hall is silent.";
+    expect(cutSentences(runes, [finding('Kira')])).toBe(runes);
+    const elder = 'The elder speaks. She nods slowly toward the door. The fire crackles.';
+    expect(cutSentences(elder, [finding('she nods')])).toBe(elder);
+    expect(cutSentences('The door opens. Kira nods.', [finding('nod')])).toBe(
+      'The door opens. Kira nods.'
+    );
+  });
+
+  it('keeps the line break between two kept lines when the line between them is cut', () => {
+    const narration = 'Line one.\nLine two.\nLine three.';
+    expect(cutSentences(narration, [finding('Line two.')])).toBe('Line one.\nLine three.');
+  });
+
+  it('keeps line breaks and no leading whitespace when the first line is cut', () => {
+    const narration = 'Line one.\nLine two.\nLine three.';
+    expect(cutSentences(narration, [finding('Line one.')])).toBe('Line two.\nLine three.');
+  });
+
+  it('preserves line breaks inside a paragraph and blank lines between paragraphs', () => {
+    const narration = 'Alpha one. Alpha two.\n\nBeta one.\nBeta two.\nBeta three.';
+    const cut = cutSentences(narration, [finding('Alpha one.'), finding('Beta two.')]);
+    expect(cut).toBe('Alpha two.\n\nBeta one.\nBeta three.');
+  });
+
+  it("cuts only the PC's line when an NPC says the same words", () => {
+    expect(
+      cutSentences('"Run!" the guard shouts. Kira says "Run!"', [finding('Kira says "Run!"')])
+    ).toBe('"Run!" the guard shouts.');
+  });
+
+  it('keeps an NPC quote that repeats inside a flagged sentence', () => {
+    expect(
+      cutSentences('The old man grins. "Yes." Kira smiles and says, "Yes."', [
+        finding('Kira smiles and says, "Yes."'),
+      ])
+    ).toBe('The old man grins. "Yes."');
+  });
+});
+
+describe('partyFindings', () => {
+  const party = [
+    { id: 'kira', name: 'Kira Vale' },
+    { id: 'tomas', name: 'Tomas Reed' },
+  ];
+  const finding = (pc: string) => ({ pc, sentence: 'She nods.', why: '' });
+
+  it('keeps a finding naming a party member however the checker writes it', () => {
+    const findings = [
+      'Kira Vale',
+      'kira',
+      'Vale',
+      'TOMAS',
+      ' Tomas Reed ',
+      "Kira Vale's",
+      'Kira Vale (rogue)',
+      'kira-vale',
+      'Kira and Borin',
+    ].map(finding);
+    expect(partyFindings(findings, party)).toEqual(findings);
+  });
+
+  it('drops a finding about anyone outside the party', () => {
+    expect(partyFindings(['Silas', 'Silas Vane', 'the innkeeper'].map(finding), party)).toEqual([]);
+  });
+
+  it("drops a finding naming an NPC who shares a party member's first name", () => {
+    expect(partyFindings([finding('Kira Stone')], party, ['Kira Stone', 'Borin'])).toEqual([]);
+    expect(partyFindings([finding('Kira')], party, ['Kira Stone'])).toEqual([finding('Kira')]);
+  });
+});
+
+describe('describeFindings', () => {
+  it('lists each sentence with its character and reason', () => {
+    expect(
+      describeFindings([
+        finding('Kira nods.'),
+        { pc: 'Tomas Reed', sentence: 'Tomas grins.', why: '' },
+      ])
+    ).toBe('"Kira nods." (Kira Vale: dialogue the player never said); "Tomas grins." (Tomas Reed)');
+  });
+});

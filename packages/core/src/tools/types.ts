@@ -1,7 +1,8 @@
 import { RulesError, type Combatant, type Rng } from '@cartyx-sim/rules';
 import { z } from 'zod';
+import type { ClockPhase } from '../clock';
 import { SessionPausedError } from '../errors';
-import type { SimEvent } from '../events';
+import { Emotion, EMOTIONS, type SimEvent } from '../events';
 import type { LoreIndex, ToolCall, ToolSchema } from '../model';
 import type { TurnRecorder } from '../recorder';
 import { ownEntry, type GameState } from '../state';
@@ -16,11 +17,32 @@ export const SpokenText = z
   .transform(unwrapQuotes)
   .pipe(z.string().min(1, 'Say something inside the quotes.'));
 
+/**
+ * An emotion argument that never fails a tool call: a value outside {@link EMOTIONS} (an emotion
+ * the model invented, or the wrong type) coerces to "neutral" instead of rejecting the call, and
+ * the engine records that coerced value, never the model's original string. A missing value is
+ * left alone so `defaultEmotion` applies exactly as `Emotion.default(defaultEmotion)` would.
+ */
+export function coercedEmotion(defaultEmotion: Emotion) {
+  return z.preprocess((value) => {
+    if (value === undefined) return value;
+    return (EMOTIONS as readonly unknown[]).includes(value) ? value : 'neutral';
+  }, Emotion.default(defaultEmotion));
+}
+
 /** A tool misuse the model can correct, e.g. an unknown id. Returned to the model as an error result. */
 export class ToolError extends Error {
-  constructor(message: string) {
+  /**
+   * True when the rest of the DM's response should still run. A refusal the DM can simply take
+   * ("no second fight") leaves its narration and hand_off intact; a malformed or dangerous call
+   * still stops the response, since the calls after it were written expecting it to have worked.
+   */
+  readonly recoverable: boolean;
+
+  constructor(message: string, options: { recoverable?: boolean } = {}) {
     super(message);
     this.name = 'ToolError';
+    this.recoverable = options.recoverable ?? false;
   }
 }
 
@@ -31,6 +53,12 @@ export interface ToolContext {
   rng: Rng;
   lore: LoreIndex;
   loreThreshold: number;
+  /**
+   * The session clock's current phase, e.g. so a tool can refuse to start something new past its
+   * hard stop. Read live rather than passed as a value: earlier calls in the same beat can push
+   * the clock past a threshold, and a snapshot taken before the beat would never show it.
+   */
+  clockPhase: () => ClockPhase;
   /** "dm" or the acting PC's id. */
   actorId: string;
   /** The configured model seat for the acting DM or PC (e.g. "player-kira"), distinct from actorId. */
@@ -98,14 +126,17 @@ export async function runPreparedCall(
   def: AnyToolDef,
   args: unknown,
   context: ToolContext
-): Promise<{ ok: true; outcome: ToolOutcome } | { ok: false; error: string }> {
+): Promise<{ ok: true; outcome: ToolOutcome } | { ok: false; error: string; recoverable?: true }> {
   const checkpoint = context.recorder.checkpoint();
   try {
     return { ok: true, outcome: await def.run(args, context) };
   } catch (error) {
     if (error instanceof ToolError || error instanceof RulesError) {
       context.recorder.rollback(checkpoint);
-      return { ok: false, error: error.message };
+      // Only set when true, so an ordinary failure still reads as { ok: false, error }.
+      return error instanceof ToolError && error.recoverable
+        ? { ok: false, error: error.message, recoverable: true }
+        : { ok: false, error: error.message };
     }
     if (error instanceof z.ZodError) {
       context.recorder.rollback(checkpoint);
@@ -120,10 +151,91 @@ export async function runPreparedCall(
   }
 }
 
+/**
+ * When `id` is not a combatant but looks like an NPC id (`npc-` followed by the combatant's own
+ * id, or a prefix of it), and exactly one non-PC combatant's id equals that suffix or starts with
+ * `<suffix>-`, resolves to it (e.g. `npc-silas-vane` → `silas-vane-1`). An empty suffix (`npc-`)
+ * never matches, and a player character is never resolved this way. Two or more matches are left
+ * ambiguous.
+ */
+function resolveNpcId(state: GameState, id: string): Combatant | undefined {
+  const prefix = 'npc-';
+  if (!id.startsWith(prefix)) return undefined;
+  const suffix = id.slice(prefix.length);
+  if (suffix === '') return undefined;
+  const matches = Object.keys(state.combatants).filter((key) => {
+    if (key !== suffix && !key.startsWith(`${suffix}-`)) return false;
+    return ownEntry(state.combatants, key)?.kind !== 'pc';
+  });
+  return matches.length === 1 ? ownEntry(state.combatants, matches[0]!) : undefined;
+}
+
+/** Whether `actor` has already attacked or cast since the combat turn now running began. */
+function actedThisTurn(
+  actorId: string,
+  history: readonly SimEvent[],
+  recorder: TurnRecorder
+): boolean {
+  const events = [...history, ...recorder.events];
+  // The turn began at the last combat_turn, or at combat_start for the first turn of a fight.
+  let start = 0;
+  events.forEach((event, index) => {
+    if (event.type === 'combat_turn' || event.type === 'combat_start') start = index + 1;
+  });
+  return events
+    .slice(start)
+    .some(
+      (event) =>
+        event.type === 'roll' &&
+        event.actor === actorId &&
+        (event.kind === 'attack' || event.kind === 'damage' || event.kind === 'healing')
+    );
+}
+
+/**
+ * Refuses an attack or spell out of turn, or a second one on the same turn, while combat runs:
+ * in session 011 one giant rat bit Kira four times across a single round, taking her from 24 HP
+ * to 6, because nothing tied an action to the initiative order or counted it. A turn is one
+ * action, since the engine models no multiattack. Outside combat there are no turns, so nothing
+ * is refused.
+ */
+export function requireCombatTurn(
+  state: GameState,
+  actor: Combatant,
+  what: string,
+  history: readonly SimEvent[],
+  recorder: TurnRecorder
+): void {
+  const { combat } = state;
+  if (!combat) return;
+  const currentId = combat.order[combat.turnIndex]?.combatantId;
+  if (!currentId) return;
+  // Someone outside the initiative order is not taking turns at all — a trap, a glyph, or an NPC
+  // watching the fight — so nothing stops them.
+  if (!combat.order.some((entry) => entry.combatantId === actor.id)) return;
+  if (currentId !== actor.id) {
+    const current = ownEntry(state.combatants, currentId);
+    throw new ToolError(
+      `The spotlight is on ${current?.name ?? currentId}, whose id is ${currentId}, so ${actor.name} cannot ${what} now — and apply_damage is not a way round the initiative order. Resolve what is happening, then end your turn with hand_off: initiative brings ${actor.name} round again.`
+    );
+  }
+  if (actedThisTurn(actor.id, history, recorder)) {
+    throw new ToolError(
+      `${actor.name} has already acted this turn and cannot ${what} again. Narrate what happens, then end your turn with hand_off: initiative brings ${actor.name} round again next round.`
+    );
+  }
+}
+
 export function getCombatant(state: GameState, id: string): Combatant {
-  const combatant = ownEntry(state.combatants, id);
+  const combatant = ownEntry(state.combatants, id) ?? resolveNpcId(state, id);
   if (!combatant) {
     const known = Object.keys(state.combatants).join(', ') || 'none';
+    const npc = ownEntry(state.npcs, id);
+    if (npc) {
+      throw new ToolError(
+        `"${id}" is ${npc.name}, an NPC who is not a combatant, so the engine holds no stats for them. Decide what happens to them in narration, or add them with start_combat if they fight. Known combatant ids: ${known}`
+      );
+    }
     throw new ToolError(`Unknown combatant id "${id}". Known ids: ${known}`);
   }
   return combatant;

@@ -1,6 +1,6 @@
 # Example campaign
 
-A starting point for `npm run sim -- bench --campaign <id>` and `npm run sim -- run --campaign <id>`.
+A starting point for `npm run sim -- bench --campaign <id>`, `npm run sim -- run --campaign <id>`, and `npm run sim -- script --campaign <id>`.
 
 Copy this folder into your campaigns directory (default `./campaigns`), then point `campaign.json` at your model servers:
 

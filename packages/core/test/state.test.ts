@@ -1,3 +1,4 @@
+import type { Combatant } from '@cartyx-sim/rules';
 import { makeCombatant } from '@cartyx-sim/rules/testing';
 import { describe, expect, it } from 'vitest';
 import { SimEvent } from '../src/events';
@@ -7,6 +8,7 @@ import {
   applyEvent,
   foldEvents,
   initialState,
+  isDying,
   nextActor,
   selectResponders,
 } from '../src/state';
@@ -39,6 +41,22 @@ describe('applyEvent', () => {
     expect(state.partyIds).toEqual(['kira', 'tomas']);
     expect(state.combatants.kira).toEqual(kira);
     expect(nextActor(state)).toEqual({ kind: 'dm', reason: 'beat' });
+  });
+
+  it('keeps the description from npc_introduced on the NPC record', () => {
+    const recorder = recorderAfterStart();
+    recorder.emit({
+      type: 'npc_introduced',
+      npcId: 'sella',
+      name: 'Sella Vaunt',
+      description: 'Crystal engine professor',
+      invented: false,
+    });
+    expect(recorder.state.npcs.sella).toMatchObject({
+      npcId: 'sella',
+      name: 'Sella Vaunt',
+      description: 'Crystal engine professor',
+    });
   });
 
   it('counts spoken words per speaker and tracks silent turns', () => {
@@ -171,6 +189,19 @@ describe('applyEvent', () => {
     expect(nextActor(recorder.state)).toEqual({ kind: 'dm', reason: 'beat' });
   });
 
+  it("makes a dying player character's combat turn a death saving throw", () => {
+    const { state } = startedState([{ ...kira, hp: 0 }, tomas]);
+    const recorder = new TurnRecorder(state, 'turn', now);
+    recorder.emit({
+      type: 'combat_start',
+      order: [
+        { combatantId: 'kira', roll: 10, dexMod: 2, total: 12 },
+        { combatantId: 'tomas', roll: 5, dexMod: 1, total: 6 },
+      ],
+    });
+    expect(nextActor(recorder.state)).toEqual({ kind: 'death_save', combatantId: 'kira' });
+  });
+
   it('reports the end of the session', () => {
     const recorder = recorderAfterStart();
     recorder.emit({ type: 'session_end', reason: 'manual' });
@@ -190,10 +221,15 @@ describe('foldEvents', () => {
 });
 
 describe('advanceCombat', () => {
-  function combatState(hp: { kira: number; tomas: number; sentry: number }, turnIndex: number) {
+  /** Combat with the sentry, Kira, and Tomas in that order; `down` marks a PC stable or dead. */
+  function combatState(
+    hp: { kira: number; tomas: number; sentry: number },
+    turnIndex: number,
+    down: Partial<Record<'kira' | 'tomas', Partial<Combatant>>> = {}
+  ) {
     const { state } = startedState([
-      { ...kira, hp: hp.kira },
-      { ...tomas, hp: hp.tomas },
+      { ...kira, hp: hp.kira, ...down.kira },
+      { ...tomas, hp: hp.tomas, ...down.tomas },
     ]);
     return {
       ...state,
@@ -212,7 +248,8 @@ describe('advanceCombat', () => {
   }
 
   it('moves to the next combatant who can act', () => {
-    expect(advanceCombat(combatState({ kira: 0, tomas: 12, sentry: 5 }, 0))).toEqual({
+    const stable = { kira: { stable: true } };
+    expect(advanceCombat(combatState({ kira: 0, tomas: 12, sentry: 5 }, 0, stable))).toEqual({
       round: 1,
       turnIndex: 2,
       combatantId: 'tomas',
@@ -227,8 +264,26 @@ describe('advanceCombat', () => {
     });
   });
 
+  it('gives a dying player character their turn, for a death saving throw', () => {
+    expect(advanceCombat(combatState({ kira: 0, tomas: 12, sentry: 5 }, 0))).toEqual({
+      round: 1,
+      turnIndex: 1,
+      combatantId: 'kira',
+    });
+  });
+
+  it('skips a stable or dead player character', () => {
+    const down = { kira: { stable: true }, tomas: { dead: true } };
+    expect(advanceCombat(combatState({ kira: 0, tomas: 0, sentry: 5 }, 1, down))).toEqual({
+      round: 2,
+      turnIndex: 0,
+      combatantId: 'sentry-1',
+    });
+  });
+
   it('returns null when nobody can act', () => {
-    expect(advanceCombat(combatState({ kira: 0, tomas: 0, sentry: 0 }, 0))).toBeNull();
+    const down = { kira: { stable: true }, tomas: { dead: true } };
+    expect(advanceCombat(combatState({ kira: 0, tomas: 0, sentry: 0 }, 0, down))).toBeNull();
   });
 
   it('with inclusive, returns the current combatant when they can still act', () => {
@@ -238,21 +293,36 @@ describe('advanceCombat', () => {
   });
 
   it('with inclusive, searches forward from the current index when they cannot', () => {
+    const stable = { kira: { stable: true } };
     expect(
-      advanceCombat(combatState({ kira: 0, tomas: 12, sentry: 5 }, 1), { inclusive: true })
+      advanceCombat(combatState({ kira: 0, tomas: 12, sentry: 5 }, 1, stable), { inclusive: true })
     ).toEqual({ round: 1, turnIndex: 2, combatantId: 'tomas' });
   });
 
   it('with inclusive, wraps into the next round when nobody from the current index onward can act', () => {
+    const stable = { tomas: { stable: true } };
     expect(
-      advanceCombat(combatState({ kira: 10, tomas: 0, sentry: 0 }, 2), { inclusive: true })
+      advanceCombat(combatState({ kira: 10, tomas: 0, sentry: 0 }, 2, stable), { inclusive: true })
     ).toEqual({ round: 2, turnIndex: 1, combatantId: 'kira' });
   });
 
   it('with inclusive, returns null when nobody can act', () => {
+    const down = { kira: { stable: true }, tomas: { dead: true } };
     expect(
-      advanceCombat(combatState({ kira: 0, tomas: 0, sentry: 0 }, 0), { inclusive: true })
+      advanceCombat(combatState({ kira: 0, tomas: 0, sentry: 0 }, 0, down), { inclusive: true })
     ).toBeNull();
+  });
+});
+
+describe('isDying', () => {
+  it('is true only for a player character at 0 HP who is neither dead nor stable', () => {
+    const down = { ...kira, hp: 0 };
+    expect(isDying(down)).toBe(true);
+    expect(isDying(kira)).toBe(false);
+    expect(isDying({ ...down, stable: true })).toBe(false);
+    expect(isDying({ ...down, dead: true })).toBe(false);
+    expect(isDying({ ...sentry, hp: 0 })).toBe(false);
+    expect(isDying(undefined)).toBe(false);
   });
 });
 
@@ -267,6 +337,11 @@ describe('selectResponders', () => {
 
   it('orders the whole party quietest first', () => {
     expect(selectResponders({ kind: 'party' }, chatty)).toEqual(['tomas', 'kira']);
+  });
+
+  it('leaves out a dying player character', () => {
+    const dying = { ...chatty, combatants: { ...chatty.combatants, tomas: { ...tomas, hp: 0 } } };
+    expect(selectResponders({ kind: 'party' }, dying)).toEqual(['kira']);
   });
 
   it('gives the open floor to the two quietest players', () => {

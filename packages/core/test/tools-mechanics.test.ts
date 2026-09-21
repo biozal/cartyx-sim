@@ -35,6 +35,25 @@ function withGoblin(rolls: number[]) {
   });
 }
 
+const miner = makeCombatant({
+  id: 'miner-1',
+  name: 'Enslaved Miner',
+  kind: 'monster',
+  ac: 11,
+  hp: 9,
+  maxHp: 9,
+  attacks: [{ name: 'Rusty Pickaxe', bonus: 3, damage: '1d6+1', damageType: 'bludgeoning' }],
+});
+
+function withMiner(rolls: number[]) {
+  const { state, history } = startedState([kira, tomas]);
+  return toolHarness({
+    state: { ...state, combatants: { ...state.combatants, [miner.id]: miner } },
+    history,
+    rng: scriptedRng(rolls),
+  });
+}
+
 const POISON_IDS = ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf'];
 
 describe('id lookups reject built-in property names', () => {
@@ -126,6 +145,135 @@ describe('id lookups reject built-in property names', () => {
   });
 });
 
+const silasVane = makeCombatant({
+  id: 'silas-vane-1',
+  name: 'Silas Vane',
+  kind: 'npc',
+  ac: 11,
+  hp: 8,
+  maxHp: 8,
+});
+
+function withSilasVane() {
+  const { state, history } = startedState([kira, tomas]);
+  return toolHarness({
+    state: { ...state, combatants: { ...state.combatants, [silasVane.id]: silasVane } },
+    history,
+    rng: scriptedRng([10]),
+  });
+}
+
+describe('getCombatant resolves an npc- prefixed id to its combatant', () => {
+  it('resolves "npc-silas-vane" to the one combatant id starting with "silas-vane"', async () => {
+    const harness = withSilasVane();
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-silas-vane',
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('keeps the "Unknown combatant id" error when the NPC id matches two combatants', async () => {
+    const other = makeCombatant({
+      id: 'silas-vane-elder',
+      name: 'Silas Vane the Elder',
+      kind: 'npc',
+      ac: 11,
+      hp: 8,
+      maxHp: 8,
+    });
+    const harness = withSilasVane();
+    harness.recorder.emit({ type: 'combatant_added', combatant: other });
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-silas-vane',
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain('Unknown combatant id "npc-silas-vane"');
+  });
+
+  it('says an introduced NPC who is not fighting has no stats to roll (session 008)', async () => {
+    const { state, history } = startedState([kira, tomas]);
+    const harness = toolHarness({ state, history, rng: scriptedRng([10]) });
+    harness.recorder.emit({
+      type: 'npc_introduced',
+      npcId: 'npc-silas-vane',
+      name: 'Silas Vane',
+      description: 'A hooded warden.',
+      invented: true,
+    });
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-silas-vane',
+      checkType: 'ability',
+      ability: 'wis',
+      dc: 12,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain(
+      '"npc-silas-vane" is Silas Vane, an NPC who is not a combatant'
+    );
+  });
+
+  it('keeps the "Unknown combatant id" error for an unrelated unknown id', async () => {
+    const harness = withSilasVane();
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-nobody-here',
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain('Unknown combatant id "npc-nobody-here"');
+  });
+
+  it('does not resolve a short prefix to an unrelated combatant, e.g. "npc-k" to "kira"', async () => {
+    const harness = withSilasVane();
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-k',
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain('Unknown combatant id "npc-k"');
+  });
+
+  it('does not resolve an empty suffix, e.g. "npc-", to the only combatant', async () => {
+    const harness = withSilasVane();
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-',
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain('Unknown combatant id "npc-"');
+  });
+
+  it('never resolves to a combatant whose kind is "pc", even on an exact suffix match', async () => {
+    const harness = withSilasVane();
+    const result = await harness.run(requestCheck, {
+      combatantId: 'npc-kira',
+      checkType: 'ability',
+      ability: 'str',
+      dc: 10,
+      reason: 'x',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain('Unknown combatant id "npc-kira"');
+  });
+});
+
 describe('request_check', () => {
   it('rolls a skill check and logs the roll', async () => {
     const harness = toolHarness({ rng: scriptedRng([8]) });
@@ -176,8 +324,149 @@ describe('request_check', () => {
         dc: 10,
         reason: 'x',
       })
-    ).toEqual({ ok: false, error: 'checkType "skill" requires skill.' });
+    ).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('checkType "skill" requires skill. Skills: acrobatics'),
+    });
     expect(harness.recorder.events).toHaveLength(0);
+  });
+
+  it('never guesses the skill from the reason, which named another one in real sessions', async () => {
+    const harness = toolHarness({ rng: scriptedRng([14]) });
+    const result = await harness.run(requestCheck, {
+      combatantId: 'kira',
+      checkType: 'skill',
+      dc: 10,
+      reason: "determine the entity's nature and whether it is a construct",
+    });
+    expect(result.ok).toBe(false);
+    expect(harness.recorder.events).toHaveLength(0);
+  });
+});
+
+describe('attack and the combat turn', () => {
+  /** A fight where it is Tomas's turn, with the goblin later in the order. */
+  function inCombat(rolls: number[]) {
+    const harness = withGoblin(rolls);
+    harness.recorder.emit({
+      type: 'combat_start',
+      order: [
+        { combatantId: 'tomas', roll: 18, dexMod: 1, total: 19 },
+        { combatantId: 'goblin-1', roll: 10, dexMod: 2, total: 12 },
+        { combatantId: 'kira', roll: 4, dexMod: 2, total: 6 },
+      ],
+    });
+    return harness;
+  }
+
+  it('refuses an attack by anyone but the combatant whose turn it is (session 011)', async () => {
+    const harness = inCombat([12, 3]);
+    const result = await harness.run(attack, {
+      attackerId: 'goblin-1',
+      targetId: 'kira',
+      attackName: 'Scimitar',
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain(
+      'The spotlight is on Tomas Reed, whose id is tomas, so Goblin cannot attack now'
+    );
+    expect(harness.recorder.events.filter((e) => e.type === 'roll')).toEqual([]);
+  });
+
+  it('allows the attack of the combatant whose turn it is', async () => {
+    const harness = inCombat([12, 3]);
+    const result = await harness.run(attack, {
+      attackerId: 'tomas',
+      targetId: 'goblin-1',
+      attackName: 'Longsword',
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('refuses a spell cast out of turn, and allows one in turn', async () => {
+    const harness = inCombat([12, 3]);
+    const out = await harness.run(castSpell, {
+      casterId: 'kira',
+      spell: 'Sacred Flame',
+      slotLevel: 0,
+      targetIds: ['goblin-1'],
+    });
+    expect(out.ok).toBe(false);
+    expect((out as { error: string }).error).toContain('The spotlight is on Tomas Reed');
+  });
+
+  it('refuses a second attack on the same turn, since the engine models no multiattack', async () => {
+    const harness = inCombat([12, 3, 15, 4]);
+    expect(
+      (
+        await harness.run(attack, {
+          attackerId: 'tomas',
+          targetId: 'goblin-1',
+          attackName: 'Longsword',
+        })
+      ).ok
+    ).toBe(true);
+    const again = await harness.run(attack, {
+      attackerId: 'tomas',
+      targetId: 'goblin-1',
+      attackName: 'Longsword',
+    });
+    expect(again.ok).toBe(false);
+    expect((again as { error: string }).error).toContain(
+      'Tomas Reed has already acted this turn and cannot attack again'
+    );
+  });
+
+  it('counts an attack from an earlier beat of the same turn, so an ambusher gets one swing', async () => {
+    const harness = inCombat([12, 3, 15, 4]);
+    expect(
+      (
+        await harness.run(attack, {
+          attackerId: 'tomas',
+          targetId: 'goblin-1',
+          attackName: 'Longsword',
+        })
+      ).ok
+    ).toBe(true);
+    // A new beat of the same turn: the rolls above are history now, not this recorder's events.
+    const next = toolHarness({
+      state: harness.recorder.state,
+      history: [...harness.recorder.events],
+      rng: scriptedRng([15, 4]),
+    });
+    const again = await next.run(attack, {
+      attackerId: 'tomas',
+      targetId: 'goblin-1',
+      attackName: 'Longsword',
+    });
+    expect(again.ok).toBe(false);
+    expect((again as { error: string }).error).toContain('has already acted this turn');
+  });
+
+  it('lets the next combatant act once the turn moves on', async () => {
+    const harness = inCombat([12, 3, 15, 4]);
+    await harness.run(attack, {
+      attackerId: 'tomas',
+      targetId: 'goblin-1',
+      attackName: 'Longsword',
+    });
+    harness.recorder.emit({ type: 'combat_turn', round: 1, turnIndex: 1, combatantId: 'goblin-1' });
+    const result = await harness.run(attack, {
+      attackerId: 'goblin-1',
+      targetId: 'kira',
+      attackName: 'Scimitar',
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('refuses nothing outside combat, when nobody has a turn', async () => {
+    const harness = withGoblin([12, 3]);
+    const result = await harness.run(attack, {
+      attackerId: 'goblin-1',
+      targetId: 'kira',
+      attackName: 'Scimitar',
+    });
+    expect(result.ok).toBe(true);
   });
 });
 
@@ -264,6 +553,61 @@ describe('attack', () => {
       attackName: 'Longsword',
     });
     expect(harness.recorder.events[1]).toMatchObject({ kind: 'damage', expr: '2d8+3' });
+  });
+
+  describe('a loosely named attack', () => {
+    it('matches a unique case-insensitive substring of the attack name', async () => {
+      const harness = withMiner([15, 3]);
+      const result = await harness.run(attack, {
+        attackerId: 'miner-1',
+        targetId: 'tomas',
+        attackName: 'pickaxe',
+      });
+      expect(result).toMatchObject({
+        ok: true,
+        outcome: { result: expect.stringContaining("Enslaved Miner's Rusty Pickaxe hits") },
+      });
+    });
+
+    it('errors, listing every candidate, when the substring matches two or more attacks', async () => {
+      const twinBlades = makeCombatant({
+        id: 'twin-blades',
+        name: 'Twin-Blades',
+        kind: 'monster',
+        attacks: [
+          { name: 'Rusty Pickaxe', bonus: 3, damage: '1d6+1', damageType: 'bludgeoning' },
+          { name: 'Pickaxe Handle', bonus: 2, damage: '1d4', damageType: 'bludgeoning' },
+        ],
+      });
+      const { state, history } = startedState([kira, tomas]);
+      const harness = toolHarness({
+        state: { ...state, combatants: { ...state.combatants, [twinBlades.id]: twinBlades } },
+        history,
+      });
+      const result = await harness.run(attack, {
+        attackerId: 'twin-blades',
+        targetId: 'tomas',
+        attackName: 'pickaxe',
+      });
+      expect(result).toEqual({
+        ok: false,
+        error:
+          'Twin-Blades has no attack named "pickaxe". Known attacks: Rusty Pickaxe, Pickaxe Handle',
+      });
+    });
+
+    it('does not fall back to a specific but wrong weapon name for a character carrying only one attack', async () => {
+      const harness = toolHarness();
+      const result = await harness.run(attack, {
+        attackerId: 'kira',
+        targetId: 'tomas',
+        attackName: 'Longsword',
+      });
+      expect(result).toEqual({
+        ok: false,
+        error: 'Kira Vale has no attack named "Longsword". Known attacks: Light Hammer',
+      });
+    });
   });
 });
 
@@ -752,7 +1096,9 @@ describe('start_combat and end_combat', () => {
     await harness.run(startCombat, sentries);
     expect(await harness.run(startCombat, sentries)).toEqual({
       ok: false,
-      error: 'Combat is already running. Call end_combat first.',
+      error:
+        'This fight is already running, and a session has room for one, so ending it ends it for good. Bring any newcomers into this fight in your narration, or leave them out of it. Call end_combat only when the fight is really over.',
+      recoverable: true,
     });
     expect(await harness.run(endCombat)).toEqual({
       ok: true,

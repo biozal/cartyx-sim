@@ -34,6 +34,8 @@ The Plan 3 Ampere spike needs no code from Plans 1–2 and can be run on the har
 - **Lore is empty until Plan 2B.** `sim run --campaign` plays with no lore index, so every `lookup_lore` reports a gap and the DM invents and records details. (Plan 2A)
 - **Package manifests keep caret ranges; the lockfile pins exact versions.** Installs use `npm ci`. (Plan 2A)
 - **Campaign files are JSON, not YAML** (spec §6.1): `campaign.json`, `characters/<pc>.json`, and later `cast/npcs/<npc>.json`, parsed with `JSON.parse` and no YAML dependency. Chosen by the user after Plan 2A. (Plan 2A follow-up)
+- **A script stage sits between the event log and media** (design `../specs/2026-09-16-session-script-design.md`). `sim script` writes `script.json` and `script.md`; Plan 3 reads `script.json` rather than raw events, and `timeline.json` references script line ids. NPC speech the DM embedded in narration becomes its own lines there, attributed by an optional `seats.script` model seat (default: `checker`). (Post-2A)
+- **Death saving throws were delivered outside Plan 2C** (design `../specs/2026-09-17-death-saves-design.md`), in response to the 1-hour run finding that a downed PC never acted again. A player character at 0 HP keeps their place in initiative and rolls a death saving throw each round with no model call; three failures kill them, three successes stabilize them, and a natural 20 wakes them at 1 HP. (Post-2A)
 
 ## Backlog
 

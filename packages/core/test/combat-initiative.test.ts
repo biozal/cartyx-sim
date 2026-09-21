@@ -19,7 +19,7 @@ const goblins = {
 };
 
 describe('start_combat initiative', () => {
-  it('adds a living party member at 0 HP to the order but never gives them a turn while down', async () => {
+  it('adds a living party member at 0 HP to the order and gives them a death-save turn', async () => {
     const { state, history } = startedState([
       { ...kira, hp: 0, conditions: ['unconscious'] },
       tomas,
@@ -31,7 +31,23 @@ describe('start_combat initiative', () => {
     expect(order).toContain('kira');
     expect(order).toEqual(['kira', 'tomas', 'goblin-1']);
 
-    // The director moves past a downed first combatant; the pure helper it uses skips Kira.
+    // A dying PC keeps their place in the order: their turn is a death saving throw.
+    expect(advanceCombat(harness.recorder.state, { inclusive: true })).toMatchObject({
+      combatantId: 'kira',
+    });
+    expect(nextActor(harness.recorder.state)).toEqual({
+      kind: 'death_save',
+      combatantId: 'kira',
+    });
+  });
+
+  it('skips a stabilized party member at 0 HP', async () => {
+    const { state, history } = startedState([
+      { ...kira, hp: 0, conditions: ['unconscious'], stable: true },
+      tomas,
+    ]);
+    const harness = toolHarness({ state, history, rng: scriptedRng([15, 10, 5]) });
+    await harness.run(startCombat, goblins);
     expect(advanceCombat(harness.recorder.state, { inclusive: true })).toMatchObject({
       combatantId: 'tomas',
     });
@@ -75,6 +91,61 @@ describe('start_combat initiative', () => {
     const order = harness.recorder.state.combat!.order.map((entry) => entry.combatantId);
     expect(order).not.toContain('kira');
   });
+});
+
+describe('one fight a session', () => {
+  it('refuses a second fight, running or ended (spec §5.3)', async () => {
+    const { state, history } = startedState();
+    const harness = toolHarness({ state, history, rng: scriptedRng([15, 10, 5]) });
+    expect((await harness.run(startCombat, goblins)).ok).toBe(true);
+    harness.recorder.emit({ type: 'combat_end' });
+
+    const second = await harness.run(startCombat, goblins);
+    expect(second).toMatchObject({
+      ok: false,
+      error:
+        'This session has already had its fight, and a session has room for one. Resolve this danger in the story instead: a stand-off, a chase, a surrender, a retreat, or a threat that withdraws.',
+    });
+  });
+
+  it('counts a fight from an earlier beat, not just this one', async () => {
+    const { state, history } = startedState();
+    const first = toolHarness({ state, history, rng: scriptedRng([15, 10, 5]) });
+    await first.run(startCombat, goblins);
+    first.recorder.emit({ type: 'combat_end' });
+
+    const later = toolHarness({
+      state: first.recorder.state,
+      history: [...history, ...first.recorder.events],
+      rng: scriptedRng([15, 10, 5]),
+    });
+    expect((await later.run(startCombat, goblins)).ok).toBe(false);
+  });
+});
+
+describe('start_combat and the session clock', () => {
+  it.each(['end_at_scene_break', 'hard_stop'] as const)(
+    'refuses a new fight once the clock has hit %s',
+    async (clockPhase) => {
+      const { state, history } = startedState();
+      const harness = toolHarness({ state, history, clockPhase });
+      const result = await harness.run(startCombat, goblins);
+      expect(result).toMatchObject({
+        ok: false,
+        error: 'Time is up: no new fight can start. Close the scene and call scene_change.',
+      });
+    }
+  );
+
+  it.each(['running', 'wrap_up'] as const)(
+    'still starts a fight at clock phase %s',
+    async (clockPhase) => {
+      const { state, history } = startedState();
+      const harness = toolHarness({ state, history, clockPhase, rng: scriptedRng([15, 10, 5]) });
+      const result = await harness.run(startCombat, goblins);
+      expect(result).toMatchObject({ ok: true });
+    }
+  );
 });
 
 describe('hand_off when nobody can respond', () => {

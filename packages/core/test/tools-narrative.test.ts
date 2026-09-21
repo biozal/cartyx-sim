@@ -1,3 +1,4 @@
+import { scriptedRng } from '@cartyx-sim/rules';
 import { makeCombatant } from '@cartyx-sim/rules/testing';
 import { describe, expect, it } from 'vitest';
 import {
@@ -9,6 +10,7 @@ import {
   recordInvention,
   sceneChange,
 } from '../src/tools/narrative';
+import { startCombat } from '../src/tools/combat';
 import type { LoreIndex } from '../src/model';
 import { toToolSchema } from '../src/tools/types';
 import { renderTranscript } from '../src/transcript';
@@ -55,6 +57,19 @@ describe('narrate', () => {
   it('publishes a JSON schema where defaulted fields are optional', () => {
     expect(toToolSchema(narrate).parameters).toMatchObject({ required: ['text'] });
   });
+
+  it('coerces an emotion outside the enum to neutral instead of failing', async () => {
+    const harness = toolHarness();
+    const result = await harness.run(narrate, { text: 'The engines hum.', emotion: 'furious' });
+    expect(result).toMatchObject({ ok: true });
+    expect(harness.recorder.events[0]).toMatchObject({ emotion: 'neutral' });
+  });
+
+  it('keeps the default emotion when none is given', async () => {
+    const harness = toolHarness();
+    await harness.run(narrate, { text: 'The engines hum.' });
+    expect(harness.recorder.events[0]).toMatchObject({ emotion: 'neutral' });
+  });
 });
 
 describe('introduce_npc and npc_say', () => {
@@ -81,6 +96,22 @@ describe('introduce_npc and npc_say', () => {
       speaker: 'npc-professor-sella-vaunt',
       speakerKind: 'npc',
     });
+  });
+
+  it('coerces an emotion outside the enum to neutral instead of failing', async () => {
+    const harness = toolHarness();
+    await harness.run(introduceNpc, {
+      name: 'Professor Sella Vaunt',
+      description: 'Crystal engine professor',
+      invented: false,
+    });
+    const result = await harness.run(npcSay, {
+      npcId: 'npc-professor-sella-vaunt',
+      text: 'Find out who.',
+      emotion: 'smug',
+    });
+    expect(result).toMatchObject({ ok: true });
+    expect(harness.recorder.events[1]).toMatchObject({ type: 'dialogue', emotion: 'neutral' });
   });
 
   it('removes quote marks wrapped around a whole NPC line', async () => {
@@ -196,6 +227,27 @@ describe('scene_change', () => {
     expect(harness.recorder.state.scene?.location).toBe("Dean's Office");
   });
 
+  it('throws while combat is still running', async () => {
+    const harness = toolHarness({ rng: scriptedRng([10, 5, 17]) });
+    await harness.run(startCombat, {
+      monsters: [
+        {
+          name: 'Clockwork Sentry',
+          ac: 13,
+          maxHp: 11,
+          attacks: [{ name: 'Slam', bonus: 4, damage: '1d6+2', damageType: 'bludgeoning' }],
+        },
+      ],
+    });
+    expect(
+      await harness.run(sceneChange, { location: "Dean's Office", artPrompt: 'A polished office' })
+    ).toEqual({
+      ok: false,
+      error: 'Combat is still running. Call end_combat first, then scene_change.',
+    });
+    expect(harness.recorder.state.scene).toBeNull();
+  });
+
   it('G5.15: records a loreEntityId on the event and in state.scene', async () => {
     const harness = toolHarness();
     await harness.run(sceneChange, {
@@ -266,6 +318,49 @@ describe('record_invention', () => {
       reason: 'not in lore',
     });
     expect(harness.recorder.events[0]).toMatchObject({ type: 'lore_invention', visibility: 'dm' });
+  });
+
+  it('attaches the query of a lore lookup earlier this turn', async () => {
+    const harness = toolHarness();
+    await harness.run(lookupLore, { query: 'Echor airship defenses' });
+    await harness.run(recordInvention, {
+      fact: 'Echor airships carry no weapons.',
+      reason: 'not in lore',
+    });
+    expect(harness.recorder.events[1]).toMatchObject({
+      type: 'lore_invention',
+      query: 'Echor airship defenses',
+    });
+  });
+
+  it('leaves the query out when nothing was looked up this turn', async () => {
+    // A fresh recorder (a new turn/beat) holds none of a prior turn's events, so a lookup from
+    // before this beat never lingers here.
+    const harness = toolHarness();
+    await harness.run(recordInvention, {
+      fact: 'Engine three is named Marigold.',
+      reason: 'not in lore',
+    });
+    expect(harness.recorder.events[0]).not.toHaveProperty('query');
+  });
+
+  it('ignores a query the model supplies, deriving it from the turn instead', async () => {
+    const harness = toolHarness();
+    await harness.run(recordInvention, {
+      fact: 'Engine three is named Marigold.',
+      reason: 'not in lore',
+      query: 'a stale query from a different turn',
+    });
+    expect(harness.recorder.events[0]).not.toHaveProperty('query');
+  });
+
+  it('no longer publishes a query parameter to the model', () => {
+    expect(toToolSchema(recordInvention).parameters).toMatchObject({
+      required: ['fact', 'reason'],
+    });
+    const properties = (toToolSchema(recordInvention).parameters as { properties: object })
+      .properties;
+    expect(properties).not.toHaveProperty('query');
   });
 });
 
@@ -379,11 +474,127 @@ describe('hand_off', () => {
     expect(harness.recorder.state.pendingResponders).toEqual(['kira', 'tomas']);
   });
 
+  it('takes a hand-off naming only combatants in combat as one to the party (session 011)', async () => {
+    const harness = toolHarness();
+    harness.recorder.emit({
+      type: 'combatant_added',
+      combatant: makeCombatant({ id: 'giant-rat-2', name: 'Giant Rat 2', kind: 'monster' }),
+    });
+    harness.recorder.emit({
+      type: 'combat_start',
+      order: [
+        { combatantId: 'kira', roll: 15, dexMod: 2, total: 17 },
+        { combatantId: 'giant-rat-2', roll: 8, dexMod: 2, total: 10 },
+      ],
+    });
+    const result = await harness.run(handOff, { target: { kind: 'pcs', ids: ['giant-rat-2'] } });
+    expect(result.ok).toBe(true);
+    expect((result as { outcome: { result: string } }).outcome.result).toContain(
+      'giant-rat-2 is not a player character, so initiative decides who acts next.'
+    );
+    expect(harness.recorder.events.at(-1)).toMatchObject({
+      type: 'hand_off',
+      target: { kind: 'party' },
+    });
+  });
+
+  it('tells the DM a monster cannot take the spotlight (session 009)', async () => {
+    const harness = toolHarness();
+    harness.recorder.emit({
+      type: 'combatant_added',
+      combatant: makeCombatant({
+        id: 'hooded-merchant-1',
+        name: 'Hooded Merchant',
+        kind: 'monster',
+      }),
+    });
+    const result = await harness.run(handOff, {
+      target: { kind: 'pcs', ids: ['hooded-merchant-1', 'zzz'] },
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain('Unknown ids: hooded-merchant-1, zzz');
+    expect((result as { error: string }).error).toContain(
+      'Only player characters take the spotlight, and hooded-merchant-1 is not one'
+    );
+  });
+
   it('rejects unknown PC ids', async () => {
     const harness = toolHarness();
     expect(await harness.run(handOff, { target: { kind: 'pcs', ids: ['oona'] } })).toEqual({
       ok: false,
       error: 'Unknown player character ids: oona. Party ids: kira, tomas',
+    });
+  });
+
+  describe('a bare string target', () => {
+    it('coerces "party" to { kind: "party" }', async () => {
+      const harness = toolHarness();
+      const result = await harness.run(handOff, { target: 'party' });
+      expect(result).toEqual({
+        ok: true,
+        outcome: { result: 'Handed off to kira, tomas.', endsBeat: true },
+      });
+      expect(harness.recorder.events[0]).toMatchObject({
+        type: 'hand_off',
+        target: { kind: 'party' },
+      });
+    });
+
+    it('coerces "open" to { kind: "open" }', async () => {
+      const harness = toolHarness();
+      const result = await harness.run(handOff, { target: 'open' });
+      expect(result).toMatchObject({ ok: true });
+      expect(harness.recorder.events[0]).toMatchObject({
+        type: 'hand_off',
+        target: { kind: 'open' },
+      });
+    });
+
+    it('coerces any other string to { kind: "pcs", ids: [string] }', async () => {
+      const harness = toolHarness();
+      const result = await harness.run(handOff, { target: 'kira' });
+      expect(result).toEqual({
+        ok: true,
+        outcome: { result: 'Handed off to kira.', endsBeat: true },
+      });
+      expect(harness.recorder.events[0]).toMatchObject({
+        type: 'hand_off',
+        target: { kind: 'pcs', ids: ['kira'] },
+      });
+    });
+
+    it("still errors on an unknown player character id, with today's message", async () => {
+      const harness = toolHarness();
+      expect(await harness.run(handOff, { target: 'oona' })).toEqual({
+        ok: false,
+        error: 'Unknown player character ids: oona. Party ids: kira, tomas',
+      });
+      expect(harness.recorder.events).toHaveLength(0);
+    });
+
+    const SHAPE_ERROR =
+      'hand_off target must be an object like {"kind": "party"}, {"kind": "open"}, or ' +
+      '{"kind": "pcs", "ids": ["kira"]}.';
+
+    it.each([
+      ['garbled tool-call syntax', '<parameter=kind>\npcs'],
+      ['a comma-separated list', 'party, open'],
+      ['an empty string', ''],
+    ])('rejects %s as a shape error, not a list of ids', async (_label, target) => {
+      const harness = toolHarness();
+      expect(await harness.run(handOff, { target })).toEqual({ ok: false, error: SHAPE_ERROR });
+      expect(harness.recorder.events).toHaveLength(0);
+    });
+
+    it('documents the string branch in the published schema instead of a bare string', () => {
+      const parameters = toToolSchema(handOff).parameters as {
+        properties: { target: { anyOf: Array<{ type?: string; description?: string }> } };
+      };
+      const stringBranch = parameters.properties.target.anyOf.find(
+        (branch) => branch.type === 'string'
+      );
+      expect(stringBranch?.description).toEqual(expect.stringContaining('party'));
+      expect(stringBranch?.description).toEqual(expect.stringContaining('open'));
     });
   });
 });

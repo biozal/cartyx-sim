@@ -15,7 +15,7 @@ import {
   toolCall,
   type ScriptedResponse,
 } from '../src/testing';
-import { kira, now, tomas } from './helpers';
+import { kira, now, startedState, tomas } from './helpers';
 import { SELLA_CHUNK } from './tool-harness';
 
 function config(overrides: Partial<DirectorConfig> = {}): DirectorConfig {
@@ -67,6 +67,26 @@ function flakyNow(failOnCall: number): () => Date {
     if (calls === failOnCall) throw new Error('clock unavailable');
     return now();
   };
+}
+
+/**
+ * A committed history that starts a session for the default `config()` party, then narrates one
+ * DM beat per `sentence`, each ending with `turn_end` (actor 'dm') as a beat boundary would.
+ */
+function priorBeats(sentences: string[]): SimEvent[] {
+  const recorder = new TurnRecorder(initialState(), 'setup', now);
+  recorder.emit({
+    type: 'session_start',
+    session: 1,
+    loreCommit: 'abc123',
+    targetMinutes: 60,
+    party: [kira, tomas],
+  });
+  for (const sentence of sentences) {
+    recorder.emit({ type: 'narration', speaker: 'dm', text: sentence, emotion: 'neutral' });
+    recorder.emit({ type: 'turn_end', actor: 'dm' });
+  }
+  return [...recorder.events];
 }
 
 /** Every turn's events must be contiguous and seqs must count up from 0 without gaps. */
@@ -477,6 +497,211 @@ describe('Director', () => {
     });
   });
 
+  it('strips a leaked combatant block from DM narration, keeping the prose before it', async () => {
+    const leak = 'Kira Vale (id: kira) | HP 24/24, AC 15';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(
+          toolCall('narrate', { text: `The mercenaries fall back into the alley.\n${leak}` }),
+          toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })
+        ),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration')).toMatchObject([
+      { text: 'The mercenaries fall back into the alley.' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'dm_state_leak', resolution: 'trimmed', retries: 0 },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'ooc_note')).toMatchObject([
+      { visibility: 'dm', text: `Cut from DM narration (dm_state_leak): ${leak}` },
+    ]);
+  });
+
+  it('strips every shape of leaked prompt state from a session-007-style narration, keeping the prose', async () => {
+    const leakLines = [
+      '**Current Status:**',
+      '- Kira: 20/24 HP (Dagger wound)',
+      '- All three Hooded Figures: 11 HP each, AC 12',
+      "[combat] Round 1: Kira Vale's turn",
+      '[hand_off]',
+      '{"target": {"kind": "party"}}',
+    ];
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(
+          toolCall('narrate', {
+            text: `${leakLines.join('\n')}\nThe mercenaries fall back into the alley.`,
+          }),
+          toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })
+        ),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration')).toMatchObject([
+      { text: 'The mercenaries fall back into the alley.' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'dm_state_leak', resolution: 'trimmed', retries: 0 },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'ooc_note')).toMatchObject([
+      { visibility: 'dm', text: `Cut from DM narration (dm_state_leak): ${leakLines.join(' | ')}` },
+    ]);
+  });
+
+  it('records no leak trim when the stripped narration is rejected as a duplicate', async () => {
+    const leak = 'Kira Vale (id: kira) | HP 24/24, AC 15';
+    const { deps: built, sink } = deps({
+      dm: [
+        { text: 'The engines roar to life.', toolCalls: [] },
+        { text: `${leak}\nThe engines roar to life.`, toolCalls: [] },
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration')).toMatchObject([
+      { text: 'The engines roar to life.' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'duplicate_narration', resolution: 're_prompted' },
+    ]);
+    expect(
+      sink.events.filter((e) => e.type === 'ooc_note' && e.text.includes('dm_state_leak'))
+    ).toEqual([]);
+  });
+
+  it('rejects a narration that leaks prompt state on every line, and the beat still hands off', async () => {
+    const leak = 'Kira Vale (id: kira) | HP 24/24, AC 15';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(
+          toolCall('narrate', { text: leak }),
+          toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })
+        ),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.some((e) => e.type === 'narration')).toBe(false);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'dm_state_leak', resolution: 'trimmed' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'hand_off')).toHaveLength(1);
+  });
+
+  it('cuts a narration sentence repeating one already narrated this beat, and flags repeated_text', async () => {
+    const { deps: built, sink } = deps({
+      dm: [
+        { text: 'The gate groans open. Rain hammers down on the stones.', toolCalls: [] },
+        { text: 'Rain hammers down on the stones. Thunder rolls overhead.', toolCalls: [] },
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.step();
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration')).toMatchObject([
+      { text: 'The gate groans open. Rain hammers down on the stones.' },
+      { text: 'Thunder rolls overhead.' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'repeated_text', resolution: 'trimmed' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'ooc_note')).toMatchObject([
+      {
+        visibility: 'dm',
+        text: 'Cut from DM narration (repeated_text): Rain hammers down on the stones.',
+      },
+    ]);
+  });
+
+  it('cuts a narration sentence repeating one narrated in the previous beat, and flags repeated_text', async () => {
+    const sink = new MemorySink();
+    sink.events.push(...priorBeats(['The room is utterly silent.']));
+    const { deps: built } = deps(
+      {
+        dm: [
+          { text: 'The room is utterly silent. Someone coughs in the dark.', toolCalls: [] },
+          respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })),
+        ],
+      },
+      { sink }
+    );
+    const director = await Director.create(config(), built);
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration').map((e) => e.text)).toEqual([
+      'The room is utterly silent.',
+      'Someone coughs in the dark.',
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'repeated_text', resolution: 'trimmed' },
+    ]);
+  });
+
+  it('keeps a narration sentence that only repeats one narrated five beats ago', async () => {
+    const sink = new MemorySink();
+    sink.events.push(
+      ...priorBeats([
+        'The room is utterly silent.',
+        'Filler beat two.',
+        'Filler beat three.',
+        'Filler beat four.',
+        'Filler beat five.',
+      ])
+    );
+    const { deps: built } = deps(
+      {
+        dm: [
+          { text: 'The room is utterly silent. New sounds echo down the hall.', toolCalls: [] },
+          respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })),
+        ],
+      },
+      { sink }
+    );
+    const director = await Director.create(config(), built);
+    await director.step();
+    expect(sink.events.filter((e) => e.type === 'narration').map((e) => e.text)).toEqual([
+      'The room is utterly silent.',
+      'Filler beat two.',
+      'Filler beat three.',
+      'Filler beat four.',
+      'Filler beat five.',
+      'The room is utterly silent. New sounds echo down the hall.',
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toEqual([]);
+  });
+
+  it("rejects a narration that only repeats a player's recent line, and the beat still hands off", async () => {
+    const line = 'We do not have much time before it comes looking.';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })),
+        respond(
+          toolCall('narrate', {
+            text: '"We do not have much time before it comes looking," Tomas warns everyone.',
+          }),
+          toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } })
+        ),
+      ],
+      'player-tomas': [respond(toolCall('speak', { text: line }))],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(4);
+    expect(sink.events.some((e) => e.type === 'narration')).toBe(false);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'repeated_text', resolution: 'trimmed' },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'hand_off')).toHaveLength(2);
+  });
+
   it('does not speak player prose that arrives alongside a tool call', async () => {
     const { deps: built, sink } = deps({
       dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['tomas'] } }))],
@@ -514,6 +739,164 @@ describe('Director', () => {
     ]);
   });
 
+  it('re-prompts a player who repeats a line they already said this session, once', async () => {
+    const line = 'My numbers are what you breathe on, same rule as the drip.';
+    const freshLine = 'The math never lies about what happens to the plates.';
+    const {
+      deps: built,
+      sink,
+      model,
+    } = deps({
+      dm: [
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+      ],
+      'player-kira': [
+        respond(toolCall('speak', { text: line })),
+        respond(toolCall('speak', { text: line })),
+        respond(toolCall('speak', { text: freshLine })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(5);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([
+      { text: line },
+      { text: freshLine },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'player_repeats_self', resolution: 're_prompted' },
+    ]);
+    const retry = model.requests.filter((r) => r.seat === 'player-kira')[2]!;
+    expect(retry.messages.at(-1)).toMatchObject({
+      role: 'tool',
+      content: expect.stringContaining(
+        `You already said that this session: "${line}". Say something new, in your own words.`
+      ),
+    });
+  });
+
+  it('accepts a line repeated a second time, flagged and unaltered', async () => {
+    const line = 'My numbers are what you breathe on, same rule as the drip.';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+      ],
+      'player-kira': [
+        respond(toolCall('speak', { text: line })),
+        respond(toolCall('speak', { text: line })),
+        respond(toolCall('speak', { text: line })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(5);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([
+      { text: line },
+      { text: line },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'player_repeats_self', resolution: 're_prompted' },
+      { rule: 'player_repeats_self', resolution: 'accepted_with_flag' },
+    ]);
+  });
+
+  it("leaves a player's first use of a line untouched", async () => {
+    const line = 'My numbers are what you breathe on, same rule as the drip.';
+    const { deps: built, sink } = deps({
+      dm: [respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } }))],
+      'player-kira': [respond(toolCall('speak', { text: line }))],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(3);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([{ text: line }]);
+    expect(sink.events.some((e) => e.type === 'validator_flag')).toBe(false);
+  });
+
+  it('speaks a repeat found once the turn has spent its retries', async () => {
+    const line = 'My numbers are what you breathe on, same rule as the drip.';
+    const outcome = respond(toolCall('speak', { text: 'I successfully pick the lock.' }));
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+      ],
+      'player-kira': [
+        respond(toolCall('speak', { text: line })),
+        outcome,
+        outcome,
+        respond(toolCall('speak', { text: line })),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(5);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([
+      { text: line },
+      { text: line },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'player_narrates_outcome', resolution: 're_prompted' },
+      { rule: 'player_narrates_outcome', resolution: 're_prompted' },
+      { rule: 'player_repeats_self', resolution: 'accepted_with_flag' },
+    ]);
+    expect(sink.events.some((e) => e.type === 'pass')).toBe(false);
+  });
+
+  it('speaks a first repeat when the turn has no retries to spend', async () => {
+    const line = 'My numbers are what you breathe on, same rule as the drip.';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+      ],
+      'player-kira': [
+        respond(toolCall('speak', { text: line })),
+        respond(toolCall('speak', { text: line })),
+      ],
+    });
+    const director = await Director.create(config({ maxValidatorRetries: 0 }), built);
+    await director.run(5);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([
+      { text: line },
+      { text: line },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'player_repeats_self', resolution: 'accepted_with_flag' },
+    ]);
+    expect(sink.events.some((e) => e.type === 'pass')).toBe(false);
+  });
+
+  it('keeps the repeat flag on an attempt that also hit a tool error', async () => {
+    const line = 'My numbers are what you breathe on, same rule as the drip.';
+    const { deps: built, sink } = deps({
+      dm: [
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+        respond(toolCall('hand_off', { target: { kind: 'pcs', ids: ['kira'] } })),
+      ],
+      'player-kira': [
+        respond(toolCall('speak', { text: line })),
+        respond(
+          toolCall('speak', { text: line }),
+          toolCall('declare_spell', { spell: 'Fireball', slotLevel: 3 })
+        ),
+      ],
+    });
+    const director = await Director.create(config({ maxValidatorRetries: 0 }), built);
+    await director.run(5);
+
+    expect(sink.events.filter((e) => e.type === 'dialogue')).toMatchObject([
+      { text: line },
+      { text: line },
+    ]);
+    expect(sink.events.filter((e) => e.type === 'validator_flag')).toMatchObject([
+      { rule: 'tool_error,player_repeats_self', resolution: 'accepted_with_flag' },
+    ]);
+  });
+
   it('ends at the hard stop even without a scene break', async () => {
     const { deps: built, sink } = deps({
       dm: [
@@ -526,6 +909,67 @@ describe('Director', () => {
     const director = await Director.create(config({ targetMinutes: 0.02 }), built);
     expect((await director.run()).status).toBe('ended');
     expect(sink.events.at(-1)).toMatchObject({ type: 'session_end', reason: 'hard_stop' });
+  });
+
+  it('closes combat before the session ends mid-fight, at the hard stop', async () => {
+    const { deps: built, sink } = deps(
+      {
+        dm: [
+          // The fight starts before the narration runs the clock out: past the hard stop
+          // `start_combat` refuses, and this is about the session ending mid-fight.
+          respond(
+            toolCall('start_combat', {
+              monsters: [
+                {
+                  name: 'Clockwork Sentry',
+                  ac: 13,
+                  maxHp: 11,
+                  attacks: [{ name: 'Slam', bonus: 4, damage: '1d6+2', damageType: 'bludgeoning' }],
+                },
+              ],
+            }),
+            toolCall('narrate', { text: 'The engines roar to life all around you.' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      { rolls: [10, 5, 17] }
+    );
+    const director = await Director.create(config({ targetMinutes: 0.02 }), built);
+    expect((await director.run()).status).toBe('ended');
+    expect(sink.events.slice(-2)).toMatchObject([
+      { type: 'combat_end' },
+      { type: 'session_end', reason: 'hard_stop' },
+    ]);
+    expect(director.currentState.combat).toBeNull();
+  });
+
+  it('refuses a fight the DM starts after narrating past the hard stop in the same beat', async () => {
+    const { deps: built, sink } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('narrate', {
+              text: 'The engines roar to life all around you, and the brass plates underfoot begin to buckle.',
+            }),
+            toolCall('start_combat', { monsters: [monsterSpec('Goblin')] })
+          ),
+          respond(toolCall('hand_off', { target: { kind: 'party' } })),
+        ],
+      },
+      { rolls: [10, 5, 17] }
+    );
+    const director = await Director.create(config({ targetMinutes: 0.02 }), built);
+    const outcome = await director.run();
+
+    expect(sink.events.some((e) => e.type === 'combat_start')).toBe(false);
+    expect(outcome.status).toBe('ended');
+    expect(sink.events).toContainEqual(
+      expect.objectContaining({
+        type: 'ooc_note',
+        text: 'Tool error (start_combat): Time is up: no new fight can start. Close the scene and call scene_change.',
+      })
+    );
   });
 
   it('pauses when a seat keeps failing and resumes from the log', async () => {
@@ -771,7 +1215,191 @@ describe('Director', () => {
     attacks: [{ name: 'Scimitar', bonus: 4, damage: '1d6+2', damageType: 'slashing' }],
   });
 
-  it("G2.1: keeps the new fight's own initiative when combat ends and restarts in one beat", async () => {
+  /**
+   * A solo Kira, dropped to 0 HP in the beat that starts combat, with the only monster killed in
+   * the same beat: every step after the DM's beat is one of her death-saving-throw turns.
+   */
+  function dyingSolo(deathSaveRolls: number[]) {
+    return deps(
+      {
+        dm: [
+          respond(
+            toolCall('start_combat', { monsters: [monsterSpec('Goblin')] }),
+            toolCall('apply_damage', {
+              targetId: 'kira',
+              amount: 10,
+              damageType: 'fire',
+              reason: 'a collapsing rafter',
+            }),
+            toolCall('apply_damage', {
+              targetId: 'goblin-1',
+              amount: 20,
+              damageType: 'fire',
+              reason: 'a collapsing rafter',
+            }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      // initiative: kira 20+2=22, goblin 1 -> Kira first, and down before her turn comes round.
+      { rolls: [20, 1, ...deathSaveRolls] }
+    );
+  }
+
+  const soloConfig = () =>
+    config({ party: [kira], seats: { dm: 'dm', players: { kira: 'player-kira' } } });
+
+  /** The events of the last turn in the log. */
+  const lastTurn = (sink: MemorySink) =>
+    sink.events.filter((event) => event.turnId === sink.events.at(-1)!.turnId);
+
+  it('rolls a dying PC death saving throw itself, with no model call', async () => {
+    const { deps: built, model, sink } = dyingSolo([12]);
+    const director = await Director.create(soloConfig(), built);
+    await director.run(2);
+    const callsBefore = model.requests.length;
+
+    await director.step();
+
+    expect(model.requests.length).toBe(callsBefore);
+    expect(lastTurn(sink).map((event) => event.type)).toEqual([
+      'roll',
+      'state_change',
+      'turn_end',
+      'combat_turn',
+    ]);
+    expect(lastTurn(sink)[0]).toMatchObject({
+      type: 'roll',
+      actor: 'kira',
+      kind: 'save',
+      label: 'Kira Vale death saving throw',
+      expr: '1d20',
+      rolls: [12],
+      modifier: 0,
+      total: 12,
+      target: 10,
+      outcome: 'success',
+      visibility: 'public',
+    });
+    expect(lastTurn(sink)[1]).toMatchObject({
+      type: 'state_change',
+      entity: 'kira',
+      field: 'deathSaves',
+      after: { successes: 1, failures: 0 },
+      cause: 'death_save',
+    });
+    expect(lastTurn(sink)[2]).toMatchObject({ type: 'turn_end', actor: 'kira' });
+    expect(director.currentState.combat).toMatchObject({ round: 2, turnIndex: 0 });
+    expect(nextActor(director.currentState)).toEqual({ kind: 'death_save', combatantId: 'kira' });
+    expectWellFormedLog(sink.events);
+  });
+
+  it('stabilizes a dying PC on the third success and stops giving them turns', async () => {
+    const { deps: built, sink } = dyingSolo([10, 11, 12]);
+    const director = await Director.create(soloConfig(), built);
+
+    await director.run(5);
+
+    const state = director.currentState;
+    expect(state.combatants.kira).toMatchObject({
+      hp: 0,
+      dead: false,
+      stable: true,
+      deathSaves: { successes: 0, failures: 0 },
+    });
+    expect(state.combatants.kira?.conditions).toContain('unconscious');
+    expect(lastTurn(sink).map((event) => event.type)).toEqual([
+      'roll',
+      'state_change',
+      'state_change',
+      'turn_end',
+      'combat_end',
+    ]);
+    expect(lastTurn(sink)[1]).toMatchObject({ field: 'deathSaves', cause: 'death_save' });
+    expect(lastTurn(sink)[2]).toMatchObject({ field: 'stable', after: true, cause: 'death_save' });
+  });
+
+  it('wakes a dying PC at 1 HP on a natural 20, so their next turn is their own', async () => {
+    const { deps: built, sink } = dyingSolo([20]);
+    const director = await Director.create(soloConfig(), built);
+
+    await director.run(3);
+
+    const state = director.currentState;
+    expect(state.combatants.kira).toMatchObject({ hp: 1, dead: false, stable: false });
+    expect(state.combatants.kira?.conditions).not.toContain('unconscious');
+    expect(lastTurn(sink)[0]).toMatchObject({ total: 20, outcome: 'success' });
+    expect(nextActor(state)).toEqual({ kind: 'pc', pcId: 'kira', reason: 'combat_turn' });
+  });
+
+  it('kills a dying PC on the third failure and closes the fight', async () => {
+    const { deps: built, sink } = dyingSolo([5, 5, 5]);
+    const director = await Director.create(soloConfig(), built);
+
+    await director.run(5);
+
+    const state = director.currentState;
+    expect(state.combatants.kira).toMatchObject({
+      dead: true,
+      deathSaves: { successes: 0, failures: 3 },
+    });
+    expect(lastTurn(sink)[0]).toMatchObject({ total: 5, outcome: 'failure' });
+    expect(lastTurn(sink).map((event) => event.type)).toEqual([
+      'roll',
+      'state_change',
+      'state_change',
+      'turn_end',
+      'combat_end',
+    ]);
+    expect(lastTurn(sink)[2]).toMatchObject({ field: 'dead', after: true, cause: 'death_save' });
+    expect(state.combat).toBeNull();
+    expect(foldEvents(sink.events)).toEqual(state);
+  });
+
+  it('counts a natural 1 as two failures and a hit at 0 HP as another', async () => {
+    const { deps: built, sink } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('start_combat', { monsters: [monsterSpec('Goblin')] }),
+            toolCall('apply_damage', {
+              targetId: 'kira',
+              amount: 10,
+              damageType: 'fire',
+              reason: 'a collapsing rafter',
+            }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+          respond(
+            toolCall('apply_damage', {
+              targetId: 'kira',
+              amount: 4,
+              damageType: 'slashing',
+              reason: 'the goblin stabs the fallen',
+            }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      // initiative: kira 22, goblin 1; then Kira's death save rolls a natural 1.
+      { rolls: [20, 1, 1] }
+    );
+    const director = await Director.create(soloConfig(), built);
+
+    await director.run(4);
+
+    expect(director.currentState.combatants.kira).toMatchObject({
+      dead: true,
+      deathSaves: { successes: 0, failures: 3 },
+    });
+    expect(
+      sink.events.some(
+        (event) => event.type === 'state_change' && event.field === 'dead' && event.after === true
+      )
+    ).toBe(true);
+  });
+
+  it('G2.1: refuses a second fight in one session, leaving the first one ended', async () => {
     const { deps: built, sink } = deps(
       {
         dm: [
@@ -787,27 +1415,132 @@ describe('Director', () => {
         ],
         'player-kira': [respond(toolCall('act', { intent: 'size up the goblin' }))],
       },
-      // initiative 1: kira 22, tomas 16, goblin 2 (kira acts, hands to DM to resolve)
-      // initiative 2: kira 4, tomas 4, orc 20 -> orc, kira, tomas
       { rolls: [20, 15, 2, 2, 3, 20] }
     );
     const director = await Director.create(config(), built);
 
     await director.run(4);
 
-    const state = director.currentState;
-    expect(state.combat).not.toBeNull();
-    expect(state.combat!.turnIndex).toBe(0);
-    expect(state.combat!.order[0]).toMatchObject({ combatantId: 'orc-1' });
-    expect(nextActor(state)).toMatchObject({
-      kind: 'dm',
-      reason: 'monster',
-      combatantId: 'orc-1',
-    });
-    expect(foldEvents(sink.events)).toEqual(state);
+    expect(sink.events.filter((e) => e.type === 'combat_start')).toHaveLength(1);
+    expect(sink.events.filter((e) => e.type === 'combat_end')).toHaveLength(1);
+    expect(director.currentState.fightsSoFar).toBe(1);
+    expect(sink.events).toContainEqual(
+      expect.objectContaining({
+        type: 'ooc_note',
+        text: expect.stringContaining('This session has already had its fight'),
+      })
+    );
+    // The refusal is one the DM can simply take, so the hand_off it sent with the refused call
+    // still runs: the beat ends without another model call.
+    expect(sink.events.filter((e) => e.type === 'hand_off')).toHaveLength(2);
+    expect(foldEvents(sink.events)).toEqual(director.currentState);
   });
 
-  it('G2.2: skips a PC downed in the same beat that started combat', async () => {
+  it("caps a monster turn's instruction at three sentences of narration", async () => {
+    const goblin = makeCombatant({
+      id: 'goblin-1',
+      name: 'Goblin',
+      kind: 'monster',
+      hp: 7,
+      maxHp: 7,
+    });
+    const sink = new MemorySink();
+    const { state, history } = startedState();
+    const recorder = new TurnRecorder(state, 'setup-combat', now);
+    recorder.emit({ type: 'combatant_added', combatant: goblin });
+    recorder.emit({
+      type: 'combat_start',
+      order: [
+        { combatantId: 'goblin-1', roll: 20, dexMod: 0, total: 20 },
+        { combatantId: 'kira', roll: 10, dexMod: 2, total: 12 },
+        { combatantId: 'tomas', roll: 5, dexMod: 1, total: 6 },
+      ],
+    });
+    await sink.append([...history, ...recorder.events]);
+
+    const { deps: built, model } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('narrate', { text: 'The goblin lunges.' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      },
+      { sink }
+    );
+    const director = await Director.create(config({ loreCommit: 'test' }), built);
+    await director.run(1);
+
+    const dmRequests = model.requests.filter((request) => request.seat === 'dm');
+    expect(lastUserMessage(dmRequests[0]!)).toContain(
+      "Keep this turn's narration to at most three sentences: what the creature does and what it costs. Save detail for scene beats."
+    );
+  });
+
+  it('does not cap narration length outside a monster turn', async () => {
+    const { deps: built, model } = deps({
+      dm: [
+        respond(
+          toolCall('narrate', { text: 'The tavern hums.' }),
+          toolCall('hand_off', { target: { kind: 'party' } })
+        ),
+      ],
+    });
+    const director = await Director.create(config(), built);
+    await director.run(2); // step 1 is session_start; step 2 is the DM's first beat.
+
+    const dmRequests = model.requests.filter((request) => request.seat === 'dm');
+    expect(lastUserMessage(dmRequests[0]!)).not.toContain("Keep this turn's narration");
+  });
+
+  it("caps an in-combat resolve turn's instruction at three sentences of narration", async () => {
+    const { deps: built, model } = deps(
+      {
+        dm: [
+          respond(
+            toolCall('start_combat', { monsters: [monsterSpec('Goblin')] }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+          respond(
+            toolCall('narrate', { text: 'Kira swings.' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+        'player-kira': [respond(toolCall('act', { intent: 'swing wildly' }))],
+      },
+      // initiative: kira 20+2=22, tomas 15+1=16, goblin 1+0=1 -> kira, tomas, goblin.
+      { rolls: [20, 15, 1] }
+    );
+    const director = await Director.create(config(), built);
+
+    await director.run(4);
+
+    const dmRequests = model.requests.filter((request) => request.seat === 'dm');
+    expect(lastUserMessage(dmRequests[1]!)).toContain(
+      "Keep this turn's narration to at most three sentences: what the character's action achieves and what it costs. Save detail for scene beats."
+    );
+  });
+
+  it('does not cap a resolve instruction outside combat', async () => {
+    const { deps: built } = deps({});
+    const director = await Director.create(config(), built);
+    // dmInstruction is private; cast to reach it directly rather than contriving a reachable
+    // resolve-outside-combat state through the public step API (nextActor never produces one).
+    const instruction = (
+      director as unknown as {
+        dmInstruction(
+          reason: 'beat' | 'resolve' | 'monster',
+          combatantId: string | undefined,
+          nudge: string | undefined
+        ): string;
+      }
+    ).dmInstruction('resolve', 'kira', undefined);
+
+    expect(instruction).not.toContain("Keep this turn's narration");
+  });
+
+  it('G2.2: leaves a PC downed in the same beat that started combat on their turn', async () => {
     const { deps: built, sink } = deps(
       {
         dm: [
@@ -833,12 +1566,9 @@ describe('Director', () => {
     const state = director.currentState;
     expect(state.combatants.kira).toMatchObject({ hp: 0 });
     expect(state.combat!.order[0]).toMatchObject({ combatantId: 'kira' });
-    expect(state.combat!.turnIndex).toBe(1);
-    expect(nextActor(state)).toMatchObject({
-      kind: 'pc',
-      pcId: 'tomas',
-      reason: 'combat_turn',
-    });
+    // She keeps her place: a dying PC's turn is a death saving throw, not a skipped turn.
+    expect(state.combat!.turnIndex).toBe(0);
+    expect(nextActor(state)).toMatchObject({ kind: 'death_save', combatantId: 'kira' });
     expect(foldEvents(sink.events)).toEqual(state);
   });
 
@@ -946,6 +1676,147 @@ describe('Director', () => {
     await expect(
       Director.create(config({ loreCommit: 'a-different-commit' }), { ...built, sink })
     ).rejects.toThrow(/lore commit/i);
+  });
+
+  describe('accepts the tool shapes models actually send', () => {
+    it('hand_off: coerces a bare string target instead of re-prompting', async () => {
+      const {
+        deps: built,
+        model,
+        sink,
+      } = deps({
+        dm: [respond(toolCall('hand_off', { target: 'party' }))],
+      });
+      const director = await Director.create(config(), built);
+      await director.step(); // session_start
+      await director.step(); // the DM's whole beat, in a single model call
+      expect(sink.events.filter((e) => e.type === 'hand_off')).toMatchObject([
+        { target: { kind: 'party' }, responders: ['kira', 'tomas'] },
+      ]);
+      expect(model.requests).toHaveLength(1);
+    });
+
+    it('narrate: coerces an emotion outside the enum to neutral instead of re-prompting', async () => {
+      const {
+        deps: built,
+        model,
+        sink,
+      } = deps({
+        dm: [
+          respond(
+            toolCall('narrate', { text: 'The engines roar to life.', emotion: 'furious' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      });
+      const director = await Director.create(config(), built);
+      await director.step(); // session_start
+      await director.step(); // the DM's whole beat, in a single model call
+      expect(sink.events.filter((e) => e.type === 'narration')).toMatchObject([
+        { text: 'The engines roar to life.', emotion: 'neutral' },
+      ]);
+      expect(model.requests).toHaveLength(1);
+    });
+
+    it('attack: matches a loosely named attack by a unique substring instead of re-prompting', async () => {
+      const {
+        deps: built,
+        model,
+        sink,
+      } = deps({
+        dm: [
+          respond(
+            toolCall('attack', { attackerId: 'tomas', targetId: 'kira', attackName: 'sword' }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      });
+      const director = await Director.create(config(), { ...built, rng: scriptedRng([12, 3]) });
+      await director.step(); // session_start
+      await director.step(); // the DM's whole beat, in a single model call
+      expect(sink.events.filter((e) => e.type === 'roll' && e.kind === 'attack')).toMatchObject([
+        { label: expect.stringContaining('Tomas Reed Longsword') },
+      ]);
+      expect(model.requests).toHaveLength(1);
+    });
+  });
+
+  it('repeats the closing instruction as its own message once the target is reached', async () => {
+    const { deps: built, model } = deps({
+      dm: [
+        respond(toolCall('narrate', { text: 'The bells ring out over the rooftops.' })),
+        respond(toolCall('hand_off', { target: { kind: 'party' } })),
+      ],
+    });
+    const director = await Director.create(config({ targetMinutes: 0.02 }), built);
+    await director.step(); // session_start
+    await director.step(); // DM beat: narrate, then a second step for the hand_off
+
+    const dmRequests = model.requests.filter((request) => request.seat === 'dm');
+    expect(dmRequests).toHaveLength(2);
+    expect(dmRequests[1]!.messages.at(-1)).toMatchObject({
+      role: 'user',
+      content: expect.stringContaining('Time is up'),
+    });
+  });
+
+  describe('retold narration', () => {
+    const swing =
+      'The goblin swings its rusted scimitar at Kira, the jagged blade biting into her shoulder as the goblin cackles.';
+    const swingAgain =
+      'The goblin swings its rusted scimitar at Kira again, the jagged blade biting her shoulder while the goblin cackles.';
+
+    it('judges a narration only against what was told since the last roll, so a second attack narrates', async () => {
+      const { deps: built, sink } = deps({
+        dm: [
+          respond(
+            toolCall('narrate', { text: swing }),
+            toolCall('attack', { attackerId: 'tomas', targetId: 'kira', attackName: 'sword' }),
+            toolCall('narrate', { text: swingAgain }),
+            toolCall('hand_off', { target: { kind: 'party' } })
+          ),
+        ],
+      });
+      const director = await Director.create(config(), { ...built, rng: scriptedRng([12, 3]) });
+      await director.step(); // session_start
+      await director.step(); // DM beat
+      expect(sink.events.filter((e) => e.type === 'narration').map((e) => e.text)).toEqual([
+        swing,
+        swingAgain,
+      ]);
+    });
+
+    it('turns away a retelling, and ends the turn after three (session 010 retold one moment seven times)', async () => {
+      const {
+        deps: built,
+        model,
+        sink,
+      } = deps({
+        dm: [
+          respond(toolCall('narrate', { text: swing })),
+          respond(toolCall('narrate', { text: swingAgain })),
+          respond(toolCall('narrate', { text: swingAgain })),
+          respond(toolCall('narrate', { text: swingAgain })),
+          respond(toolCall('hand_off', { target: { kind: 'party' } })),
+        ],
+      });
+      const director = await Director.create(config(), built);
+      await director.step(); // session_start
+      await director.step(); // DM beat
+      expect(sink.events.filter((e) => e.type === 'narration').map((e) => e.text)).toEqual([swing]);
+      expect(
+        sink.events
+          .filter((e) => e.type === 'validator_flag')
+          .map((e) => (e as { rule: string }).rule)
+      ).toEqual([
+        'duplicate_narration',
+        'duplicate_narration',
+        'duplicate_narration',
+        'dm_retell_limit',
+      ]);
+      expect(model.requests.filter((request) => request.seat === 'dm')).toHaveLength(4);
+      expect(sink.events.filter((e) => e.type === 'hand_off')).toHaveLength(1);
+    });
   });
 
   describe('F5: malformed model responses', () => {
@@ -1106,6 +1977,13 @@ describe('Director', () => {
       { rule: 'tool_error', retries: 1, resolution: 're_prompted' },
     ]);
     expect(sink.events.some((e) => e.type === 'action')).toBe(false);
+    expect(sink.events.filter((e) => e.type === 'ooc_note')).toMatchObject([
+      {
+        text: expect.stringContaining(
+          'Tool error (declare_spell): You have no level 2 spell slots'
+        ),
+      },
+    ]);
     const kiraRequests = model.requests.filter((r) => r.seat === 'player-kira');
     expect(kiraRequests).toHaveLength(2);
     expect(kiraRequests[1]!.messages.at(-1)).toMatchObject({
@@ -1345,9 +2223,11 @@ describe('Director', () => {
             toolCall('hand_off', { target: { kind: 'party' } })
           ),
           respond(
+            // Enough to kill Kira outright (massive damage): a PC merely downed would keep
+            // taking turns, rolling death saves.
             toolCall('apply_damage', {
               targetId: 'kira',
-              amount: 10,
+              amount: 20,
               damageType: 'fire',
               reason: 'a shared blast',
             }),
@@ -1452,6 +2332,11 @@ describe('Director', () => {
       },
       { type: 'turn_end', actor: 'tomas' },
     ]);
+    expect(sink.events.filter((e) => e.type === 'ooc_note')).toMatchObject(
+      Array.from({ length: 3 }, () => ({
+        text: expect.stringContaining('Invalid tool call (unknown_tool): Unknown tool'),
+      }))
+    );
   });
 
   it('G5.7: a text-only player reply becomes a dialogue event', async () => {

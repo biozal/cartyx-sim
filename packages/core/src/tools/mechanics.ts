@@ -1,5 +1,6 @@
 import {
   Ability,
+  SKILLS,
   Skill,
   applyDamage,
   applyHealing,
@@ -18,11 +19,15 @@ import {
 import { z } from 'zod';
 import type { StateField } from '../events';
 import type { EventInput, TurnRecorder } from '../recorder';
-import { defineTool, getCombatant, ToolError } from './types';
+import { defineTool, getCombatant, requireCombatTurn, ToolError } from './types';
 
 export const RollModeArg = z.enum(['normal', 'advantage', 'disadvantage']).default('normal');
 
+// `deathSaves` leads so a downed PC's tally is on the record before whatever it caused
+// (stabilization, death, or waking on a natural 20).
 const DIFF_FIELDS = [
+  'deathSaves',
+  'stable',
   'hp',
   'tempHp',
   'maxHp',
@@ -126,7 +131,12 @@ export const requestCheck = defineTool({
     const combatant = getCombatant(recorder.state, args.combatantId);
     let spec: CheckSpec;
     if (args.checkType === 'skill') {
-      if (!args.skill) throw new ToolError('checkType "skill" requires skill.');
+      // Deliberately not guessed from `reason`: across sessions 001-013 no reason names the skill
+      // being rolled, while two name another one ("determine the entity's nature" for an Arcana
+      // check), so guessing rolled the wrong skill silently. The DM repairs this in one call.
+      if (!args.skill) {
+        throw new ToolError(`checkType "skill" requires skill. Skills: ${SKILLS.join(', ')}.`);
+      }
       spec = { type: 'skill', skill: args.skill };
     } else {
       if (!args.ability) throw new ToolError(`checkType "${args.checkType}" requires ability.`);
@@ -153,12 +163,13 @@ export const attack = defineTool({
     attackName: z.string().trim().min(1).max(200),
     mode: RollModeArg,
   }),
-  run(args, { recorder, rng }) {
+  run(args, { recorder, rng, history }) {
     const attacker = getCombatant(recorder.state, args.attackerId);
     const target = getCombatant(recorder.state, args.targetId);
     if (attacker.dead || attacker.hp === 0) {
       throw new ToolError(`${attacker.name} cannot attack at 0 HP or while dead.`);
     }
+    requireCombatTurn(recorder.state, attacker, 'attack', history, recorder);
     const result = resolveAttack(attacker, target, args.attackName, rng, args.mode);
     const label = `${attacker.name} ${result.attack.name} → ${target.name}`;
     for (const event of attackRollEvents(attacker.id, label, result)) recorder.emit(event);
@@ -201,10 +212,11 @@ export const castSpell = defineTool({
     healing: z.string().min(1).optional(),
     mode: RollModeArg,
   }),
-  run(args, { recorder, rng }) {
+  run(args, { recorder, rng, history }) {
     const { state } = recorder;
     const caster = getCombatant(state, args.casterId);
     const targets = args.targetIds.map((id) => getCombatant(state, id));
+    requireCombatTurn(state, caster, 'cast a spell', history, recorder);
     // Save and healing effects hit each target once, regardless of duplicate ids; a repeated
     // attack (e.g. Scorching Ray) is a separate ray per id.
     const seenIds = new Set<string>();

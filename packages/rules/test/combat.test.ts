@@ -54,4 +54,41 @@ describe('resolveAttack', () => {
     const corpse = { ...goblin, hp: 0, dead: true };
     expect(() => rollAttack(fighter.attacks[0]!, corpse, scriptedRng([10]))).toThrow(RulesError);
   });
+
+  describe('a loosely named attack', () => {
+    const miner = makeCombatant({
+      id: 'miner',
+      attacks: [{ name: 'Rusty Pickaxe', bonus: 3, damage: '1d6+1', damageType: 'bludgeoning' }],
+    });
+    const duelist = makeCombatant({
+      id: 'duelist',
+      attacks: [
+        { name: 'Rusty Pickaxe', bonus: 3, damage: '1d6+1', damageType: 'bludgeoning' },
+        { name: 'Pickaxe Handle', bonus: 2, damage: '1d4', damageType: 'bludgeoning' },
+      ],
+    });
+
+    it('matches a unique case-insensitive substring of the attack name', () => {
+      const result = resolveAttack(miner, goblin, 'pickaxe', scriptedRng([10]));
+      expect(result.attack.name).toBe('Rusty Pickaxe');
+    });
+
+    it('matches when the attack name is a substring of the query', () => {
+      const result = resolveAttack(miner, goblin, 'a rusty pickaxe swing', scriptedRng([10]));
+      expect(result.attack.name).toBe('Rusty Pickaxe');
+    });
+
+    it('errors, listing every candidate, when the substring matches two or more attacks', () => {
+      expect(() => resolveAttack(duelist, goblin, 'pickaxe', scriptedRng([10]))).toThrow(
+        'Known attacks: Rusty Pickaxe, Pickaxe Handle'
+      );
+    });
+
+    it('does not fall back to a specific but wrong weapon name, even with only one attack', () => {
+      // Kira-shaped case: a real weapon name, just not one this combatant carries.
+      expect(() => resolveAttack(fighter, goblin, 'Light Hammer', scriptedRng([10]))).toThrow(
+        'Known attacks: Longsword'
+      );
+    });
+  });
 });

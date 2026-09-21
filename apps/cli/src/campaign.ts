@@ -14,6 +14,7 @@ const SeatRef = z.object({
   maxOutputTokens: z.number().int().positive().optional(),
   timeoutMs: z.number().int().positive().optional(),
   toolChoice: z.enum(['auto', 'required']).optional(),
+  reasoningEffort: z.enum(['none', 'low', 'medium', 'high']).optional(),
   fallbacks: z
     .array(z.object({ endpoint: z.string().min(1), model: z.string().min(1) }))
     .default([]),
@@ -29,12 +30,18 @@ export const CampaignFile = z.object({
   endpoints: z.record(z.string(), Endpoint),
   seats: z.object({
     dm: SeatRef,
+    /** Optional: reviews DM narration for playing the player characters. */
+    checker: SeatRef.optional(),
+    /** Optional: labels who speaks quotes in DM narration for `sim script`. Defaults to `checker`. */
+    script: SeatRef.optional(),
     /** Keyed by party member id. */
     players: z.record(z.string(), SeatRef),
   }),
 });
 
 export const DM_SEAT = 'dm';
+export const CHECKER_SEAT = 'checker';
+export const SCRIPT_SEAT = 'script';
 
 export function playerSeat(pcId: string): string {
   return `player-${pcId}`;
@@ -48,9 +55,11 @@ export interface Campaign {
   loreCommit: string;
   party: Combatant[];
   /** Seat ids for the director. */
-  seats: { dm: string; players: Record<string, string> };
+  seats: { dm: string; players: Record<string, string>; checker?: string };
   /** Model configuration per seat id, for the model client and `sim bench`. */
   models: Record<string, SeatConfigInput>;
+  /** The seat `sim script` labels quotes with: `script`, else `checker`, else none. */
+  scriptSeat?: string;
 }
 
 function isNotFound(error: unknown): boolean {
@@ -133,6 +142,7 @@ export async function loadCampaign(campaignsDir: string, campaignId: string): Pr
     maxOutputTokens: ref.maxOutputTokens,
     timeoutMs: ref.timeoutMs,
     toolChoice: ref.toolChoice,
+    reasoningEffort: ref.reasoningEffort,
     fallbacks: ref.fallbacks.map((fallback, index) => ({
       endpoint: endpoint(fallback.endpoint, `${where} fallback ${index + 1}`),
       model: fallback.model,
@@ -156,6 +166,13 @@ export async function loadCampaign(campaignsDir: string, campaignId: string): Pr
   const models: Record<string, SeatConfigInput> = {
     [DM_SEAT]: resolve(file.seats.dm, 'seats.dm'),
   };
+  if (file.seats.checker) models[CHECKER_SEAT] = resolve(file.seats.checker, 'seats.checker');
+  if (file.seats.script) models[SCRIPT_SEAT] = resolve(file.seats.script, 'seats.script');
+  const scriptSeat = file.seats.script
+    ? SCRIPT_SEAT
+    : file.seats.checker
+      ? CHECKER_SEAT
+      : undefined;
   // Built as entries and turned into an object at the end, rather than assigning `players[pc.id]
   // = seat` in the loop: a party member id of "__proto__" would silently be dropped by that plain
   // assignment (the inherited `__proto__` setter ignores a non-object value) instead of becoming a
@@ -178,7 +195,8 @@ export async function loadCampaign(campaignsDir: string, campaignId: string): Pr
     targetMinutes: file.targetMinutes,
     loreCommit: file.loreCommit,
     party,
-    seats: { dm: DM_SEAT, players },
+    seats: { dm: DM_SEAT, players, ...(file.seats.checker ? { checker: CHECKER_SEAT } : {}) },
     models,
+    ...(scriptSeat ? { scriptSeat } : {}),
   };
 }

@@ -31,7 +31,14 @@ export function removeItem(combatant: Combatant, name: string, quantity = 1): Co
   const existing = combatant.inventory.find((item) => sameItem(item.name, name));
   if (!existing || existing.quantity < quantity) {
     const held = existing?.quantity ?? 0;
-    throw new RulesError(`${combatant.name} has ${held} × "${name}", cannot remove ${quantity}`);
+    // What they do carry, so the DM can spend that instead of inventing another item.
+    const carrying =
+      combatant.inventory
+        .map((item) => (item.quantity > 1 ? `${item.quantity} × ${item.name}` : item.name))
+        .join(', ') || 'nothing';
+    throw new RulesError(
+      `${combatant.name} has ${held} × "${name}", cannot remove ${quantity}. Carrying: ${carrying}. Add an item with add_item before spending it.`
+    );
   }
   const inventory =
     existing.quantity === quantity

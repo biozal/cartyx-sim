@@ -154,4 +154,41 @@ describe('benchSeat', () => {
       expect.stringContaining('tool trial 1 failed'),
     ]);
   });
+
+  it("sends the seat's reasoning effort with the speed test and the tool trials", async () => {
+    const fake = await server((_body, index) =>
+      index === 0
+        ? { text: 'A corridor.' }
+        : { toolCalls: [{ name: 'roll_dice', arguments: { dice: '1d20+3', reason: 'ok' } }] }
+    );
+
+    await benchSeat(
+      'checker',
+      { endpoint: { baseURL: fake.baseURL }, model: 'glm', reasoningEffort: 'none' },
+      { trials: 1 }
+    );
+
+    expect(fake.requests.map((sent) => sent.reasoning_effort)).toEqual(['none', 'none']);
+  });
+
+  it('runs no tool trials when trials is 0', async () => {
+    const fake = await server(() => ({ text: 'A corridor.', completionTokens: 20 }), {
+      models: ['glm'],
+    });
+
+    const result = await benchSeat(
+      'checker',
+      { endpoint: { baseURL: fake.baseURL }, model: 'glm' },
+      { trials: 0 }
+    );
+
+    expect(result).toMatchObject({
+      reachable: true,
+      modelListed: true,
+      toolCallTrials: 0,
+      toolCallSuccesses: 0,
+      errors: [],
+    });
+    expect(fake.requests).toHaveLength(1);
+  });
 });

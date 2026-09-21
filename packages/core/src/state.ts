@@ -26,6 +26,8 @@ export interface NpcRecord {
   name: string;
   invented: boolean;
   loreEntityId?: string;
+  /** From `npc_introduced`. Kept on the record so the DM prompt still has it once the introduction scrolls out of the transcript window. */
+  description?: string;
 }
 
 export interface CombatState {
@@ -49,6 +51,8 @@ export interface GameState {
   npcs: Record<string, NpcRecord>;
   scene: { location: string; loreEntityId?: string } | null;
   combat: CombatState | null;
+  /** Fights started this session, running or finished: a session has room for one (spec §5.3). */
+  fightsSoFar: number;
   /** PCs the DM handed off to who have not taken their turn yet (exploration only). */
   pendingResponders: string[];
   spokenWords: number;
@@ -87,6 +91,7 @@ export function initialState(): GameState {
     npcs: {},
     scene: null,
     combat: null,
+    fightsSoFar: 0,
     pendingResponders: [],
     spokenWords: 0,
     wordsBySpeaker: {},
@@ -144,6 +149,7 @@ export function applyEvent(state: GameState, event: SimEvent): GameState {
         name: event.name,
         invented: event.invented,
         loreEntityId: event.loreEntityId,
+        description: event.description,
       };
       break;
     case 'scene_change':
@@ -157,6 +163,7 @@ export function applyEvent(state: GameState, event: SimEvent): GameState {
       break;
     case 'combat_start':
       next.combat = { order: event.order, round: 1, turnIndex: 0, declared: false };
+      next.fightsSoFar += 1;
       next.pendingResponders = [];
       next.idleHandOffs = 0;
       break;
@@ -200,16 +207,35 @@ export function isUp(combatant: Combatant | undefined): combatant is Combatant {
   return combatant !== undefined && !combatant.dead && combatant.hp > 0;
 }
 
+/** A PC at 0 HP who is neither dead nor stable: their turn is a death saving throw. */
+export function isDying(combatant: Combatant | undefined): boolean {
+  return (
+    combatant !== undefined &&
+    combatant.kind === 'pc' &&
+    !combatant.dead &&
+    combatant.hp === 0 &&
+    !combatant.stable
+  );
+}
+
+/** Who takes the next turn in initiative: anyone who can act, plus dying PCs. */
+export function takesTurn(combatant: Combatant | undefined): boolean {
+  return isUp(combatant) || isDying(combatant);
+}
+
 export type NextActor =
   | { kind: 'ended' }
   | { kind: 'dm'; reason: 'beat' | 'resolve' | 'monster'; combatantId?: string }
-  | { kind: 'pc'; pcId: string; reason: 'response' | 'combat_turn' };
+  | { kind: 'pc'; pcId: string; reason: 'response' | 'combat_turn' }
+  /** A downed PC's turn: the engine rolls their death saving throw, with no model call. */
+  | { kind: 'death_save'; combatantId: string };
 
 export function nextActor(state: GameState): NextActor {
   if (state.ended) return { kind: 'ended' };
   if (state.combat) {
     const entry = state.combat.order[state.combat.turnIndex];
     const combatant = entry ? state.combatants[entry.combatantId] : undefined;
+    if (combatant && isDying(combatant)) return { kind: 'death_save', combatantId: combatant.id };
     if (combatant?.kind === 'pc') {
       return state.combat.declared
         ? { kind: 'dm', reason: 'resolve', combatantId: combatant.id }
@@ -224,9 +250,10 @@ export function nextActor(state: GameState): NextActor {
 }
 
 /**
- * The next combatant in initiative order who can act, or null if nobody can. With `inclusive`,
- * the search starts at the current turn index instead of the one after it (no round increment
- * when it resolves there) — for checking whether the combatant whose turn it already is can act.
+ * The next combatant in initiative order who takes a turn (anyone who can act, plus a dying PC
+ * rolling a death saving throw), or null if nobody does. With `inclusive`, the search starts at
+ * the current turn index instead of the one after it (no round increment when it resolves there)
+ * — for checking whether the combatant whose turn it already is still has one.
  */
 export function advanceCombat(
   state: GameState,
@@ -239,7 +266,7 @@ export function advanceCombat(
   for (let offset = start; offset <= count; offset++) {
     const position = combat.turnIndex + offset;
     const entry = combat.order[position % count]!;
-    if (isUp(state.combatants[entry.combatantId])) {
+    if (takesTurn(state.combatants[entry.combatantId])) {
       return {
         round: combat.round + Math.floor(position / count),
         turnIndex: position % count,

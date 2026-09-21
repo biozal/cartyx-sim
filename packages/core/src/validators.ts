@@ -1,11 +1,18 @@
-import { escapeRegExp } from './text';
+import { splitSentences } from './pc-control';
+import { escapeRegExp, joinKeptSentences } from './text';
 
 export type ViolationRule =
-  'dm_controls_pc' | 'mechanics_without_tool' | 'player_controls_other' | 'player_narrates_outcome';
+  | 'dm_controls_pc'
+  | 'dm_state_leak'
+  | 'mechanics_without_tool'
+  | 'player_controls_other'
+  | 'player_narrates_outcome';
 
 export interface Violation {
   rule: ViolationRule;
   message: string;
+  /** Only for `dm_state_leak`: the narration with its leaks removed, and what was removed. */
+  strip?: StateLeakStrip;
 }
 
 // Present and past tense, so "Kira draws" and "Kira drew" both count.
@@ -140,11 +147,155 @@ function controlledCharacter(text: string, names: readonly string[]): string | n
   return null;
 }
 
+// Prompt state that must never reach narration: a combatant's id parenthetical, an HP block
+// (either digit order, or "HP rises to 19/28"), a hit-point readout ("9 out of 22 hit points",
+// "drops to just 3 hit points", "4 hit points left"; "loses 3 hit points" is a mechanics claim,
+// left to that rule, and "drops to 0 hit points" is a PC going down, which everyone sees), an AC
+// readout, a bald "whose turn" statement, a turn-order readout ("Initiative is rolled.", "The
+// order of combat is as follows:", "**Initiative:** Kira 18"), a transcript tag (e.g. "[combat]",
+// "[hand_off]"), a hand-off JSON object, or the DM echoing its engine instruction ("Act for it
+// with tools, narrate, then call hand_off.", "Continue with other tools, or call hand_off.") or a
+// tool call ("hand_off(target=…)", "attack(goblin-1)", or session 010's "hand_off" and
+// "target: party" as bare lines, session 012's bold "**hand_off** to the party."), or the DM
+// talking to the engine rather than the table ("My apologies for the error. Let me correct the
+// narration of Kira's turn." reached session 012's script). Meta-talk is matched at the start of
+// a sentence and has to name what went wrong, so an NPC's "My apologies, my lady" and a wright's
+// "Let me correct the ledger" are untouched; a sentence that carries its correction after a colon
+// keeps it, since only the prefix is dropped (see META_PREFIX). "HP" followed by a figure counts in any
+// wording ("HP drops to a critical 8"), since "HP" is never story prose; a whose-turn statement
+// counts in the DM's own words too, but only against a name ("Giant Rat 2's turn is complete."),
+// so "before its turn is complete the rope snaps" and the table talk "Kira, it is your turn. What
+// do you do?" both stay; "health" or "hit points"
+// and "health" or "hit points"
+// counts with a readout against a two-digit maximum ("health to 36/52", "36/52 health", "hit
+// points 36 of 52"), so "3/4 of a vial" stays. Checked one sentence at a time, so the prose
+// around a leak survives. "Order of battle" and "turn order" are left alone: story prose uses both.
+const SENTENCE_LEAK_PATTERNS = [
+  /\(id:\s*[a-z0-9-]+\)/i,
+  /\bHP\b[^.\d\n]{0,30}\d/i,
+  /\b(?:health|hit\s+points?)\b[^.\d\n]{0,30}\d+\s*(?:\/|(?:out\s+)?of)\s*\d{2,}/i,
+  /\d+\s*\/\s*\d+\s*(?:HP|hit\s+points?|health)\b/i,
+  /\b(?:\d+\s+(?:out\s+)?of\s+\d+|(?:to|at|with)\s+(?:just\s+|only\s+)?[1-9]\d*)\s+(?:hit\s+points?|HP)\b/i,
+  /\b[1-9]\d*\s+(?:hit\s+points?|HP)\s+(?:left|remaining)\b/i,
+  /\bAC\s+\d+\b/i,
+  /\bIt is [^.]{1,40}['’]s turn\b|(?:[A-Z][\w'’-]*|\b\d+)['’]s turn is (?:complete|over|done|finished)\b/,
+  /\binitiative\s+order\b|\border\s+of\s+(?:combat|initiative)\b|\binitiative\s+(?:is|has been)\s+rolled\b|\binitiative\b\W{0,4}:/i,
+  /\[(?:combat|roll|state|scene|npc|lore|invented|hand_off|ooc)\]/i,
+  /\{[^}]*"(?:target|kind)"\s*:/,
+  /^[`*_]{0,2}[a-z]+_[a-z_]+\b|^(?:target|kind|ids)\s*:/,
+  /^[`*_]{0,2}(?:my )?apologies\b[^.\n]{0,40}\b(?:error|mistake|confusion|correction|narration|that)\b|^[`*_]{0,2}(?:let me|I['’]ll|I will) (?:correct|redo|rephrase|re-?narrate)\b[^.\n]{0,40}\b(?:that|this|it|narration|beat|turn|line)\b/i,
+  /^Act for [^.,]{1,40} with tools\b|\b(?:then|now|or)\s+call\s+`?hand_off\b|^Continue with other tools\b|\b(?:narrate|attack)\(|\b[a-z]+_[a-z_]+\(/i,
+];
+
+// Whole lines of prompt state: the "Current Status" heading the DM writes above its own status
+// readout, and a turn-order entry, which is how the DM reads out initiative: a numbered item that
+// is only a combatant's name ("1. Mira Ashdown", "3. Shadow Stalker #3"), or a combatant's name
+// with its initiative after it, in a list or not ("- **Bram Holloway** (21)", "Kira Vale — 18",
+// "2. Goblin: 12", "1. Kira Vale (Initiative 18)"). A bulleted name with no number is left alone,
+// since a notice or a roll call lists names that way too.
+// Meta-talk that introduces the corrected narration rather than replacing it: only the prefix
+// goes, so "Correction: the goblin dodges." keeps the goblin dodging.
+const META_PREFIX =
+  /^[`*_]{0,2}(?:correction|(?:my )?apologies[^.:\n]{0,40}\b(?:error|mistake|confusion|correction)\b[^.:\n]{0,20}|let me correct that|I['’]ll correct that)\s*:\s*/i;
+
+const LINE_LEAK_PATTERNS = [/^\s*\*\*Current Status:?\*\*\s*$/i, /^\s*Current Status:?\s*$/i];
+const NUMBERED_ITEM = /^\s*\d{1,2}[.)]\s+/;
+const BULLET = /^\s*[-*•]\s+/;
+const INITIATIVE_SUFFIX =
+  /(?:\s*\(\s*(?:initiative\s*:?\s*)?\d{1,2}\s*\)|\s*[—–:-]\s*(?:initiative\s*:?\s*)?\d{1,2})\s*$/i;
+
+function isTurnOrderEntry(line: string, combatantNames: readonly string[]): boolean {
+  if (combatantNames.length === 0) return false;
+  const numbered = NUMBERED_ITEM.test(line);
+  let item = line.replace(NUMBERED_ITEM, '').replace(BULLET, '').trim();
+  const withInitiative = INITIATIVE_SUFFIX.test(item);
+  if (!numbered && !withInitiative) return false;
+  item = item.replace(INITIATIVE_SUFFIX, '');
+  const name = item
+    .replace(/\*\*|__/g, '')
+    .replace(/[.:]\s*$/, '')
+    .replace(/\s+#(\d+)$/, ' $1')
+    .trim()
+    .toLowerCase();
+  if (name.length === 0) return false;
+  return combatantNames.some((candidate) => {
+    // Numbered copies share one base name: the DM may write "Shadow Stalker 3" for a monster
+    // added as "Shadow Stalker", or "Hooded Figure" for one added as "Hooded Figure 1".
+    const base = candidate.toLowerCase().replace(/\s+\d+$/, '');
+    return name === base || new RegExp(`^${escapeRegExp(base)}\\s+\\d+$`).test(name);
+  });
+}
+
+/** What `stripStateLeaks` removed from a narration, and what is left. */
+export interface StateLeakStrip {
+  /** The narration without its leaked lines and sentences; '' when nothing is left. */
+  kept: string;
+  /** The removed lines and sentences, verbatim and in order. */
+  removed: string[];
+}
+
+const leaks = (sentence: string) => SENTENCE_LEAK_PATTERNS.some((p) => p.test(sentence));
+
+/**
+ * The narration without its prompt-state leaks: a heading or turn-order entry goes as a whole
+ * line, any other leak goes as the one sentence it sits in, so prose sharing its line survives,
+ * and a quote mark the cut sentence held is added back to the speech left around it. Runs of
+ * blank lines left behind collapse to one paragraph break.
+ */
+export function stripStateLeaks(
+  text: string,
+  combatantNames: readonly string[] = []
+): StateLeakStrip {
+  const removed: string[] = [];
+  const lines = text.split('\n').map((line) => {
+    if (
+      LINE_LEAK_PATTERNS.some((pattern) => pattern.test(line)) ||
+      isTurnOrderEntry(line, combatantNames)
+    ) {
+      removed.push(line.trim());
+      return '';
+    }
+    // A meta prefix with the real narration behind it loses only the prefix.
+    const parts = splitSentences(line).map((part) => {
+      const trimmed = part.sentence.replace(META_PREFIX, '');
+      if (trimmed === part.sentence || trimmed.length === 0) return part;
+      removed.push(part.sentence.slice(0, part.sentence.length - trimmed.length).trim());
+      return { ...part, sentence: trimmed };
+    });
+    if (!parts.some(({ sentence }) => leaks(sentence)))
+      return joinKeptSentences(parts.map((part) => ({ ...part, keep: true })));
+    const cut = parts.map((part) => ({ ...part, keep: !leaks(part.sentence) }));
+    removed.push(...cut.filter((part) => !part.keep).map((part) => part.sentence));
+    return joinKeptSentences(cut);
+  });
+  const kept = lines
+    .join('\n')
+    .replace(/\n[ \t]*(?:\n[ \t]*)+/g, '\n\n')
+    .trim();
+  return { kept, removed };
+}
+
 export function validateDmText(
   text: string,
-  context: { pcNames: readonly string[]; mechanicsToolCalled: boolean }
+  context: {
+    pcNames: readonly string[];
+    mechanicsToolCalled: boolean;
+    /** True when a checker seat is configured: it replaces this verb-list rule. Default false. */
+    skipPcControl?: boolean;
+    /** Every combatant's name, so a turn-order list of them counts as a leak. Default none. */
+    combatantNames?: readonly string[];
+  }
 ): Violation | null {
-  const pc = controlledCharacter(text, context.pcNames);
+  const leaked = stripStateLeaks(text, context.combatantNames);
+  if (leaked.removed.length > 0) {
+    return {
+      rule: 'dm_state_leak',
+      message:
+        'Narration must not include prompt state such as combatant ids, HP counts, turn-order lists, or whose-turn lines; describe the scene in prose instead.',
+      strip: leaked,
+    };
+  }
+  const pc = context.skipPcControl ? null : controlledCharacter(text, context.pcNames);
   if (pc) {
     return {
       rule: 'dm_controls_pc',
