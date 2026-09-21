@@ -24,10 +24,18 @@ export interface IndexMeta {
   files: number;
   chunks: number;
   builtAt: string;
+  /** Display names that resolved to more than one Kanka entity, so `--check` can report them
+   * without rebuilding. A `meta.json` written before this field existed simply lacks it; readers
+   * must treat a missing value as `[]`, not as an absent-but-required field. */
+  ambiguous: readonly string[];
 }
 
-/** The fields that decide staleness; `loreCommit` deliberately is not one of them. */
-export type IndexIdentity = Omit<IndexMeta, 'loreCommit' | 'files' | 'chunks' | 'builtAt'>;
+/** The fields that decide staleness; `loreCommit` deliberately is not one of them. Nor is
+ * `ambiguous`: an unresolved-name report changing never means the indexed content did. */
+export type IndexIdentity = Omit<
+  IndexMeta,
+  'loreCommit' | 'files' | 'chunks' | 'builtAt' | 'ambiguous'
+>;
 
 export interface BuildOptions {
   lorePath: string;
@@ -136,6 +144,7 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
     files: files.length,
     chunks: chunks.length,
     builtAt: new Date().toISOString(),
+    ambiguous: entities.ambiguous,
   };
 
   // Build beside the target and rename, so an interrupted index leaves the previous one intact.

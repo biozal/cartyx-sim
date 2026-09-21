@@ -33,6 +33,7 @@ describe('buildIndex', () => {
     expect(result.meta.documentPrefix).toBe(DOCUMENT_PREFIX);
     expect(result.meta.queryPrefix).toBe(QUERY_PREFIX);
     expect(result.meta.contentDigest).toMatch(/^sha256:/);
+    expect(result.meta.ambiguous).toEqual(result.ambiguous);
     expect(await readMeta(indexDir)).toEqual(result.meta);
   });
 
@@ -86,6 +87,7 @@ describe('isStale', () => {
     files: 2,
     chunks: 3,
     builtAt: '2026-09-20T00:00:00.000Z',
+    ambiguous: [],
   };
   const current = {
     lorePath: '/lore',

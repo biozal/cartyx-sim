@@ -72,7 +72,24 @@ describe('runIndex', () => {
       embedder: new FakeEmbedder(16),
     });
     expect(checked.rebuilt).toBe(false);
+    expect(checked.stale).toBe(true);
     expect(checked.meta).toBeUndefined();
+  });
+
+  it('--check reports staleness after a lore file changes, without rebuilding', async () => {
+    const { campaignsDir, campaign } = await fixture();
+    const embedder = new FakeEmbedder(16);
+    const first = await runIndex({ campaignsDir, campaign, embedder });
+    const lorePath = first.meta!.lorePath;
+    await writeFile(
+      join(lorePath, 'dm', 'avalon.md'),
+      '# Avalon Artificers Academy\n\nA polished rival school north of the river, now with a fresh coat of paint on every workshop wall.\n'
+    );
+    const checked = await runIndex({ campaignsDir, campaign, check: true, embedder });
+    expect(checked.stale).toBe(true);
+    expect(checked.rebuilt).toBe(false);
+    expect(checked.meta!.builtAt).toBe(first.meta!.builtAt);
+    expect(formatIndexSummary(checked).join('\n')).toContain('stale');
   });
 });
 

@@ -29,6 +29,12 @@ export interface IndexOptions {
 export interface IndexResult {
   indexDir: string;
   rebuilt: boolean;
+  /**
+   * Whether the index (`meta`) is out of date with the lore repo right now. Always `false` after
+   * a rebuild. On `--check`, this is the answer the flag exists to give — `rebuilt` alone cannot
+   * distinguish "confirmed fresh" from "stale, but you asked not to build".
+   */
+  stale: boolean;
   meta: IndexMeta | undefined;
   ambiguous: readonly string[];
   /** The lore version the repo is at right now, whether or not the index was rebuilt. */
@@ -96,17 +102,35 @@ export async function ensureIndex(options: IndexOptions): Promise<IndexResult> {
   const indexDir = loreIndexDir(campaign);
   const existing = await readMeta(indexDir);
   const { identity, loreCommit } = await currentIdentity(campaign, embedder, existing?.dims);
-  const stale = options.force === true || isStale(existing, identity);
+  // Whether the index is actually out of date with the lore repo, independent of `--force`: this
+  // is what `--check` reports, and `--force` must not make an honestly-fresh index look stale.
+  const stale = isStale(existing, identity);
   if (options.check) {
-    return { indexDir, rebuilt: false, meta: existing, ambiguous: [], loreCommit };
+    return {
+      indexDir,
+      rebuilt: false,
+      stale,
+      meta: existing,
+      ambiguous: existing?.ambiguous ?? [],
+      loreCommit,
+    };
   }
-  if (!stale && existing) {
-    return { indexDir, rebuilt: false, meta: existing, ambiguous: [], loreCommit };
+  const shouldRebuild = options.force === true || stale;
+  if (!shouldRebuild && existing) {
+    return {
+      indexDir,
+      rebuilt: false,
+      stale: false,
+      meta: existing,
+      ambiguous: existing.ambiguous ?? [],
+      loreCommit,
+    };
   }
   const built = await buildIndex({ lorePath, indexDir, embedder, log: options.log });
   return {
     indexDir,
     rebuilt: true,
+    stale: false,
     meta: built.meta,
     ambiguous: built.ambiguous,
     loreCommit: built.meta.loreCommit,
@@ -125,12 +149,19 @@ export function formatIndexSummary(result: IndexResult): string[] {
     return lines;
   }
   const meta = result.meta;
-  lines.push(
-    `${result.rebuilt ? 'Built' : 'Index is fresh:'} ${meta.chunks} chunk${
-      meta.chunks === 1 ? '' : 's'
-    } from ${meta.files} file${meta.files === 1 ? '' : 's'} (${meta.embedModel}, ${meta.dims} dims)`
-  );
-  lines.push(`Lore commit: ${meta.loreCommit}`);
+  if (!result.rebuilt && result.stale) {
+    lines.push(
+      `Index is stale (indexed ${meta.loreCommit}, lore is now ${result.loreCommit}). ` +
+        'Run `sim index` to rebuild.'
+    );
+  } else {
+    lines.push(
+      `${result.rebuilt ? 'Built' : 'Index is fresh:'} ${meta.chunks} chunk${
+        meta.chunks === 1 ? '' : 's'
+      } from ${meta.files} file${meta.files === 1 ? '' : 's'} (${meta.embedModel}, ${meta.dims} dims)`
+    );
+    lines.push(`Lore commit: ${meta.loreCommit}`);
+  }
   lines.push(`Index: ${result.indexDir}`);
   if (result.ambiguous.length > 0) {
     lines.push('');
