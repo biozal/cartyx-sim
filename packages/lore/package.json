@@ -1,0 +1,14 @@
+{
+  "name": "@cartyx-sim/lore",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@cartyx-sim/core": "*",
+    "@cartyx-sim/models": "*",
+    "zod": "^4.6.4"
+  }
+}
