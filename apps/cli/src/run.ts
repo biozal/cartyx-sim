@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import {
   basicPrompts,
   describeEvent,
@@ -8,10 +9,12 @@ import {
   type RunResult,
 } from '@cartyx-sim/core';
 import { ScriptedModelClient, StaticLoreIndex } from '@cartyx-sim/core/testing';
+import { openIndex, readMeta, type Embedder } from '@cartyx-sim/lore';
 import { OpenAICompatibleModelClient } from '@cartyx-sim/models';
 import { scriptedRng, secureRng, seededRng, type Rng } from '@cartyx-sim/rules';
 import { loadCampaign } from './campaign';
 import { loadFixture } from './fixture';
+import { currentIdentity, embedderFor, ensureIndex, loreIndexDir } from './index-lore';
 import { JsonlFileSink } from './jsonl-sink';
 import { sessionEventsPath } from './paths';
 
@@ -25,6 +28,8 @@ export interface RunOptions {
   seed?: number;
   resume: boolean;
   log?: (line: string) => void;
+  /** Injected by tests; production builds one from the campaign's embed seat. */
+  embedder?: Embedder;
 }
 
 export type RunSessionResult = RunResult & { eventsPath: string };
@@ -56,19 +61,108 @@ async function fixtureSetup(options: RunOptions, fixturePath: string): Promise<S
   };
 }
 
+/** The lore commit stamped on a session's `session_start`, or undefined if the log has none. */
+async function loggedLoreCommit(eventsPath: string): Promise<string | undefined> {
+  let text: string;
+  try {
+    text = await readFile(eventsPath, 'utf8');
+  } catch {
+    return undefined;
+  }
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') continue;
+    try {
+      const event = JSON.parse(line) as { type?: string; loreCommit?: string };
+      if (event.type === 'session_start') return event.loreCommit;
+    } catch {
+      // A torn final line is recovered elsewhere; here it simply is not a session_start.
+    }
+  }
+  return undefined;
+}
+
 async function campaignSetup(options: RunOptions): Promise<SessionSetup> {
   const campaign = await loadCampaign(options.campaignsDir, options.campaign);
+  if (!campaign.lorePath) {
+    return {
+      config: {
+        session: options.session,
+        targetMinutes: options.targetMinutes ?? campaign.targetMinutes,
+        loreCommit: campaign.loreCommit,
+        party: campaign.party,
+        seats: campaign.seats,
+      },
+      model: new OpenAICompatibleModelClient(campaign.models),
+      // A campaign with no lorePath plays with no lore: every lookup reports a gap.
+      lore: new StaticLoreIndex([]),
+      rng: rngFor(options.seed),
+    };
+  }
+
+  const embedder = options.embedder ?? embedderFor(campaign);
+  const indexDir = loreIndexDir(campaign);
+
+  if (options.resume) {
+    // A resume never rebuilds: the logged commit is the lore that session is playing, and
+    // re-indexing mid-story would change the world underneath it. The director's own check
+    // compares the configured commit against the logged one; this makes the message specific.
+    const meta = await readMeta(indexDir);
+    const logged = await loggedLoreCommit(
+      sessionEventsPath(options.campaignsDir, options.campaign, options.session)
+    );
+    if (!meta) {
+      throw new Error(
+        `No lore index at ${indexDir}, and session ${options.session} was played against lore ` +
+          `${logged ?? 'of an unrecorded version'}. Restore that lore commit and run \`sim index\`.`
+      );
+    }
+    if (logged !== undefined) {
+      // Compares against the actual lore repo too, not only the frozen index: a lore file edited
+      // in place after the session started is a real drift even though it hasn't been reindexed
+      // yet, and `ensureIndex` must never be called here to find that out.
+      const { loreCommit: current } = await currentIdentity(campaign, embedder, meta.dims);
+      const drifted = meta.loreCommit !== logged ? meta.loreCommit : current;
+      if (drifted !== logged) {
+        throw new Error(
+          `The lore has changed since session ${options.session} started: the log records ` +
+            `${logged}, but the lore is now at ${drifted}. Restore that lore commit and run ` +
+            `\`sim index\` before resuming.`
+        );
+      }
+    }
+    const lore = await openIndex(indexDir, embedder);
+    return {
+      config: {
+        session: options.session,
+        targetMinutes: options.targetMinutes ?? campaign.targetMinutes,
+        loreCommit: meta.loreCommit,
+        party: campaign.party,
+        seats: campaign.seats,
+      },
+      model: new OpenAICompatibleModelClient(campaign.models),
+      lore,
+      rng: rngFor(options.seed),
+    };
+  }
+
+  const index = await ensureIndex({
+    campaignsDir: options.campaignsDir,
+    campaign: options.campaign,
+    embedder,
+    log: options.log,
+  });
+  if (index.rebuilt) options.log?.(`Rebuilt the lore index: ${index.indexDir}`);
+  const lore = await openIndex(index.indexDir, embedder);
   return {
     config: {
       session: options.session,
       targetMinutes: options.targetMinutes ?? campaign.targetMinutes,
-      loreCommit: campaign.loreCommit,
+      loreCommit: index.meta!.loreCommit,
       party: campaign.party,
       seats: campaign.seats,
     },
     model: new OpenAICompatibleModelClient(campaign.models),
-    // No lore yet: every lookup reports a gap. Plan 2B replaces this with the cartyx-lore index.
-    lore: new StaticLoreIndex([]),
+    lore,
     rng: rngFor(options.seed),
   };
 }
@@ -116,6 +210,9 @@ export async function runSession(options: RunOptions): Promise<RunSessionResult>
     const result = await director.run();
     return { ...result, eventsPath };
   } finally {
+    if ('close' in setup.lore && typeof setup.lore.close === 'function') {
+      await (setup.lore as { close(): Promise<void> }).close();
+    }
     await sink.releaseLock();
   }
 }
