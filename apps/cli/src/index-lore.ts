@@ -39,6 +39,11 @@ export interface IndexResult {
   ambiguous: readonly string[];
   /** The lore version the repo is at right now, whether or not the index was rebuilt. */
   loreCommit: string;
+  /**
+   * Wall time spent inside `buildIndex`, in milliseconds. Set only when `rebuilt` is true — a
+   * no-op run (`--check`, or an index already fresh) spent no build time to report.
+   */
+  buildMs: number | undefined;
 }
 
 /** The index is per lore checkout, not per session; `.cache` is git-ignored (v1 design §6.1). */
@@ -113,6 +118,7 @@ export async function ensureIndex(options: IndexOptions): Promise<IndexResult> {
       meta: existing,
       ambiguous: existing?.ambiguous ?? [],
       loreCommit,
+      buildMs: undefined,
     };
   }
   const shouldRebuild = options.force === true || stale;
@@ -124,8 +130,10 @@ export async function ensureIndex(options: IndexOptions): Promise<IndexResult> {
       meta: existing,
       ambiguous: existing.ambiguous ?? [],
       loreCommit,
+      buildMs: undefined,
     };
   }
+  const buildStarted = Date.now();
   const built = await buildIndex({ lorePath, indexDir, embedder, log: options.log });
   return {
     indexDir,
@@ -134,6 +142,7 @@ export async function ensureIndex(options: IndexOptions): Promise<IndexResult> {
     meta: built.meta,
     ambiguous: built.ambiguous,
     loreCommit: built.meta.loreCommit,
+    buildMs: Date.now() - buildStarted,
   };
 }
 
@@ -155,10 +164,16 @@ export function formatIndexSummary(result: IndexResult): string[] {
         'Run `sim index` to rebuild.'
     );
   } else {
+    // Only a rebuild spent real build time; a fresh/--check result must never report one it
+    // didn't spend, so `duration` stays empty outside `result.rebuilt`.
+    const duration =
+      result.rebuilt && result.buildMs !== undefined
+        ? ` in ${(result.buildMs / 1000).toFixed(1)}s`
+        : '';
     lines.push(
       `${result.rebuilt ? 'Built' : 'Index is fresh:'} ${meta.chunks} chunk${
         meta.chunks === 1 ? '' : 's'
-      } from ${meta.files} file${meta.files === 1 ? '' : 's'} (${meta.embedModel}, ${meta.dims} dims)`
+      } from ${meta.files} file${meta.files === 1 ? '' : 's'}${duration} (${meta.embedModel}, ${meta.dims} dims)`
     );
     lines.push(`Lore commit: ${meta.loreCommit}`);
   }

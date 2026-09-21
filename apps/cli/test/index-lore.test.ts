@@ -63,6 +63,23 @@ describe('runIndex', () => {
     expect(formatIndexSummary(result).join('\n')).toContain('1 chunk');
   });
 
+  it('reports how long a rebuild took, and never claims a build time it did not spend', async () => {
+    const { campaignsDir, campaign } = await fixture();
+    const embedder = new FakeEmbedder(16);
+    const built = await runIndex({ campaignsDir, campaign, embedder });
+    expect(built.rebuilt).toBe(true);
+    expect(built.buildMs).toBeGreaterThanOrEqual(0);
+    expect(formatIndexSummary(built).join('\n')).toMatch(/in \d+\.\ds/);
+
+    const fresh = await ensureIndex({ campaignsDir, campaign, embedder });
+    expect(fresh.rebuilt).toBe(false);
+    expect(fresh.buildMs).toBeUndefined();
+    expect(formatIndexSummary(fresh).join('\n')).not.toMatch(/in \d+\.\ds/);
+
+    const checked = await runIndex({ campaignsDir, campaign, check: true, embedder });
+    expect(checked.buildMs).toBeUndefined();
+  });
+
   it('--check reports freshness without building', async () => {
     const { campaignsDir, campaign } = await fixture();
     const checked = await runIndex({
