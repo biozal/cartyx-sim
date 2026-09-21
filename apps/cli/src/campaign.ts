@@ -1,5 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import { ownEntry } from '@cartyx-sim/core';
 import { Endpoint, type SeatConfigInput } from '@cartyx-sim/models';
 import { Combatant } from '@cartyx-sim/rules';
@@ -27,6 +27,8 @@ export const CampaignFile = z.object({
   targetMinutes: z.number().positive(),
   /** The lore version the campaign plays against. Plan 2B sets this from the lore repository. */
   loreCommit: z.string().min(1).default('unversioned'),
+  /** Path to the cartyx-lore checkout, absolute or relative to the campaign directory. */
+  lorePath: z.string().min(1).optional(),
   endpoints: z.record(z.string(), Endpoint),
   seats: z.object({
     dm: SeatRef,
@@ -34,6 +36,8 @@ export const CampaignFile = z.object({
     checker: SeatRef.optional(),
     /** Optional: labels who speaks quotes in DM narration for `sim script`. Defaults to `checker`. */
     script: SeatRef.optional(),
+    /** Embeds lore chunks and queries. Required when `lorePath` is set. */
+    embed: SeatRef.optional(),
     /** Keyed by party member id. */
     players: z.record(z.string(), SeatRef),
   }),
@@ -42,6 +46,7 @@ export const CampaignFile = z.object({
 export const DM_SEAT = 'dm';
 export const CHECKER_SEAT = 'checker';
 export const SCRIPT_SEAT = 'script';
+export const EMBED_SEAT = 'embed';
 
 export function playerSeat(pcId: string): string {
   return `player-${pcId}`;
@@ -53,6 +58,10 @@ export interface Campaign {
   name: string;
   targetMinutes: number;
   loreCommit: string;
+  /** Absolute path to the lore repository, when the campaign plays with lore. */
+  lorePath?: string;
+  /** Seat id for embeddings, present exactly when `lorePath` is. */
+  embedSeat?: string;
   party: Combatant[];
   /** Seat ids for the director. */
   seats: { dm: string; players: Record<string, string>; checker?: string };
@@ -124,6 +133,24 @@ export async function loadCampaign(campaignsDir: string, campaignId: string): Pr
     throw new Error(`${configPath}: invalid campaign\n${z.prettifyError(parsed.error)}`);
   }
   const file = parsed.data;
+  if (file.lorePath && file.loreCommit !== 'unversioned') {
+    throw new Error(
+      `${configPath}: loreCommit is derived from lorePath; remove it. The commit recorded in ` +
+        `the log comes from the lore repository itself.`
+    );
+  }
+  if (file.lorePath && !file.seats.embed) {
+    throw new Error(
+      `${configPath}: lorePath is set but seats.embed is missing. Add an embed seat, e.g. ` +
+        `{"endpoint": "macbook", "model": "text-embedding-nomic-embed-text-v1.5"}.`
+    );
+  }
+  if (!file.lorePath && file.seats.embed) {
+    throw new Error(
+      `${configPath}: seats.embed is set but lorePath is missing. Point lorePath at a ` +
+        `cartyx-lore checkout, or remove the embed seat.`
+    );
+  }
   const party = await loadParty(dir);
 
   const endpoint = (name: string, where: string) => {
@@ -168,6 +195,7 @@ export async function loadCampaign(campaignsDir: string, campaignId: string): Pr
   };
   if (file.seats.checker) models[CHECKER_SEAT] = resolve(file.seats.checker, 'seats.checker');
   if (file.seats.script) models[SCRIPT_SEAT] = resolve(file.seats.script, 'seats.script');
+  if (file.seats.embed) models[EMBED_SEAT] = resolve(file.seats.embed, 'seats.embed');
   const scriptSeat = file.seats.script
     ? SCRIPT_SEAT
     : file.seats.checker
@@ -198,5 +226,7 @@ export async function loadCampaign(campaignsDir: string, campaignId: string): Pr
     seats: { dm: DM_SEAT, players, ...(file.seats.checker ? { checker: CHECKER_SEAT } : {}) },
     models,
     ...(scriptSeat ? { scriptSeat } : {}),
+    ...(file.lorePath ? { lorePath: resolvePath(dir, file.lorePath) } : {}),
+    ...(file.seats.embed ? { embedSeat: EMBED_SEAT } : {}),
   };
 }
