@@ -52,6 +52,25 @@ describe('buildIndex', () => {
     const result = await buildIndex({ lorePath, indexDir, embedder: new FakeEmbedder(16) });
     expect(result.ambiguous).toEqual([]);
   });
+
+  it('builds an index when no chunk resolves to a Kanka entity', async () => {
+    // No kanka-export/ directory at all, so every chunk falls through to `pathEntity` and carries
+    // no kankaId. LanceDB's schema inference used to throw on an all-null column (see lance.ts).
+    const dir = await mkdtemp(join(tmpdir(), 'lore-build-'));
+    await mkdir(join(dir, 'dm'), { recursive: true });
+    await writeFile(
+      join(dir, 'dm', 'avalon.md'),
+      '# Avalon Artificers Academy\n\nA polished rival school north of the river, famous for its duels, its bake-offs and its extremely well-funded workshops.\n'
+    );
+    const indexDir = join(await mkdtemp(join(tmpdir(), 'lore-index-')), 'lore-index');
+    const result = await buildIndex({ lorePath: dir, indexDir, embedder: new FakeEmbedder(16) });
+    expect(result.meta.chunks).toBe(1);
+    const rows = JSON.parse(await readFile(join(indexDir, 'chunks.json'), 'utf8')) as {
+      chunk: { kankaId?: number };
+    }[];
+    expect(rows.length).toBe(1);
+    expect(rows.every((row) => row.chunk.kankaId === undefined)).toBe(true);
+  });
 });
 
 describe('isStale', () => {

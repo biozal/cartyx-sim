@@ -12,6 +12,7 @@
     "@cartyx-sim/models": "*",
     "@lancedb/lancedb": "^0.39.0",
     "ai": "^7.0.99",
+    "apache-arrow": "18.1.0",
     "zod": "^4.6.4"
   }
 }

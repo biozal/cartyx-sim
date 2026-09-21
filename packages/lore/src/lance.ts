@@ -1,9 +1,36 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as lancedb from '@lancedb/lancedb';
+import { Field, FixedSizeList, Float32, Float64, Schema, Utf8 } from 'apache-arrow';
 import type { ScoredChunk, StoredChunk, VectorStore } from './store';
 
 const TABLE = 'chunks';
+
+/**
+ * An explicit schema for `createTable`, rather than letting LanceDB infer one from the rows.
+ * `lorePath` is operator-configurable, and a lore repository with no `kanka-export/` directory
+ * has every chunk resolve through `pathEntity` (see entities.ts), leaving `kankaId` `null` in
+ * every row. LanceDB's inferrer cannot assign a type to an all-null column and throws; an
+ * explicit schema sidesteps inference for that column entirely.
+ *
+ * `kankaId` is `Float64`, not `Int64`: Arrow reads an Int64 column back as a JS `BigInt`, which
+ * would fail `LoreHit`'s `z.number()` downstream. `Float64` matches what inference already
+ * produced for this numeric column before this schema existed, so the read path is unchanged,
+ * and Kanka ids (~7 digits) are far inside Float64's exact-integer range.
+ */
+function chunkSchema(dims: number): Schema {
+  return new Schema([
+    new Field('vector', new FixedSizeList(dims, new Field('item', new Float32(), true)), false),
+    new Field('chunkId', new Utf8(), false),
+    new Field('source', new Utf8(), false),
+    new Field('title', new Utf8(), false),
+    new Field('text', new Utf8(), false),
+    new Field('entityId', new Utf8(), false),
+    new Field('entityName', new Utf8(), false),
+    new Field('entityType', new Utf8(), false),
+    new Field('kankaId', new Float64(), true),
+  ]);
+}
 
 interface Row {
   vector: number[];
@@ -58,11 +85,13 @@ export class LanceStore implements VectorStore {
       kankaId: chunk.kankaId ?? null,
     }));
     const connection = await lancedb.connect(indexDir);
+    const dims = rows[0]?.vector.length ?? 0;
     // LanceDB types createTable's rows as Record<string, unknown>[]. `Row` is structurally
     // compatible but lacks an index signature; casting here keeps `Row` strict, so a renamed
     // column is still a type error at every other site.
     await connection.createTable(TABLE, records as unknown as Record<string, unknown>[], {
       mode: 'overwrite',
+      schema: chunkSchema(dims),
     });
     // A plain JSON mirror of the rows, for tests and for reading an index without LanceDB.
     await writeFile(
