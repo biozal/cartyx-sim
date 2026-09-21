@@ -8,7 +8,7 @@ export interface LoreFile {
   text: string;
 }
 
-const SKIP_DIRS = new Set(['node_modules', '.git', '.cache', 'images', '_raw']);
+const SKIP_DIRS = new Set(['node_modules', '.git']);
 
 /**
  * Everything markdown is lore, including the Kanka mirror. The only markdown left out is the

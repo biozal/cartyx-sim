@@ -33,6 +33,17 @@ describe('readLoreFiles', () => {
     const files = await readLoreFiles(dir);
     expect(files.map((file) => file.path)).toEqual(['dm/notes.md', 'gods.md']);
   });
+
+  it('skips markdown inside dependency and VCS directories', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'lore-skip-'));
+    await mkdir(join(dir, 'node_modules', 'pkg'), { recursive: true });
+    await mkdir(join(dir, '.git'), { recursive: true });
+    await writeFile(join(dir, 'node_modules', 'pkg', 'readme.md'), '# Dependency\n');
+    await writeFile(join(dir, '.git', 'NOTES.md'), '# Git internals\n');
+    await writeFile(join(dir, 'gods.md'), '# Gods\n');
+    const files = await readLoreFiles(dir);
+    expect(files.map((file) => file.path)).toEqual(['gods.md']);
+  });
 });
 
 describe('contentDigest', () => {
