@@ -121,12 +121,17 @@ async function campaignSetup(options: RunOptions): Promise<SessionSetup> {
       // in place after the session started is a real drift even though it hasn't been reindexed
       // yet, and `ensureIndex` must never be called here to find that out.
       const { loreCommit: current } = await currentIdentity(campaign, embedder, meta.dims);
-      const drifted = meta.loreCommit !== logged ? meta.loreCommit : current;
-      if (drifted !== logged) {
+      const mismatch: { source: string; value: string } | undefined =
+        meta.loreCommit !== logged
+          ? { source: 'the on-disk index', value: meta.loreCommit }
+          : current !== logged
+            ? { source: 'the lore repository', value: current }
+            : undefined;
+      if (mismatch) {
         throw new Error(
           `The lore has changed since session ${options.session} started: the log records ` +
-            `${logged}, but the lore is now at ${drifted}. Restore that lore commit and run ` +
-            `\`sim index\` before resuming.`
+            `${logged}, but ${mismatch.source} is now at ${mismatch.value}. Restore that lore ` +
+            `commit and run \`sim index\` before resuming.`
         );
       }
     }
@@ -167,6 +172,14 @@ async function campaignSetup(options: RunOptions): Promise<SessionSetup> {
   };
 }
 
+/** Closes a `LoreIndex` if it holds a real handle (`StaticLoreIndex` doesn't; the real,
+ * LanceDB-backed one does), so a session never leaks an open database connection. */
+async function closeLore(lore: LoreIndex): Promise<void> {
+  if ('close' in lore && typeof lore.close === 'function') {
+    await (lore as { close(): Promise<void> }).close();
+  }
+}
+
 export async function runSession(options: RunOptions): Promise<RunSessionResult> {
   // Load and validate everything before taking the lock, so a config error leaves nothing behind.
   const setup = options.fixturePath
@@ -176,43 +189,47 @@ export async function runSession(options: RunOptions): Promise<RunSessionResult>
   const sink = new JsonlFileSink(eventsPath);
   const log = options.log ?? (() => {});
 
-  const stalePid = await sink.acquireLock();
-  if (stalePid !== undefined) {
-    log(
-      `Replaced a stale lock from process ${stalePid}, which is no longer running: ${eventsPath}.lock`
-    );
-  }
+  // The lore index is closed here, outside the lock's own try/finally: `acquireLock` genuinely
+  // throws when another live process already holds this session's lock, and that must not leak
+  // the LanceDB connection `campaignSetup`/`fixtureSetup` already opened above.
   try {
-    // Checked under the lock, so a concurrent run cannot create the log between check and use.
-    if (!options.resume && (await sink.exists())) {
-      throw new Error(`${eventsPath} already exists. Pass --resume to continue that session.`);
-    }
-    const director = await Director.create(setup.config, {
-      model: setup.model,
-      lore: setup.lore,
-      rng: setup.rng,
-      sink,
-      prompts: basicPrompts,
-      onCommit: (events, state) => {
-        for (const event of events) {
-          if (event.visibility !== 'public') continue;
-          const line = describeEvent(event, state);
-          if (line) log(line);
-        }
-      },
-    });
-    if (sink.tornTail) {
+    const stalePid = await sink.acquireLock();
+    if (stalePid !== undefined) {
       log(
-        `Ignoring an incomplete final line (line ${sink.tornTail.line}) left by an interrupted ` +
-          `write; it will be removed on the next write: ${eventsPath}`
+        `Replaced a stale lock from process ${stalePid}, which is no longer running: ${eventsPath}.lock`
       );
     }
-    const result = await director.run();
-    return { ...result, eventsPath };
-  } finally {
-    if ('close' in setup.lore && typeof setup.lore.close === 'function') {
-      await (setup.lore as { close(): Promise<void> }).close();
+    try {
+      // Checked under the lock, so a concurrent run cannot create the log between check and use.
+      if (!options.resume && (await sink.exists())) {
+        throw new Error(`${eventsPath} already exists. Pass --resume to continue that session.`);
+      }
+      const director = await Director.create(setup.config, {
+        model: setup.model,
+        lore: setup.lore,
+        rng: setup.rng,
+        sink,
+        prompts: basicPrompts,
+        onCommit: (events, state) => {
+          for (const event of events) {
+            if (event.visibility !== 'public') continue;
+            const line = describeEvent(event, state);
+            if (line) log(line);
+          }
+        },
+      });
+      if (sink.tornTail) {
+        log(
+          `Ignoring an incomplete final line (line ${sink.tornTail.line}) left by an interrupted ` +
+            `write; it will be removed on the next write: ${eventsPath}`
+        );
+      }
+      const result = await director.run();
+      return { ...result, eventsPath };
+    } finally {
+      await sink.releaseLock();
     }
-    await sink.releaseLock();
+  } finally {
+    await closeLore(setup.lore);
   }
 }
