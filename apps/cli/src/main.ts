@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { parseNumber } from './args';
+import { formatAuditSummary, runAudit } from './audit';
 import { benchPassed, runBench } from './bench';
 import { formatCommandError } from './command-errors';
 import { releaseHeldLocks } from './jsonl-sink';
@@ -47,6 +48,14 @@ interface ScriptCommandOptions {
   /** False with --no-model. */
   model: boolean;
   refresh: boolean;
+  campaignsDir: string;
+}
+
+interface AuditCommandOptions {
+  campaign: string;
+  session: number;
+  /** False with --no-model. */
+  model: boolean;
   campaignsDir: string;
 }
 
@@ -161,6 +170,26 @@ program
         log: (line) => console.log(line),
       });
       for (const line of formatScriptSummary(result)) console.log(line);
+    })
+  );
+
+program
+  .command('audit')
+  .description('Report what the lore covered, what it missed, and what the DM invented')
+  .requiredOption('--campaign <id>', 'campaign id (a folder under the campaigns directory)')
+  .option('--session <n>', 'session number', parseNumber('integer'), 1)
+  .option('--no-model', 'skip the checker pass for possible contradictions')
+  .option('--campaigns-dir <path>', 'campaigns directory', 'campaigns')
+  .action(
+    action<AuditCommandOptions>(async (options) => {
+      const result = await runAudit({
+        campaignsDir: options.campaignsDir,
+        campaign: options.campaign,
+        session: options.session,
+        useModel: options.model,
+        log: (line) => console.log(line),
+      });
+      for (const line of formatAuditSummary(result)) console.log(line);
     })
   );
 
