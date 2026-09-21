@@ -123,7 +123,17 @@ export const SimEvent = z.discriminatedUnion('type', [
     ...base,
     type: z.literal('lore_lookup'),
     query: z.string().min(1),
-    hits: z.array(z.object({ chunkId: z.string(), source: z.string(), score: z.number() })),
+    hits: z.array(
+      z.object({
+        chunkId: z.string().min(1),
+        source: z.string().min(1),
+        score: z.number(),
+        // Optional so sessions 001–013, logged before Plan 2B, still parse. EVENT_SCHEMA_VERSION
+        // stays 1: this is additive.
+        entityId: z.string().min(1).optional(),
+        entityName: z.string().min(1).optional(),
+      })
+    ),
     used: z.array(z.string()),
   }),
   z.object({

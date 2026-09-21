@@ -20,6 +20,10 @@ export const SELLA_CHUNK: LoreHit = {
   title: 'Professor Sella Vaunt',
   text: 'Professor Sella Vaunt teaches applied crystal engines at Avalon Artificers Academy.',
   score: 0,
+  entityId: 'kanka-2418574',
+  entityName: 'Professor Sella Vaunt',
+  entityType: 'character',
+  kankaId: 2418574,
 };
 
 export interface ToolHarness {

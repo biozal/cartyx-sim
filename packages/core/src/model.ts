@@ -59,6 +59,12 @@ export const LoreHit = z.object({
   title: z.string().min(1),
   text: z.string(),
   score: z.number(),
+  /** The entity this chunk describes: a Kanka id (`kanka-2418574`) or a path id (`file:…#…`). */
+  entityId: z.string().min(1),
+  entityName: z.string().min(1),
+  /** 'character', 'location', 'family', …, or 'document' for a chunk with no Kanka match. */
+  entityType: z.string().min(1),
+  kankaId: z.number().int().positive().optional(),
 });
 export type LoreHit = z.infer<typeof LoreHit>;
 

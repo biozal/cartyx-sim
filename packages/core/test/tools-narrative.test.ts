@@ -11,7 +11,8 @@ import {
   sceneChange,
 } from '../src/tools/narrative';
 import { startCombat } from '../src/tools/combat';
-import type { LoreIndex } from '../src/model';
+import { SimEvent } from '../src/events';
+import type { LoreHit, LoreIndex } from '../src/model';
 import { toToolSchema } from '../src/tools/types';
 import { renderTranscript } from '../src/transcript';
 import { startedState } from './helpers';
@@ -272,7 +273,14 @@ describe('lookup_lore', () => {
       type: 'lore_lookup',
       visibility: 'dm',
       query: 'Sella Vaunt',
-      hits: [{ chunkId: 'avalon#sella-vaunt', score: 1 }],
+      hits: [
+        {
+          chunkId: 'avalon#sella-vaunt',
+          score: 1,
+          entityId: 'kanka-2418574',
+          entityName: 'Professor Sella Vaunt',
+        },
+      ],
       used: ['avalon#sella-vaunt'],
     });
   });
@@ -297,6 +305,9 @@ describe('lookup_lore', () => {
             title: 'Threshold Hit',
             text: 'Right at the line.',
             score: 0.35,
+            entityId: 'kanka-9001',
+            entityName: 'Threshold Hit',
+            entityType: 'character',
           },
         ];
       },
@@ -307,6 +318,84 @@ describe('lookup_lore', () => {
       type: 'lore_lookup',
       used: ['avalon#threshold'],
     });
+  });
+
+  it('spends one result slot per entity, keeping the best-scoring chunk', async () => {
+    const stub = (chunkId: string, entityId: string, score: number): LoreHit => ({
+      chunkId,
+      source: `dm/${chunkId}.md`,
+      title: chunkId,
+      text: `text ${chunkId}`,
+      score,
+      entityId,
+      entityName: entityId,
+      entityType: 'character',
+    });
+    const harness = toolHarness({
+      lore: {
+        async search() {
+          return [
+            stub('stub', 'kanka-1', 0.6),
+            stub('writeup', 'kanka-1', 0.8),
+            stub('other', 'kanka-2', 0.5),
+          ];
+        },
+      },
+    });
+    const result = await harness.run(lookupLore, { query: 'Sella Vaunt' });
+    expect(result).toMatchObject({ ok: true });
+    const outcome = (result as { outcome: { result: string } }).outcome;
+    expect(outcome.result).toContain('[writeup]');
+    expect(outcome.result).not.toContain('[stub]');
+    expect(outcome.result).toContain('[other]');
+    expect(harness.recorder.events[0]).toMatchObject({
+      hits: [
+        { chunkId: 'writeup', entityId: 'kanka-1' },
+        { chunkId: 'stub', entityId: 'kanka-1' },
+        { chunkId: 'other', entityId: 'kanka-2' },
+      ],
+      used: ['writeup', 'other'],
+    });
+  });
+
+  it('reports a gap only when nothing clears the threshold', async () => {
+    const harness = toolHarness({
+      lore: {
+        async search() {
+          return [
+            {
+              chunkId: 'far',
+              source: 'dm/far.md',
+              title: 'far',
+              text: 'text',
+              score: 0.1,
+              entityId: 'kanka-9',
+              entityName: 'Far',
+              entityType: 'character',
+            },
+          ];
+        },
+      },
+    });
+    const result = await harness.run(lookupLore, { query: 'Sella Vaunt' });
+    expect(result).toMatchObject({ ok: true });
+    const outcome = (result as { outcome: { result: string } }).outcome;
+    expect(outcome.result).toContain('No lore found');
+    expect(harness.recorder.events[0]).toMatchObject({ used: [] });
+  });
+
+  it('parses a lore_lookup logged before entity ids existed', () => {
+    const event = SimEvent.parse({
+      seq: 1,
+      ts: '2026-09-01T00:00:00.000Z',
+      turnId: 't1',
+      visibility: 'dm',
+      type: 'lore_lookup',
+      query: 'Sella Vaunt',
+      hits: [{ chunkId: 'a', source: 'dm/a.md', score: 0.5 }],
+      used: ['a'],
+    });
+    expect(event.type).toBe('lore_lookup');
   });
 });
 
