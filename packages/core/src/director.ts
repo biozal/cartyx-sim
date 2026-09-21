@@ -51,7 +51,7 @@ export interface DirectorConfig {
   party: Combatant[];
   /** Seat ids for the DM, each PC id, and optionally the checker that reviews DM narration. */
   seats: { dm: string; players: Record<string, string>; checker?: string };
-  /** Minimum lore search score treated as relevant. Default 0.35. */
+  /** Minimum lore search score treated as relevant. Default 0.69. */
   loreThreshold?: number;
   /** Model calls allowed in one DM beat before hand_off is forced. Default 12. */
   maxDmStepsPerBeat?: number;
@@ -348,7 +348,13 @@ export class Director {
   ) {
     this.history = [...prior];
     this.state = foldEvents(prior);
-    this.loreThreshold = config.loreThreshold ?? 0.35;
+    // Calibrated against the known-answer set on the real corpus (plan Task 15): four of five
+    // known-answer queries scored 0.740-0.815 at the top hit; the two measured misses — an
+    // unrelated control query, and the one known-answer query whose real chunk wasn't retrieved —
+    // topped out at 0.638. 0.69 is the midpoint between that highest miss and the lowest hit, so it
+    // separates every measured hit from every measured miss, including the near-miss that scored
+    // deceptively high on the wrong content.
+    this.loreThreshold = config.loreThreshold ?? 0.69;
     this.maxDmStepsPerBeat = config.maxDmStepsPerBeat ?? 12;
     this.maxValidatorRetries = config.maxValidatorRetries ?? 2;
     this.transcriptWindow = config.transcriptWindow ?? 30;
