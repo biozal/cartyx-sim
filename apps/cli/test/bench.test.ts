@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { BenchResult } from '@cartyx-sim/models';
 import { startFakeOpenAIServer, type FakeOpenAIServer } from '@cartyx-sim/models/testing';
 import type { Embedder } from '@cartyx-sim/lore';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { benchPassed, formatBenchTable, runBench } from '../src/bench';
 
 const KIRA = JSON.stringify({
@@ -215,15 +215,28 @@ describe('runBench', () => {
     );
     await writeFile(join(dir, 'characters', 'kira.json'), KIRA);
 
+    const stubEmbedder: Embedder = {
+      model: 'embed-model',
+      embedDocuments: async (texts: readonly string[]) => texts.map(() => new Float32Array(768)),
+      embedQuery: async () => new Float32Array(768),
+    };
+
     const report = await runBench({
       campaignsDir,
       campaign: 'lore-backed',
       trials: 1,
+      embedder: stubEmbedder,
     });
 
     // Embed seat should not be in the chat-seat results
     expect(report.results.map((r) => r.seat)).not.toContain('embed');
     expect(report.results.map((r) => r.seat)).toEqual(['dm', 'player-kira']);
+
+    // Embed trial should have been executed and populated
+    expect(report.embed).toBeDefined();
+    expect(report.embed?.seat).toBe('embed');
+    expect(report.embed?.reachable).toBe(true);
+    expect(report.embed?.dims).toBeGreaterThan(0);
   });
 });
 

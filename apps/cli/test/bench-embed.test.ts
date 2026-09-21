@@ -26,7 +26,7 @@ describe('benchEmbedSeat', () => {
   it('reports the dimension count on success', async () => {
     const result = await benchEmbedSeat(new WorkingEmbedder());
     expect(result).toMatchObject({ reachable: true, dims: 768, model: 'nomic', errors: [] });
-    expect(result.latencyMs).not.toBeNull();
+    expect(result.latencyMs).toBeGreaterThanOrEqual(0);
   });
 
   it('reports the error and stays unreachable on failure', async () => {

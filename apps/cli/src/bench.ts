@@ -11,6 +11,8 @@ export interface BenchOptions {
   trials?: number;
   now?: () => Date;
   log?: (line: string) => void;
+  /** Injected by tests; production builds one from the campaign's embed seat. */
+  embedder?: Embedder;
 }
 
 export interface EmbedBenchResult {
@@ -123,8 +125,7 @@ export async function runBench(options: BenchOptions): Promise<BenchReport> {
   let embed: EmbedBenchResult | undefined;
   if (campaign.embedSeat) {
     log(`Benchmarking ${EMBED_SEAT}...`);
-    const { embedderFor } = await import('./index-lore');
-    const embedder = embedderFor(campaign);
+    const embedder = options.embedder ?? (await import('./index-lore')).embedderFor(campaign);
     embed = await benchEmbedSeat(embedder);
     for (const line of formatEmbedBench(embed)) log(line);
   }
