@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BenchResult } from '@cartyx-sim/models';
 import { startFakeOpenAIServer, type FakeOpenAIServer } from '@cartyx-sim/models/testing';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Embedder } from '@cartyx-sim/lore';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { benchPassed, formatBenchTable, runBench } from '../src/bench';
 
 const KIRA = JSON.stringify({
@@ -193,6 +194,36 @@ describe('runBench', () => {
     expect(report.results[1]).toMatchObject({ reachable: true, modelListed: true });
     expect(benchPassed(report.results)).toBe(true);
     expect(lines.find((line) => line.startsWith('script'))).toMatch(/\s0\/0$/);
+  });
+
+  it('excludes the embed seat from chat-seat results when configured', async () => {
+    const dir = join(campaignsDir, 'lore-backed');
+    await mkdir(join(dir, 'characters'), { recursive: true });
+    await writeFile(
+      join(dir, 'campaign.json'),
+      JSON.stringify({
+        name: 'Lore-backed',
+        targetMinutes: 30,
+        lorePath: '/fake/lore',
+        endpoints: { local: { baseURL: fake.baseURL } },
+        seats: {
+          dm: { endpoint: 'local', model: 'dm-model' },
+          embed: { endpoint: 'local', model: 'embed-model' },
+          players: { kira: { endpoint: 'local', model: 'player-model' } },
+        },
+      })
+    );
+    await writeFile(join(dir, 'characters', 'kira.json'), KIRA);
+
+    const report = await runBench({
+      campaignsDir,
+      campaign: 'lore-backed',
+      trials: 1,
+    });
+
+    // Embed seat should not be in the chat-seat results
+    expect(report.results.map((r) => r.seat)).not.toContain('embed');
+    expect(report.results.map((r) => r.seat)).toEqual(['dm', 'player-kira']);
   });
 });
 

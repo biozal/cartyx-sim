@@ -116,7 +116,7 @@ program
         log: (line) => console.log(line),
       });
       console.log(`\nBench report: ${report.reportPath}`);
-      if (!benchPassed(report.results)) process.exitCode = 1;
+      if (!benchPassed(report.results, report.embed)) process.exitCode = 1;
     })
   );
 
