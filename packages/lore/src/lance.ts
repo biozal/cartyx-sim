@@ -1,5 +1,3 @@
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import * as lancedb from '@lancedb/lancedb';
 import { Field, FixedSizeList, Float32, Float64, Schema, Utf8 } from 'apache-arrow';
 import type { ScoredChunk, StoredChunk, VectorStore } from './store';
@@ -93,11 +91,6 @@ export class LanceStore implements VectorStore {
       mode: 'overwrite',
       schema: chunkSchema(dims),
     });
-    // A plain JSON mirror of the rows, for tests and for reading an index without LanceDB.
-    await writeFile(
-      join(indexDir, 'chunks.json'),
-      `${JSON.stringify(rows.map(({ chunk, vector }) => ({ chunk, vector: Array.from(vector) })))}\n`
-    );
   }
 
   async search(vector: Float32Array, limit: number): Promise<ScoredChunk[]> {

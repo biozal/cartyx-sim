@@ -1,9 +1,25 @@
-import { mkdtemp, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildIndex, isStale, readMeta, CHUNKER_VERSION } from '../src/build';
 import { FakeEmbedder, DOCUMENT_PREFIX, QUERY_PREFIX } from '../src/embed';
+import { LanceStore } from '../src/lance';
+import type { ScoredChunk } from '../src/store';
+
+/**
+ * Every row `buildIndex` wrote, read back out of the real table. The build is only finished if
+ * the table it produced can actually be opened and queried, so these tests read the store rather
+ * than any side artifact of the build.
+ */
+async function indexedRows(indexDir: string, embedder: FakeEmbedder): Promise<ScoredChunk[]> {
+  const store = await LanceStore.open(indexDir);
+  try {
+    return await store.search(await embedder.embedQuery('Sella Vaunt'), 100);
+  } finally {
+    await store.close();
+  }
+}
 
 async function loreRepo(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'lore-build-'));
@@ -40,11 +56,11 @@ describe('buildIndex', () => {
   it('folds the dm writeup and the Kanka stub onto one entity', async () => {
     const lorePath = await loreRepo();
     const indexDir = join(await mkdtemp(join(tmpdir(), 'lore-index-')), 'lore-index');
-    await buildIndex({ lorePath, indexDir, embedder: new FakeEmbedder(16) });
-    const rows = JSON.parse(await readFile(join(indexDir, 'chunks.json'), 'utf8')) as {
-      chunk: { entityId: string };
-    }[];
-    expect(new Set(rows.map((row) => row.chunk.entityId))).toEqual(new Set(['kanka-2418574']));
+    const embedder = new FakeEmbedder(16);
+    await buildIndex({ lorePath, indexDir, embedder });
+    const rows = await indexedRows(indexDir, embedder);
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.entityId))).toEqual(new Set(['kanka-2418574']));
   });
 
   it('reports nothing ambiguous for a clean corpus', async () => {
@@ -64,13 +80,12 @@ describe('buildIndex', () => {
       '# Avalon Artificers Academy\n\nA polished rival school north of the river, famous for its duels, its bake-offs and its extremely well-funded workshops.\n'
     );
     const indexDir = join(await mkdtemp(join(tmpdir(), 'lore-index-')), 'lore-index');
-    const result = await buildIndex({ lorePath: dir, indexDir, embedder: new FakeEmbedder(16) });
+    const embedder = new FakeEmbedder(16);
+    const result = await buildIndex({ lorePath: dir, indexDir, embedder });
     expect(result.meta.chunks).toBe(1);
-    const rows = JSON.parse(await readFile(join(indexDir, 'chunks.json'), 'utf8')) as {
-      chunk: { kankaId?: number };
-    }[];
-    expect(rows.length).toBe(1);
-    expect(rows.every((row) => row.chunk.kankaId === undefined)).toBe(true);
+    const rows = await indexedRows(indexDir, embedder);
+    expect(rows).toHaveLength(1);
+    expect(rows.every((row) => row.kankaId === undefined)).toBe(true);
   });
 });
 
