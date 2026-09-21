@@ -87,9 +87,11 @@ export class LanceStore implements VectorStore {
   async byChunkId(chunkId: string): Promise<StoredChunk | undefined> {
     const rows = (await this.table
       .query()
-      // JSON.stringify quotes and escapes the id, so a chunk id containing a quote cannot break
-      // out of the predicate.
-      .where(`chunkId = ${JSON.stringify(chunkId)}`)
+      // Lance's `where` predicate is SQL, where double quotes name a *column*, not a string —
+      // JSON.stringify's double-quoted output would silently match against a (nonexistent) column
+      // named after the id instead of comparing the value. Single-quoted string literals are the
+      // correct form here, and doubling an embedded single quote escapes it.
+      .where(`chunkId = '${chunkId.replaceAll("'", "''")}'`)
       .limit(1)
       .toArray()) as Row[];
     return rows[0] === undefined ? undefined : toStored(rows[0]);

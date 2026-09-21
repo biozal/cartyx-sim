@@ -1,5 +1,5 @@
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import type { LoreHit, LoreIndex } from '@cartyx-sim/core';
 import { chunkMarkdown } from './chunk';
 import { buildEntityIndex, resolveEntity } from './entities';
@@ -64,7 +64,35 @@ export function isStale(meta: IndexMeta | undefined, current: IndexIdentity): bo
   );
 }
 
+/**
+ * Staging and backup directories are keyed by pid, so a run that crashes leaves one behind that
+ * a later run with a different pid would otherwise never remove, leaking a full copy of the
+ * embeddings to disk indefinitely. This removes any such sibling of `indexDir` before a build
+ * starts. It doesn't try to tell whether the owning pid is still alive: a concurrent second build
+ * of the same index isn't a scenario this tool supports, and pid-liveness checks are their own
+ * source of bugs.
+ */
+async function removeStaleSiblings(indexDir: string): Promise<void> {
+  const parent = dirname(indexDir);
+  const name = basename(indexDir);
+  let entries;
+  try {
+    entries = await readdir(parent, { withFileTypes: true });
+  } catch (error) {
+    // Nothing to clean up when the parent doesn't exist yet, as on a first build.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  for (const entry of entries) {
+    if (entry.name.startsWith(`${name}.tmp-`) || entry.name.startsWith(`${name}.backup-`)) {
+      await rm(join(parent, entry.name), { recursive: true, force: true });
+    }
+  }
+}
+
 export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
+  await removeStaleSiblings(options.indexDir);
+
   const log = options.log ?? (() => {});
   const files = await readLoreFiles(options.lorePath);
   log(`Read ${files.length} markdown files from ${options.lorePath}`);
@@ -118,8 +146,23 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
   // meta.json last: a half-written index must never look valid.
   await writeFile(join(staging, META_FILE), `${JSON.stringify(meta, null, 2)}\n`);
   await mkdir(dirname(options.indexDir), { recursive: true });
-  await rm(options.indexDir, { recursive: true, force: true });
+
+  // Swap so the target is never absent for longer than a single rename: move the old index
+  // aside, put the new one in place, and only then delete. Deleting the old index first (as this
+  // used to) means a crash during the recursive delete destroys the previous index AND orphans
+  // the newly built one, which is the opposite of what staging exists to prevent.
+  const backup = `${options.indexDir}.backup-${process.pid}`;
+  await rm(backup, { recursive: true, force: true });
+  let hadPrevious = false;
+  try {
+    await rename(options.indexDir, backup);
+    hadPrevious = true;
+  } catch (error) {
+    // Nothing to move aside on a first build; any other failure is real.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
   await rename(staging, options.indexDir);
+  if (hadPrevious) await rm(backup, { recursive: true, force: true });
 
   return { meta, ambiguous: entities.ambiguous };
 }
