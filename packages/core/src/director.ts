@@ -352,8 +352,15 @@ export class Director {
     // known-answer queries scored 0.740-0.815 at the top hit; the two measured misses — an
     // unrelated control query, and the one known-answer query whose real chunk wasn't retrieved —
     // topped out at 0.638. 0.69 is the midpoint between that highest miss and the lowest hit, so it
-    // separates every measured hit from every measured miss, including the near-miss that scored
-    // deceptively high on the wrong content.
+    // separates every measured *top* hit from every measured miss.
+    //
+    // That guarantee is per query's top score only, not per chunk: `lookup_lore`
+    // (tools/narrative.ts) applies this threshold to every candidate it considers, and measured
+    // scores interleave within a query — "which professor coaches technical dueling?" surfaced the
+    // right professor at 0.740 alongside three wrong ones at 0.706/0.703/0.691, all above 0.69, all
+    // reaching the game master. This threshold is a gap detector (is anything topically relevant at
+    // all), not a relevance ranker (which specific hit is correct). See the plan's Task 15 Measured
+    // section for the full numbers and this caveat in more detail.
     this.loreThreshold = config.loreThreshold ?? 0.69;
     this.maxDmStepsPerBeat = config.maxDmStepsPerBeat ?? 12;
     this.maxValidatorRetries = config.maxValidatorRetries ?? 2;
