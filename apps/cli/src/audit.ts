@@ -1,6 +1,17 @@
 import { join } from 'node:path';
-import { applyEvent, initialState, spokenMinutes, type SimEvent } from '@cartyx-sim/core';
+import {
+  applyEvent,
+  findJsonReply,
+  initialState,
+  spokenMinutes,
+  type ModelClient,
+  type SimEvent,
+} from '@cartyx-sim/core';
+import { LanceStore, readMeta } from '@cartyx-sim/lore';
+import { OpenAICompatibleModelClient } from '@cartyx-sim/models';
 import { writeFilesAtomic } from './atomic-write';
+import { loadCampaign } from './campaign';
+import { loreIndexDir } from './index-lore';
 import { JsonlFileSink } from './jsonl-sink';
 import { sessionDir } from './paths';
 
@@ -233,6 +244,99 @@ export function buildAudit(input: {
   };
 }
 
+/** Bump when the prompt changes, so a stored audit says which prompt produced it. */
+export const CONTRADICTION_PROMPT_VERSION = 1;
+
+// A thinking model sometimes spends its whole budget thinking; retry that once on the same target.
+const INCOMPLETE_REPLY_ATTEMPTS = 2;
+
+const CONTRADICTION_SYSTEM = [
+  "You compare a game master's narration against the world lore they just looked up for it.",
+  'Reply with only a JSON object: {"conflicts": boolean, "note": string}.',
+  'Set "conflicts" to true only when the narration states something the lore directly',
+  'contradicts: a different name, role, place, fact, or outcome than the lore gives.',
+  'Detail the lore simply does not mention is NOT a conflict — the game master is always allowed',
+  'to add new detail to the world. Only flag a genuine contradiction, never an addition.',
+  'When conflicts is true, keep "note" to one sentence stating what the lore actually says.',
+  'When conflicts is false, "note" should be an empty string.',
+].join('\n');
+
+/**
+ * One pass over the narrations that followed a lore lookup with usable hits. A narration after a
+ * gap has nothing to contradict, so it is not asked about — which also keeps the pass to a handful
+ * of calls a session. Only the first narration after each lookup is checked: later ones have
+ * drifted away from what was retrieved, and asking about each would multiply the calls for little
+ * signal. Every finding is "possible": the prompt asks the checker to flag only a genuine
+ * contradiction, never detail the lore simply omits.
+ */
+export async function findContradictions(input: {
+  events: readonly SimEvent[];
+  model: ModelClient;
+  seat: string;
+  /** Re-fetches a chunk's text by id: the event log records ids and scores, never the text. */
+  chunkText: (chunkId: string) => Promise<string | undefined>;
+}): Promise<Contradiction[]> {
+  const found: Contradiction[] = [];
+  let pending: string[] | undefined;
+  for (const event of input.events) {
+    if (event.type === 'lore_lookup') {
+      const used = event.hits.filter((hit) => event.used.includes(hit.chunkId));
+      pending = used.length === 0 ? undefined : used.map((hit) => hit.chunkId);
+      continue;
+    }
+    if (event.type !== 'narration' || !pending) continue;
+    const chunkIds = pending;
+    pending = undefined;
+
+    // The log records chunk ids and scores, never the text. Bare ids tell the checker nothing, so
+    // the chunks are re-fetched from the index; a chunk the index no longer holds (the lore moved
+    // on since the session) means there is nothing to compare, and the narration is skipped.
+    const texts: string[] = [];
+    for (const chunkId of chunkIds) {
+      const text = await input.chunkText(chunkId);
+      if (text !== undefined) texts.push(`[${chunkId}] ${text}`);
+    }
+    if (texts.length === 0) continue;
+
+    let reply;
+    try {
+      reply = await input.model.complete({
+        seat: input.seat,
+        turnId: `audit-${event.seq}`,
+        messages: [
+          { role: 'system', content: CONTRADICTION_SYSTEM },
+          {
+            role: 'user',
+            content: `Lore the game master retrieved:\n${texts.join('\n\n')}\n\nNarration:\n${event.text}`,
+          },
+        ],
+        tools: [],
+        toolChoice: 'auto',
+        incompleteReplyAttempts: INCOMPLETE_REPLY_ATTEMPTS,
+      });
+    } catch {
+      // A seat failure degrades this section, not the whole audit: skip this narration and keep
+      // going, the way `attribution.ts` degrades quote labeling to rules on a seat failure.
+      continue;
+    }
+
+    const parsed = findJsonReply(reply.text, (value) => {
+      if (typeof value !== 'object' || value === null) return null;
+      const record = value as { conflicts?: unknown; note?: unknown };
+      if (typeof record.conflicts !== 'boolean') return null;
+      return {
+        conflicts: record.conflicts,
+        note: typeof record.note === 'string' ? record.note : '',
+      };
+    });
+    // An unparseable reply skips the narration rather than failing the audit.
+    if (!parsed || !parsed.conflicts) continue;
+
+    found.push({ seq: event.seq, narration: event.text, chunkIds, note: parsed.note });
+  }
+  return found;
+}
+
 export function renderAuditMarkdown(audit: Audit): string {
   const lines: string[] = [
     `# Lore audit — ${audit.campaign} session ${audit.session}`,
@@ -304,12 +408,14 @@ export interface AuditOptions {
   campaign: string;
   session: number;
   /**
-   * Whether a model-driven contradiction check should run. Reserved for the checker pass that a
-   * later task adds to `buildAudit`'s output; until then `contradictions` is always `null`
-   * regardless of this flag, and the report says why.
+   * Whether the model-driven contradiction check should run. Even when true, the pass only runs
+   * if the campaign also has a `checker` seat and a lore index exists; `contradictions` stays
+   * `null` otherwise, and the report says which condition was missing.
    */
   useModel: boolean;
   log?: (line: string) => void;
+  /** Injected by tests; production builds one from the campaign's checker seat. */
+  model?: ModelClient;
 }
 
 export interface AuditResult {
@@ -319,9 +425,53 @@ export interface AuditResult {
 }
 
 /**
- * Builds `audit.md` and `audit.json` for one session from its event log, which it never modifies
- * and which is the *only* thing it reads: no lore index, no network, so an audit still runs long
- * after the lore has moved on, against a log played months ago.
+ * Runs the contradiction checker when `useModel` is true, the campaign has a `checker` seat, and
+ * a lore index exists — otherwise returns `null` after logging which of those was missing.
+ * Opens the lore index only for this pass and always closes it before returning, success or not.
+ */
+async function contradictionPass(
+  options: AuditOptions,
+  events: readonly SimEvent[],
+  log: (line: string) => void
+): Promise<Contradiction[] | null> {
+  if (!options.useModel) {
+    log('Possible contradictions: skipped (--no-model was passed).');
+    return null;
+  }
+  const campaign = await loadCampaign(options.campaignsDir, options.campaign);
+  const seat = campaign.seats.checker;
+  if (!seat) {
+    log('Possible contradictions: skipped (campaign.json has no checker seat).');
+    return null;
+  }
+  const indexDir = loreIndexDir(campaign);
+  const meta = await readMeta(indexDir);
+  if (!meta) {
+    log(
+      `Possible contradictions: skipped (no lore index at ${indexDir}; run \`sim index --campaign ${campaign.id}\`).`
+    );
+    return null;
+  }
+  const model = options.model ?? new OpenAICompatibleModelClient(campaign.models);
+  const store = await LanceStore.open(indexDir);
+  try {
+    return await findContradictions({
+      events,
+      model,
+      seat,
+      chunkText: async (chunkId) => (await store.byChunkId(chunkId))?.text,
+    });
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * Builds `audit.md` and `audit.json` for one session from its event log, which it never modifies.
+ * The first three sections read only that log: no lore index, no network, so an audit still runs
+ * long after the lore has moved on, against a log played months ago. The fourth section, possible
+ * contradictions, is the exception — it needs the campaign's checker seat and lore index, and is
+ * skipped (not failed) when either is unavailable.
  */
 export async function runAudit(options: AuditOptions): Promise<AuditResult> {
   const log = options.log ?? (() => {});
@@ -349,9 +499,8 @@ export async function runAudit(options: AuditOptions): Promise<AuditResult> {
   }
 
   const built = buildAudit({ campaign: options.campaign, session: options.session, events });
-  // No checker pass exists yet (a later task adds it), so a report from this build never claims
-  // to have checked for contradictions.
-  const audit: Audit = { ...built, contradictions: null };
+  const contradictions = await contradictionPass(options, events, log);
+  const audit: Audit = { ...built, contradictions };
 
   const auditPath = join(dir, 'audit.json');
   const markdownPath = join(dir, 'audit.md');

@@ -1,13 +1,15 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { initialState, TurnRecorder, type SimEvent } from '@cartyx-sim/core';
+import { initialState, TurnRecorder, type ModelClient, type SimEvent } from '@cartyx-sim/core';
+import { LanceStore } from '@cartyx-sim/lore';
 import { makeCombatant } from '@cartyx-sim/rules/testing';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AUDIT_VERSION,
   buildAudit,
   clusterGaps,
+  findContradictions,
   formatAuditSummary,
   normalizeQuery,
   renderAuditMarkdown,
@@ -266,6 +268,124 @@ describe('renderAuditMarkdown', () => {
   });
 });
 
+describe('findContradictions', () => {
+  const events: SimEvent[] = [
+    event({
+      type: 'lore_lookup',
+      query: 'Professor Sella Vaunt',
+      hits: [
+        {
+          chunkId: 'c1',
+          source: 'dm/avalon.md',
+          score: 0.8,
+          entityId: 'kanka-1',
+          entityName: 'Sella Vaunt',
+        },
+      ],
+      used: ['c1'],
+    }),
+    event({ type: 'narration', visibility: 'public', text: 'Vaunt teaches technical dueling.' }),
+    event({ type: 'lore_lookup', query: 'the bridge', hits: [], used: [] }),
+    event({ type: 'narration', visibility: 'public', text: 'The bridge is old.' }),
+  ];
+
+  function stubModel(replies: string[]): ModelClient {
+    let index = 0;
+    return {
+      async complete() {
+        return { text: replies[index++]!, toolCalls: [], model: 'checker' };
+      },
+    };
+  }
+
+  const chunkText = async (chunkId: string) =>
+    chunkId === 'c1' ? 'Sella Vaunt teaches applied crystal engines.' : undefined;
+
+  it('asks only about narrations that followed a lookup with usable hits', async () => {
+    let calls = 0;
+    const model: ModelClient = {
+      async complete() {
+        calls++;
+        return { text: '{"conflicts": false}', toolCalls: [], model: 'checker' };
+      },
+    };
+    await findContradictions({ events, model, seat: 'checker', chunkText });
+    expect(calls).toBe(1);
+  });
+
+  it('sends the chunk text, not just its id', async () => {
+    let sent = '';
+    const model: ModelClient = {
+      async complete(request) {
+        sent = JSON.stringify(request.messages);
+        return { text: '{"conflicts": false}', toolCalls: [], model: 'checker' };
+      },
+    };
+    await findContradictions({ events, model, seat: 'checker', chunkText });
+    expect(sent).toContain('applied crystal engines');
+  });
+
+  it('skips a narration whose chunks cannot be fetched', async () => {
+    let calls = 0;
+    const model: ModelClient = {
+      async complete() {
+        calls++;
+        return { text: '{"conflicts": false}', toolCalls: [], model: 'checker' };
+      },
+    };
+    await findContradictions({ events, model, seat: 'checker', chunkText: async () => undefined });
+    expect(calls).toBe(0);
+  });
+
+  it('returns a finding when the checker says the narration conflicts', async () => {
+    const found = await findContradictions({
+      events,
+      chunkText,
+      model: stubModel(['{"conflicts": true, "note": "The lore says applied crystal engines."}']),
+      seat: 'checker',
+    });
+    expect(found).toEqual([
+      {
+        seq: expect.any(Number),
+        narration: 'Vaunt teaches technical dueling.',
+        chunkIds: ['c1'],
+        note: 'The lore says applied crystal engines.',
+      },
+    ]);
+  });
+
+  it('returns nothing when the checker says there is no conflict', async () => {
+    const found = await findContradictions({
+      events,
+      chunkText,
+      model: stubModel(['{"conflicts": false}']),
+      seat: 'checker',
+    });
+    expect(found).toEqual([]);
+  });
+
+  it('skips a narration whose checker reply cannot be parsed, rather than failing the audit', async () => {
+    const found = await findContradictions({
+      events,
+      chunkText,
+      model: stubModel(['not json at all']),
+      seat: 'checker',
+    });
+    expect(found).toEqual([]);
+  });
+
+  it('does not fail the pass when the checker seat throws', async () => {
+    const model: ModelClient = {
+      async complete() {
+        throw new Error('seat unavailable');
+      },
+    };
+    await expect(
+      findContradictions({ events, model, seat: 'checker', chunkText })
+    ).resolves.toEqual([]);
+  });
+});
+
 describe('runAudit', () => {
   let campaignsDir: string;
   let sessionPath: string;
@@ -336,14 +456,240 @@ describe('runAudit', () => {
     expect(markdown).toContain('## Gaps');
   });
 
-  it('leaves contradictions null whether or not --model is requested, since no checker exists yet', async () => {
-    const withModel = await runAudit({
-      campaignsDir,
-      campaign: 'live',
-      session: 1,
-      useModel: true,
+  describe('the contradiction checker pass', () => {
+    const KIRA_FILE = {
+      id: 'kira',
+      name: 'Kira Vale',
+      kind: 'pc',
+      level: 3,
+      abilities: { str: 10, dex: 14, con: 12, int: 16, wis: 12, cha: 10 },
+      proficiencyBonus: 2,
+      ac: 15,
+      maxHp: 24,
+      hp: 24,
+    };
+
+    async function writeCampaignJson(seats: Record<string, unknown> = {}) {
+      const dir = join(campaignsDir, 'live');
+      await mkdir(join(dir, 'characters'), { recursive: true });
+      await writeFile(join(dir, 'characters', 'kira.json'), JSON.stringify(KIRA_FILE));
+      await writeFile(
+        join(dir, 'campaign.json'),
+        JSON.stringify({
+          name: 'Live',
+          targetMinutes: 10,
+          endpoints: { local: { baseURL: 'http://localhost:1234/v1' } },
+          seats: {
+            dm: { endpoint: 'local', model: 'dm-model' },
+            players: { kira: { endpoint: 'local', model: 'player-model' } },
+            ...seats,
+          },
+        })
+      );
+    }
+
+    async function writeLoreIndex(
+      chunks: { chunkId: string; text: string; entityId: string }[]
+    ): Promise<string> {
+      const indexDir = join(campaignsDir, 'live', '.cache', 'lore-index');
+      await LanceStore.write(
+        indexDir,
+        chunks.map((chunk) => ({
+          chunk: {
+            chunkId: chunk.chunkId,
+            source: 'dm/lore.md',
+            title: chunk.chunkId,
+            text: chunk.text,
+            entityId: chunk.entityId,
+            entityName: chunk.chunkId,
+            entityType: 'character',
+          },
+          vector: new Float32Array([1, 0, 0]),
+        }))
+      );
+      await writeFile(
+        join(indexDir, 'meta.json'),
+        JSON.stringify({
+          lorePath: '/tmp/lore',
+          loreCommit: 'lore-abc',
+          contentDigest: 'digest',
+          embedModel: 'test-embed',
+          dims: 3,
+          documentPrefix: '',
+          queryPrefix: '',
+          chunkerVersion: 1,
+          files: 1,
+          chunks: chunks.length,
+          builtAt: '2026-09-20T00:00:00.000Z',
+          ambiguous: [],
+        })
+      );
+      return indexDir;
+    }
+
+    /** A second session (so it does not collide with the outer `beforeEach`'s session 1) whose
+     * lookup has a usable hit, followed by a narration that draws on it — the shape the checker
+     * pass actually acts on. */
+    async function writeUsableLookupSession(session: number): Promise<void> {
+      const recorder = new TurnRecorder(
+        initialState(),
+        'turn-1',
+        () => new Date('2026-09-20T12:00:00Z')
+      );
+      recorder.emit({
+        type: 'session_start',
+        session,
+        loreCommit: 'lore-abc',
+        targetMinutes: 10,
+        party: [makeCombatant({ id: 'kira', name: 'Kira Vale' })],
+      });
+      recorder.emit({
+        type: 'lore_lookup',
+        query: 'Sella Vaunt',
+        hits: [
+          {
+            chunkId: 'c1',
+            source: 'dm/avalon.md',
+            score: 0.8,
+            entityId: 'kanka-1',
+            entityName: 'Sella Vaunt',
+          },
+        ],
+        used: ['c1'],
+      });
+      recorder.emit({
+        type: 'narration',
+        speaker: 'dm',
+        emotion: 'neutral',
+        text: 'Vaunt teaches technical dueling.',
+      });
+      const path = join(
+        campaignsDir,
+        'live',
+        'sessions',
+        String(session).padStart(3, '0'),
+        'events.jsonl'
+      );
+      await new JsonlFileSink(path).append([...recorder.events]);
+    }
+
+    it('does not run without a campaign checker seat, and says so', async () => {
+      await writeCampaignJson();
+      const lines: string[] = [];
+      const result = await runAudit({
+        campaignsDir,
+        campaign: 'live',
+        session: 1,
+        useModel: true,
+        log: (line) => lines.push(line),
+      });
+      expect(result.audit.contradictions).toBeNull();
+      expect(lines.some((line) => line.includes('no checker seat'))).toBe(true);
     });
-    expect(withModel.audit.contradictions).toBeNull();
+
+    it('does not run without a lore index, and says so', async () => {
+      await writeCampaignJson({ checker: { endpoint: 'local', model: 'checker-model' } });
+      const lines: string[] = [];
+      const result = await runAudit({
+        campaignsDir,
+        campaign: 'live',
+        session: 1,
+        useModel: true,
+        log: (line) => lines.push(line),
+      });
+      expect(result.audit.contradictions).toBeNull();
+      expect(lines.some((line) => line.includes('no lore index'))).toBe(true);
+    });
+
+    it('stays null with --no-model even when a checker seat and lore index both exist', async () => {
+      await writeCampaignJson({ checker: { endpoint: 'local', model: 'checker-model' } });
+      await writeLoreIndex([{ chunkId: 'c1', text: 'chunk text', entityId: 'kanka-1' }]);
+      const result = await runAudit({
+        campaignsDir,
+        campaign: 'live',
+        session: 1,
+        useModel: false,
+      });
+      expect(result.audit.contradictions).toBeNull();
+    });
+
+    it('runs the checker, reports its finding, and closes the lore index store', async () => {
+      await writeCampaignJson({ checker: { endpoint: 'local', model: 'checker-model' } });
+      await writeLoreIndex([
+        {
+          chunkId: 'c1',
+          text: 'Sella Vaunt teaches applied crystal engines.',
+          entityId: 'kanka-1',
+        },
+      ]);
+      await writeUsableLookupSession(2);
+
+      let calls = 0;
+      const model: ModelClient = {
+        async complete() {
+          calls++;
+          return {
+            text: '{"conflicts": true, "note": "The lore says applied crystal engines."}',
+            toolCalls: [],
+            model: 'checker',
+          };
+        },
+      };
+      const closeSpy = vi.spyOn(LanceStore.prototype, 'close');
+
+      const result = await runAudit({
+        campaignsDir,
+        campaign: 'live',
+        session: 2,
+        useModel: true,
+        model,
+      });
+
+      expect(calls).toBe(1);
+      expect(result.audit.contradictions).toEqual([
+        {
+          seq: expect.any(Number),
+          narration: 'Vaunt teaches technical dueling.',
+          chunkIds: ['c1'],
+          note: 'The lore says applied crystal engines.',
+        },
+      ]);
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+      closeSpy.mockRestore();
+    });
+
+    it('still closes the lore index store when the checker seat fails', async () => {
+      await writeCampaignJson({ checker: { endpoint: 'local', model: 'checker-model' } });
+      await writeLoreIndex([
+        {
+          chunkId: 'c1',
+          text: 'Sella Vaunt teaches applied crystal engines.',
+          entityId: 'kanka-1',
+        },
+      ]);
+      await writeUsableLookupSession(2);
+
+      const model: ModelClient = {
+        async complete() {
+          throw new Error('seat unavailable');
+        },
+      };
+      const closeSpy = vi.spyOn(LanceStore.prototype, 'close');
+
+      const result = await runAudit({
+        campaignsDir,
+        campaign: 'live',
+        session: 2,
+        useModel: true,
+        model,
+      });
+
+      // The seat failure degrades the pass rather than crashing the audit, and the report is
+      // still explicit that the checker ran and simply found nothing checkable.
+      expect(result.audit.contradictions).toEqual([]);
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+      closeSpy.mockRestore();
+    });
   });
 
   it('releases the session lock after reading', async () => {
