@@ -1,6 +1,6 @@
 # cartyx-sim status
 
-_Last updated: 2026-09-19_
+_Last updated: 2026-09-21_
 
 cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on local models) built to test the Cartyx lore in `cartyx-lore`. It records a session as an event log, and later plans add voices, art, and a video-call-style playback page for recording. See the spec (`docs/superpowers/specs/2026-09-13-cartyx-sim-v1-design.md`) and the roadmap (`docs/superpowers/plans/2026-09-13-cartyx-sim-v1-roadmap.md`).
 
@@ -10,7 +10,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 | --------------------------------------------------------- | ------------------------------------------------------- |
 | 1 — Engine core                                           | Implemented, hardened, merged, pushed to GitHub         |
 | 2A — Live models                                          | Implemented, reviewed, pushed; running on real hardware |
-| 2B — Lore                                                 | Not written                                             |
+| 2B — Lore                                                 | Implemented                                             |
 | 2C — Characters, prep, and prompts                        | Not written                                             |
 | 3 — Media production (art, voices)                        | Not written                                             |
 | 4 — Playback page                                         | Not written                                             |
@@ -28,6 +28,8 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 - **Pause and resume**: seat failures and the runaway-loop backstop pause the session (exit code 2) with a logged `session_paused` event; `--resume` continues from the log with a fresh backstop budget.
 - **Campaign config**: `campaign.json` (endpoints, seats) plus `characters/*.json`; an example lives in `apps/cli/examples/local-campaign/`.
 - **`sim script --campaign <id> --session <n>`**: turns an event log into `script.json` (speaker-attributed, TTS-ready lines and cues) and `script.md` (a readable script); see `docs/running-a-session.md` §8.
+- **`sim index --campaign <id> [--force] [--check]`**: builds or refreshes the lore index from the campaign's `cartyx-lore` checkout — chunks markdown by heading, resolves each chunk to its Kanka entity, embeds through the campaign's `embed` seat, stores it in LanceDB — and reports every ambiguous entity name it declined to guess. `--check` reports staleness and builds nothing. A fresh `sim run` rebuilds a stale index automatically; `--resume` never does. See `docs/running-a-session.md` §9.
+- **`sim audit --campaign <id> --session <n> [--no-model]`**: writes `audit.md` and `audit.json` for a session — gaps, inventions (linked to the narration each supports), coverage, and possible contradictions between narration and retrieved lore (skipped without a checker seat, a lore index, or with `--no-model`).
 
 Operator guide: `docs/running-a-session.md`.
 
@@ -51,7 +53,13 @@ What the runs taught us:
 - **Engine fixes from the runs:** DM prose that arrives alongside tool calls is narrated (after those calls, before `hand_off`) instead of dropped; identical narration within one beat is skipped and flagged `duplicate_narration`; quote marks wrapped around a whole spoken line are removed; a "Hand off to …" line written in DM narration is removed and, when the DM made no hand_off call, treated as one.
 - **The DM plays the players.** Session 001's DM wrote dialogue for three player characters; the verb-list validator missed it. An optional checker seat now reviews each narration (`docs/running-a-session.md` §7), and the verb-list rule yields to the checker once one is configured. Across three 10-minute sessions with the checker on (002–004) no narration wrote a player character's dialogue and every checker catch was a real violation; a checker-off control run reproduced the original failure, with the DM writing lines for three PCs and four later player turns building on them.
 
-Lore lookups always report a gap until Plan 2B, so the DM invents and records details.
+Every session above (001–013) predates the lore index: `lorePath` was never configured, so every `lookup_lore` reported a gap and the DM invented and recorded details with `record_invention`. Plan 2B adds `sim index` and `sim audit`, below — no session has yet been played against a real index, so what the lore index does to the DM's behavior in a live run is still unmeasured.
+
+## Lore index built on the real corpus (Plan 2B, 2026-09-20)
+
+`sim index` ran against the real `cartyx-lore` checkout (not a fixture): 1,393 markdown files became 6,145 chunks in about 35 seconds. Four known-answer queries scored 0.740–0.815 at the top hit; an unrelated control query scored 0.621, and the query whose real chunk wasn't retrieved topped out at 0.638 on the wrong content. The inherited `loreThreshold` of 0.35 filtered nothing — every one of those scores clears it, so every lookup would have returned hits and `sim audit` would have reported zero gaps forever, correct answers and near-misses alike. The default is now **0.69**, the midpoint between the highest measured miss (0.638) and the lowest measured hit (0.740). The margin is tight and the sample is five queries; a real session reporting gaps for lore that demonstrably exists is the signal to re-tune it.
+
+The exercise found the first real gap in the lore itself, before any session has run: "Ghost Match" appears 13 times in `dm/regions/south/cities/alpharetta-avalon-academy-npcs.md`, always inside a per-NPC aside, but no heading ever defines it as a concept in its own right — so no chunk can answer "what is the Ghost Match?". That's a content gap, not a retrieval defect, and it's recorded as an `it.fails` case in `packages/lore/test/known-answers.test.ts` so it starts passing the day the lore writes a section that defines it.
 
 ## Script stage on real sessions (2026-09-16)
 
@@ -460,7 +468,6 @@ Aaron's call (2026-09-19): a session has room for a single fight, as a rule of t
 
 The full list is in the roadmap's Backlog section. Highlights:
 
-- **Plan 2B:** entity ids on lore hits; link lore inventions to their narration.
 - **Plan 2C:**
   - a class field on PCs;
   - player target-id validation;

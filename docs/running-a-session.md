@@ -1,6 +1,6 @@
 # Running a session with local models
 
-This guide covers what Plan 2A delivers: checking your model servers with `sim bench` and playing a session with `sim run`. Lore retrieval (Plan 2B), generated characters and session prep (Plan 2C), and voices, art, and playback (Plans 3–4) come later.
+This guide covers what Plans 2A and 2B deliver: checking your model servers with `sim bench`, playing a session with `sim run`, indexing a `cartyx-lore` checkout with `sim index` so the DM can look real answers up instead of inventing them, and reviewing a finished session with `sim audit`. Generated characters and session prep (Plan 2C) and voices, art, and playback (Plans 3–4) come later.
 
 ## 1. Install
 
@@ -73,6 +73,8 @@ npm run sim -- bench --campaign avalon
 
 For each seat this reports whether the server answered, whether it lists the configured model id, generation speed in tokens per second, and how many of the tool-call trials (default 5, `--trials N`) were well-formed. For a `toolChoice: auto` seat, a trial where the model replies with text instead of a tool call counts as usable too and is shown separately, e.g. `3/5 (+2 text)`. A report is saved to `campaigns/avalon/bench/<timestamp>.json`. The command exits with code 1 if any seat is unreachable or any trial is not a well-formed `roll_dice` call (for a `toolChoice: auto` seat, a plain-text reply also counts as usable).
 
+With `lorePath` and an `embed` seat configured (§9), `sim bench` also makes one embedding call against that seat, reporting whether it was reachable, the vector's dimensions, and its latency. A misconfigured embedding endpoint fails here in seconds instead of showing up at the first `lookup_lore`, a dozen minutes into a session. The command exits 1 if the embed seat is unreachable too.
+
 ## 5. Play a session
 
 ```bash
@@ -81,7 +83,7 @@ npm run sim -- run --campaign avalon --target-minutes 10
 
 Public events print as they happen, and every event is appended to `campaigns/avalon/sessions/001/events.jsonl`. Use `--session N` for later sessions and `--seed N` for reproducible dice.
 
-Until Plan 2B there is no lore index: every lore lookup reports a gap, and the DM invents details and records them with `record_invention`.
+A campaign with no `lorePath` plays with no lore index, the same as before Plan 2B: every lore lookup reports a gap, and the DM invents details and records them with `record_invention`. See §9 to point the campaign at a `cartyx-lore` checkout and build an index, so lookups can find real answers instead.
 
 The engine also catches a few DM slips on its own, without failing the turn. If a narration accidentally includes prompt bookkeeping — a combatant's `(id: …)`, an `HP x/y` block (either order, `HP 20/24` or `20/24 HP`), a hit-point readout in prose (any `HP` figure such as `HP rises to 19/28` or `HP drops to a critical 8`, `health to 36/52`, `at 4/28 hit points`, `9 out of 22 hit points`, `drops to just 3 hit points`, `4 hit points left`), a bare `AC 12` readout, a turn-order readout (`Initiative is rolled.`, `The order of combat is as follows:`, `**Initiative Order:**`, `**Initiative:** Kira 18`), a `[combat]`/`[roll]`/`[state]`/`[scene]`/`[npc]`/`[lore]`/`[invented]`/`[hand_off]`/`[ooc]` transcript tag, a raw `{"target": …}`/`{"kind": …}` JSON object, the DM echoing its engine instruction (`Act for it with tools, narrate, then call hand_off.`) or tool-call syntax (`hand_off(target="party")`, or `hand_off` and `target: party` written as bare lines), or an "It is `<name>`'s turn" line — the sentence holding it is cut before the narration is spoken, flagged `dm_state_leak`, with a DM-only note listing what was cut; the rest of its paragraph stays, and if the cut sentence held the quote mark that opened or closed an NPC's speech, the mark is added back. Two shapes go as whole lines instead: the `**Current Status:**` heading, and a turn-order entry — a numbered item that is only a combatant's name (`1. Mira Ashdown`, `3. Shadow Stalker #3`), or a combatant's name followed by its initiative (`- Shadow Stalker (15)`, `Kira Vale — 18`). A bulleted name with no number stays, since story lists use that shape too. Some prose is deliberately not treated as a leak: a mechanics claim like `Kira loses 3 hit points.` (the mechanics rule handles it), a character dropping to `0 hit points`, and phrases like `order of battle` or `turn order`. A narration that retells, in new words, what the DM narrated this turn since the last thing happened in the game (a roll, state change, combat step, scene change, or NPC introduced or speaking) is not narrated: 60% or more of its content words (at least 5 distinct words of four or more letters) were already told, after exact repeats are set aside, and the shared words are also a quarter or more of both texts together, so a short new beat after a long opening description still narrates. The DM is told it retells the moment and to continue with other tools or call `hand_off`, flagged `duplicate_narration`; after three such retellings in one turn the turn ends with a forced hand-off to the party, flagged `dm_retell_limit`. This stops the loop where a DM describes one moment again and again until it hits its tool-call limit, while a second monster's attack, which follows its own roll, is always narrated. If a narration repeats a sentence the DM already said in this beat or one of the previous three, or quotes back four or more words of a player's own recent line, that sentence is cut too, flagged `repeated_text`, with the same kind of note. When a cut sentence held the quote mark that opened or closed an NPC's speech, the mark is added back to the speech that is left, so it still reads as that NPC's line. Either cut can empty the whole narration, in which case the call is rejected and the DM tries again, same as any other fully-cut narration. A `tool_error` or `invalid_tool_call` — whether the DM's or a player's — now also writes a DM-only note (`Tool error (<tool>): <message>` or `Invalid tool call (<tool>): <message>`) in addition to the message sent back to the model, so the error is visible in the log without re-running the session.
 
@@ -182,3 +184,75 @@ To rename or merge speakers, add `sessions/NNN/speakers.json` and re-run:
 `sim script` refuses to start while the session is being played: it takes the same lock as `sim run`, but only while it reads and hashes the log, releasing it before labeling and writing the outputs. It prints a summary: lines by kind, spoken words, how quotes were labeled, dropped stage directions, unlisted speakers, and notes. `script.md` and `script.json` are written as a pair, with `script.json` written last, so its presence marks a complete build.
 
 Like `sim run`, any other error prints its message and exits 1; set `SIM_DEBUG=1` to print the stack instead.
+
+## 9. Play against real lore (Plan 2B)
+
+A campaign with neither `lorePath` nor an `embed` seat plays exactly as before: every `lookup_lore` reports a gap and the DM invents and records details. Adding lore is all-or-nothing: `lorePath` with no `embed` seat, or an `embed` seat with no `lorePath`, is a `campaign.json` error. Do not also set `loreCommit` — it is derived from the lore repository itself, and setting both is an error too.
+
+### Point the campaign at a lore checkout
+
+```json
+{
+  "lorePath": "/Users/you/Developer/cartyx-lore",
+  "seats": {
+    "embed": {
+      "endpoint": "macbook",
+      "model": "text-embedding-nomic-embed-text-v1.5"
+    }
+  }
+}
+```
+
+`lorePath` can be absolute, or relative to the campaign directory (`campaigns/avalon/`). `embed` is a seat like any other — it takes `endpoint`, `model`, `temperature`, `timeoutMs`, and the rest — pointed at an OpenAI-compatible embeddings endpoint (LM Studio and llama.cpp both serve one alongside their chat endpoint).
+
+### Build the index
+
+```bash
+npm run sim -- index --campaign avalon
+```
+
+This walks every markdown file in the lore repository, chunks it by heading, resolves each chunk to the Kanka entity it describes, embeds the chunks through the `embed` seat, and stores them in LanceDB under `campaigns/avalon/.cache/lore-index/` (git-ignored, one index per lore checkout, not per session). It prints the file and chunk counts, the embedding model and dimensions, and the lore commit it indexed.
+
+**Ambiguous names are reported, not guessed.** When two different Kanka entities share the same display name, `sim index` cannot tell them apart from the name alone, so it falls back to a path-based id for both and lists every such name in its output:
+
+```
+2 ambiguous entity names fell back to a path id (two Kanka entities share each name):
+  Oren Match
+  The Innkeeper
+```
+
+This is a work item for the lore repository (rename or disambiguate the entities), not a failure of the build — the index still builds, those chunks just resolve to a less specific id than a uniquely-named entity gets.
+
+Run it again any time to refresh a stale index; `--force` rebuilds even when it is fresh. `--check` reports whether the index is stale — comparing a digest over the ingested files, the embedding model and dimensions, the document/query prefixes, the chunker version, and `lorePath` itself — and builds nothing. The git commit is deliberately not part of that comparison: a commit that touches no file under `lorePath` costs no rebuild, while an uncommitted edit to a lore file does count as stale.
+
+### Auto-rebuild on a fresh run
+
+```bash
+npm run sim -- run --campaign avalon --target-minutes 60
+```
+
+A fresh `sim run` (no `--resume`) checks the index and rebuilds it first if it is stale, the same as running `sim index` by hand, then opens the session against the fresh index. The lore commit it played against is stamped into `session_start`.
+
+**`--resume` never rebuilds.** If the lore repository has changed since the session started — the on-disk index is now built from a different commit, or the lore checkout itself has moved on even if nobody has re-indexed yet — `--resume` refuses outright:
+
+```
+The lore has changed since session 3 started: the log records a1b2c3d, but the lore
+repository is now at e4f5061. Restore that lore commit and run `sim index` before resuming.
+```
+
+This is deliberate: re-indexing partway through a session would change the world underneath a half-finished story. To recover, check out the commit the message names in your `cartyx-lore` checkout, run `sim index --campaign avalon` to rebuild against it, and then `--resume` as usual.
+
+### Review a session's lore use
+
+```bash
+npm run sim -- audit --campaign avalon --session 3
+```
+
+Reads that session's `events.jsonl` and writes `audit.md` (readable) and `audit.json` (structured) into `campaigns/avalon/sessions/003/`, with four sections:
+
+- **Gaps** — every `lookup_lore` call that came back empty, clustered by shared keywords, each with the seq of the query that found nothing.
+- **Inventions** — every `record_invention`, with the fact, the DM's stated reason, the query it followed (if any), and, when it supported a narration, that narration's text and its seq and spoken-minute mark (there is no playback timestamp yet — that arrives with Plan 3's `timeline.json`).
+- **Coverage** — every lore entity actually used, with a lookup count per entity, plus counts of NPCs introduced (and how many were marked invented) and scenes tied to a lore entity.
+- **Possible contradictions** — narrations that followed a lore lookup, checked against the retrieved chunks by the campaign's `checker` seat for a stated fact the lore directly contradicts (never for detail the lore simply doesn't mention). This section only runs when the campaign has a `checker` seat and a lore index exists; otherwise, or with `--no-model`, it is skipped and the report says which condition was missing. `sim audit --no-model` skips just this section — the first three still run from the event log alone, with no lore index or model call needed, so an audit still works long after the lore has moved on.
+
+The audit does not yet cover backstory hooks or "prepped items never reached" — those need PC backstories and `sim prep`, both Plan 2C.

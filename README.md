@@ -9,7 +9,7 @@ It exists for two reasons:
 
 The party are students of **Avalon Artificers Academy** (Alpharetta), rival school to Axe-Ford Park Adventurer Academy (Brookhaven). The simulation never writes back into `cartyx-lore` or the real table campaign.
 
-> **Status:** the engine and live-model support work (Plans 1 and 2A). Lore retrieval, character generation, art, voices, and playback are not built yet. See [`docs/status.md`](docs/status.md) for the current state and next steps.
+> **Status:** the engine, live-model support, and lore retrieval work (Plans 1, 2A, and 2B). Character generation, art, voices, and playback are not built yet. See [`docs/status.md`](docs/status.md) for the current state and next steps.
 
 ## How it works
 
@@ -24,17 +24,18 @@ The party are students of **Avalon Artificers Academy** (Alpharetta), rival scho
 
 npm workspaces, TypeScript, Node 22.22 or newer.
 
-| Path                               | What it is                                                                                                                               |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/rules`                   | 5e bookkeeping: dice and seeded RNG, checks, attacks, HP, conditions, spell slots, initiative, inventory.                                |
-| `packages/core`                    | The director turn loop, event schema, state projection, DM and player tools, validators, scheduler, session clock, and the `PlayerView`. |
-| `packages/models`                  | An OpenAI-compatible model client (Vercel AI SDK) with per-seat timeouts and fallback endpoints, plus seat benchmarking.                 |
-| `apps/cli`                         | The `sim` command: campaign loading, the JSONL event sink with session locking, `sim run`, and `sim bench`.                              |
-| `apps/cli/examples/local-campaign` | An example campaign to copy and edit.                                                                                                    |
-| `apps/cli/fixtures`                | Scripted sessions that run without any model.                                                                                            |
-| `docs/`                            | Status, the operator guide, and the design spec, roadmap, and implementation plans.                                                      |
+| Path                               | What it is                                                                                                                                                             |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/rules`                   | 5e bookkeeping: dice and seeded RNG, checks, attacks, HP, conditions, spell slots, initiative, inventory.                                                              |
+| `packages/core`                    | The director turn loop, event schema, state projection, DM and player tools, validators, scheduler, session clock, and the `PlayerView`.                               |
+| `packages/models`                  | An OpenAI-compatible model client (Vercel AI SDK) with per-seat timeouts and fallback endpoints, plus seat benchmarking.                                               |
+| `packages/lore`                    | Ingests `cartyx-lore` markdown, chunks it by heading, resolves each chunk to its Kanka entity, embeds and stores it in LanceDB, and answers the engine's lore lookups. |
+| `apps/cli`                         | The `sim` command: campaign loading, the JSONL event sink with session locking, `sim run`, `sim bench`, `sim index`, `sim script`, and `sim audit`.                    |
+| `apps/cli/examples/local-campaign` | An example campaign to copy and edit.                                                                                                                                  |
+| `apps/cli/fixtures`                | Scripted sessions that run without any model.                                                                                                                          |
+| `docs/`                            | Status, the operator guide, and the design spec, roadmap, and implementation plans.                                                                                    |
 
-Planned but not built: `packages/lore` (Plan 2B), `packages/media` (Plan 3), and `apps/playback` (Plan 4).
+Planned but not built: `packages/media` (Plan 3) and `apps/playback` (Plan 4).
 
 ## Quick start
 
@@ -84,13 +85,41 @@ Checks every seat: whether the endpoint answers, whether it lists the configured
 | `--trials <n>`           | Tool-call trials per seat (default 5).     |
 | `--campaigns-dir <path>` | Campaigns directory (default `campaigns`). |
 
+With `lorePath` and an `embed` seat configured, `sim bench` also makes one embedding call, reporting its dimensions and latency.
+
+### `sim index`
+
+Builds or refreshes the lore index from the campaign's `cartyx-lore` checkout (`lorePath` in `campaign.json`): chunks markdown by heading, resolves each chunk to its Kanka entity, embeds it through the `embed` seat, and stores it in LanceDB under `campaigns/<id>/.cache/lore-index/`. Prints file and chunk counts and every ambiguous entity name it declined to guess (two Kanka entities sharing a display name), a work item for the lore repository, not a build failure.
+
+| Option                   | Meaning                                    |
+| ------------------------ | ------------------------------------------ |
+| `--campaign <id>`        | Required.                                  |
+| `--force`                | Rebuild even when the index is fresh.      |
+| `--check`                | Report freshness; build nothing.           |
+| `--campaigns-dir <path>` | Campaigns directory (default `campaigns`). |
+
+A fresh `sim run` rebuilds a stale index automatically; `--resume` never rebuilds, and refuses if the lore has changed since the session started. See [`docs/running-a-session.md`](docs/running-a-session.md) §9.
+
+### `sim audit`
+
+Writes `audit.md` and `audit.json` into a session's directory: gaps (empty lookups), inventions (linked to the narration each supports), coverage (lore entities actually used), and possible contradictions between narration and retrieved lore.
+
+| Option                   | Meaning                                            |
+| ------------------------ | -------------------------------------------------- |
+| `--campaign <id>`        | Required.                                          |
+| `--session <n>`          | Session number (default 1).                        |
+| `--no-model`             | Skip the checker pass for possible contradictions. |
+| `--campaigns-dir <path>` | Campaigns directory (default `campaigns`).         |
+
 ## A campaign folder
 
 ```text
 campaigns/<id>/
   campaign.json          name, targetMinutes, endpoints, seats (dm + one per player)
   characters/<pc>.json   one file per party member; each needs a seat under seats.players
+  .cache/lore-index/     built by `sim index`, when lorePath and an embed seat are set
   sessions/NNN/events.jsonl
+  sessions/NNN/audit.md, audit.json   written by `sim audit`
   bench/<timestamp>.json
 ```
 
@@ -111,7 +140,7 @@ All three checks (`typecheck`, `test`, `format:check`) must pass before a commit
 ## Documentation
 
 - [`docs/status.md`](docs/status.md): where the project stands, what works, next steps, and the backlog highlights.
-- [`docs/running-a-session.md`](docs/running-a-session.md): setting up model servers, a campaign, `sim bench`, `sim run`, and pauses.
+- [`docs/running-a-session.md`](docs/running-a-session.md): setting up model servers, a campaign, `sim bench`, `sim run`, pauses, and playing against a lore index with `sim index` and `sim audit`.
 - [`docs/superpowers/specs/2026-09-13-cartyx-sim-v1-design.md`](docs/superpowers/specs/2026-09-13-cartyx-sim-v1-design.md): the v1 design (event log contract, session flow, tools, media, playback).
 - [`docs/superpowers/plans/2026-09-13-cartyx-sim-v1-roadmap.md`](docs/superpowers/plans/2026-09-13-cartyx-sim-v1-roadmap.md): the plan sequence, deviations from the spec, and the full backlog.
 
@@ -121,7 +150,7 @@ All three checks (`typecheck`, `test`, `format:check`) must pass before a commit
 | ---- | ------------------------------------------------------------------------------------ | ----------- |
 | 1    | Engine core: rules, director, event log, `sim run` against fixtures                  | Implemented |
 | 2A   | Live models: model client, campaign config, `sim bench`, `sim run` on real endpoints | Implemented |
-| 2B   | Lore: ingest `cartyx-lore`, embeddings, `sim index`, `sim audit`                     | Not written |
+| 2B   | Lore: ingest `cartyx-lore`, embeddings, `sim index`, `sim audit`                     | Implemented |
 | 2C   | SRD import, production prompts, scribe, `sim chargen`, `sim prep`                    | Not written |
 | 3    | Media: ComfyUI art and TTS voices, rendered after the run                            | Not written |
 | 4    | Playback page for OBS recording                                                      | Not written |
