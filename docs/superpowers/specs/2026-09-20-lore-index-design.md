@@ -110,7 +110,7 @@ interface VectorStore {
 
 `text-embedding-nomic-embed-text-v1.5`, 768 dimensions, already loaded on both LM Studio servers. nomic requires task prefixes, and the caller supplies them: `search_document: ` on chunk text at index time, `search_query: ` on the query at lookup time. Both prefixes are recorded in `meta.json`, so changing them marks the index stale.
 
-Indexing sends batches of 32 chunks per request through the `models` package's existing retry, timeout and fallback path.
+Indexing sends batches of 32 chunks per request. The embedder is its own client over `POST /v1/embeddings` rather than the `models` package's chat client, so it carries the seat's timeout but brings none of that package's retry or fallback behaviour with it; `buildIndex` owns a bounded retry of its own around each batch. See §10.
 
 ## 5. Configuration and versioning
 
@@ -127,6 +127,8 @@ Gains `lorePath` (absolute, or relative to the campaign directory) and an `embed
 }
 ```
 
+It may also carry an optional `loreThreshold`, overriding the engine's calibrated default for a campaign whose embedding model scores on a different scale. Left out, the engine's `DEFAULT_LORE_THRESHOLD` applies.
+
 `loreCommit` remains in the schema only for lore-less fixtures and keeps its `"unversioned"` default. **Setting both `lorePath` and `loreCommit` is an error** — `loreCommit is derived from lorePath; remove it` — rather than a silent precedence rule.
 
 A campaign with `lorePath` and no `embed` seat is an error too: it would index nothing and answer nothing.
@@ -138,8 +140,9 @@ The value recorded in `session_start.loreCommit` and compared on resume:
 - clean tree: the 40-character git sha (`git rev-parse HEAD`);
 - dirty tree: `<sha>-dirty-<digest8>`, where `digest8` is the first 8 characters of the content digest;
 - the status check itself failed: `<sha>-unknown-<digest8>`. A failed check is not a clean tree, and saying so matters — the whole point of this string is to refuse a resume into changed lore. Because `digest8` fingerprints the content, an `-unknown-` version still compares correctly in both directions: identical content yields an identical string and the resume is allowed, changed content yields a different one and it is refused.
+- not a git repository at all (`rev-parse` fails, or answers with something that is not a sha): `nogit-<digest16>`, the first 16 characters of the content digest and no commit. A lore folder that was never a checkout — an export, a copy, a scratch directory — is still a lore folder, and there is no reason to refuse to index one. It carries no commit because there is none to carry.
 
-The first 40 characters are always a real commit you can `git show`, and an uncommitted lore edit produces a different version, so resuming into edited lore is correctly refused by the check the director already performs.
+Whenever the string starts with a sha, those first 40 characters are a real commit you can `git show`; the `nogit-` form has no commit by construction, and is the only form that does not. In every form an uncommitted lore edit produces a different version, so resuming into edited lore is correctly refused by the check the director already performs.
 
 ### 5.3 Index metadata and staleness
 
@@ -157,13 +160,16 @@ The first 40 characters are always a real commit you can `git show`, and an unco
   "chunkerVersion": 1,
   "files": 1740,
   "chunks": 3821,
-  "builtAt": "2026-09-20T…Z"
+  "builtAt": "2026-09-20T…Z",
+  "ambiguous": ["Oren Match", "The Innkeeper"]
 }
 ```
 
+`ambiguous` carries the display names §4.2 declined to guess, so `--check` can report them without rebuilding. A `meta.json` written before the field existed simply lacks it, and readers treat a missing value as `[]`.
+
 `contentDigest` is sha256 over the sorted list of `<relative-path>\0<sha256 of bytes>\n` for every ingested file — one pass over 3.7 MB, well under a second.
 
-**An index is stale when** `contentDigest`, `embedModel`, `dims`, either prefix, `chunkerVersion`, or `lorePath` differs from the current configuration. `loreCommit` deliberately does **not** trigger a rebuild: a commit that touches no lore file leaves the digest unchanged, and rebuilding for it would cost minutes for nothing.
+**An index is stale when** `contentDigest`, `embedModel`, either prefix, `chunkerVersion`, or `lorePath` differs from the current configuration. `loreCommit` deliberately does **not** trigger a rebuild: a commit that touches no lore file leaves the digest unchanged, and rebuilding for it would cost minutes for nothing. Neither does `dims`, for a different reason: a vector's width is only observable from an embedding response, and staleness is decided without making one — see §10.
 
 `chunkerVersion` follows the script stage's `LABEL_PROMPT_VERSION` idiom: bump it whenever chunking or entity-resolution rules change, so old chunks are not silently reused under new rules.
 
@@ -265,7 +271,7 @@ Repo-wide: `npm run typecheck` gains `packages/lore/tsconfig.json`, and `npm run
 ## 9. Risks
 
 1. **Retrieval quality is unmeasured.** Chunking by heading with a 4,000-character cap and a single embedding model is a first guess. Mitigated by the known-answer set and the threshold-calibration task; `chunkerVersion` makes a change cheap to roll out.
-2. **The embedding endpoint becomes a run dependency.** `lookup_lore` embeds each query, so a dead endpoint pauses the session on the `lore` seat. Mitigated by the existing retry-and-pause path, the new `sim bench` trial, and seat fallbacks.
+2. **The embedding endpoint becomes a run dependency.** `lookup_lore` embeds each query, so a dead endpoint pauses the session on the `lore` seat. Mitigated by the existing retry-and-pause path, the new `sim bench` trial, and — for indexing — the per-batch retry in §4.4. Not by seat fallbacks: the embed seat has none, and refuses config that declares them (§10).
 3. **Name matching can mis-merge.** Two Kanka entities with the same normalized name fall back rather than merge, but a `dm/` heading that coincidentally normalizes to an unrelated Kanka entity would merge wrongly. Mitigated by requiring a unique exact normalized match and reporting every ambiguity; the failure mode is a coverage miscount, not a wrong answer to the DM.
 4. **Auto-rebuild lengthens a run's start.** A stale index costs minutes of embedding before the session opens. Accepted deliberately, so that a session never plays against lore that no longer exists; `sim index` run beforehand avoids it entirely.
 5. **Index size.** ~4,000 chunks × 768 float32 is ~12 MB of vectors plus the text; negligible, and `.cache/` is git-ignored.
@@ -276,3 +282,17 @@ Repo-wide: `npm run typecheck` gains `packages/lore/tsconfig.json`, and `npm run
 - **Invention entries carry a seq and a spoken-minute mark, not a playback timestamp.** `timeline.json` does not exist until Plan 3; the link is recorded now so Plan 3 only has to resolve it.
 - **`campaign.json` gains `lorePath` and an `embed` seat**; §6.1's "lore repo path" is realized as that field, and the embedding model becomes a seat like every other model in the system.
 - **A stale index is rebuilt automatically on a fresh run but never on `--resume`.** §6.4 says "rebuilt before the run" without distinguishing the two; rebuilding on resume would violate the lore-version guarantee the director already enforces.
+
+### Where this document was corrected against what was built
+
+Five places where the implementation settled somewhere this design had not described. The sections above now say what is true; these entries say what changed and why, so a reader of an earlier draft is not left with the old claim.
+
+- **A fourth lore-version form, `nogit-<digest16>`, for a lore path that is no git repository.** §5.2 listed three forms and asserted the first 40 characters are always a real commit. A directory with no `.git` has no commit to put there, and refusing to index one would be a restriction nothing needs — an export or a copy is still lore. The digest still fingerprints the content, so the version still compares correctly in both directions, which is the only property the resume check depends on. §5.2 now lists the form and the sentence is scoped to the three that start with a sha.
+
+- **Indexing retries in `packages/lore`, not through the `models` package.** §4.4 said batches go "through the `models` package's existing retry, timeout and fallback path". They do not: §4's own package layout puts embeddings in `embed.ts` as a separate client over `POST /v1/embeddings`, and that client shares only the seat's timeout with the chat path. Rather than route embeddings through a chat client they do not fit, `buildIndex` wraps each batch in three attempts with a 1 s then 4 s backoff and logs every retry. What this buys is the case the original sentence was reaching for: one transient failure at chunk 5,000 of 6,145 no longer discards a multi-minute build.
+
+- **The embed seat refuses `fallbacks`.** §9 risk 2 counted seat fallbacks among the mitigations for a dead embedding endpoint. They were never wired: `embedderFor` built the embedder from `{ endpoint, model }`, so a declared fallback validated at load time and was then silently ignored. It is now a load-time error, which is also the right answer on the merits — the embedding model defines the vector space the whole index was built in, so a fallback on a different model would answer queries in a space none of the stored vectors occupy, returning confident nonsense rather than a gap. Changing embedding model is a `sim index --force`, not a failover. §9 risk 2 is corrected accordingly.
+
+- **Staleness does not compare `dims`.** §5.3 listed it among the fields that mark an index stale, and the code appeared to check it while comparing the stored value against itself. A vector's width is only observable from an embedding response, and neither `sim index --check` nor a fresh `sim run` makes one before deciding whether to rebuild — `--check` in particular has to answer with the endpoint down. An unmeasured width is therefore not compared at all rather than compared meaninglessly. A model swap is still caught by `embedModel`; a same-model width change is caught by §7.3's bench trial, which compares a live response against `meta.json`'s `dims` and fails the command on a mismatch.
+
+- **`campaign.json` gains an optional `loreThreshold`.** §5.1 did not mention one, and the calibrated 0.69 of §8 lived only in engine source. A campaign on a different embedding model scores on a different scale and needs a different cut; the threshold is a configuration question, not an engine constant, so it is now both — a named default in `packages/core` and an optional override in the campaign file. §5.1 lists it.
