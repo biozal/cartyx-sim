@@ -59,6 +59,17 @@ export function embedderFor(campaign: Campaign): Embedder {
   }
   const seat = campaign.models[EMBED_SEAT];
   if (!seat) throw new Error(`Campaign "${campaign.id}" has no model for seat "${EMBED_SEAT}".`);
+  // `OpenAICompatibleEmbedder` calls one target. Accepting `fallbacks` here and then never
+  // reaching for them would be config that validates, reads as a safety net, and silently is not
+  // one — the worst of the three outcomes. Rejecting says so at load time instead.
+  if (seat.fallbacks && seat.fallbacks.length > 0) {
+    throw new Error(
+      `Campaign "${campaign.id}": seats.embed does not support fallbacks. The embedding model ` +
+        'decides the vector space the whole index is built in, so a fallback on a different ' +
+        'model would answer queries in a space none of the stored vectors live in. Remove ' +
+        'seats.embed.fallbacks and rebuild with `sim index --force` to change embedding model.'
+    );
+  }
   return new OpenAICompatibleEmbedder(
     { endpoint: seat.endpoint, model: seat.model },
     { timeoutMs: seat.timeoutMs }

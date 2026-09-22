@@ -3,10 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeEmbedder } from '@cartyx-sim/lore';
 import { describe, expect, it } from 'vitest';
-import { ensureIndex, formatIndexSummary, runIndex } from '../src/index-lore';
+import { loadCampaign } from '../src/campaign';
+import { embedderFor, ensureIndex, formatIndexSummary, runIndex } from '../src/index-lore';
 
 /** Writes a campaign whose lorePath points at a tiny lore repo, and returns both paths. */
-async function fixture(): Promise<{ campaignsDir: string; campaign: string }> {
+async function fixture(
+  embedSeat: Record<string, unknown> = { endpoint: 'local', model: 'embed-model' }
+): Promise<{ campaignsDir: string; campaign: string }> {
   const root = await mkdtemp(join(tmpdir(), 'sim-index-'));
   const lore = join(root, 'lore');
   await mkdir(join(lore, 'dm'), { recursive: true });
@@ -23,10 +26,13 @@ async function fixture(): Promise<{ campaignsDir: string; campaign: string }> {
       name: 'Test',
       targetMinutes: 5,
       lorePath: lore,
-      endpoints: { local: { baseURL: 'http://127.0.0.1:1234/v1' } },
+      endpoints: {
+        local: { baseURL: 'http://127.0.0.1:1234/v1' },
+        studio: { baseURL: 'http://127.0.0.1:1235/v1' },
+      },
       seats: {
         dm: { endpoint: 'local', model: 'dm-model' },
-        embed: { endpoint: 'local', model: 'embed-model' },
+        embed: embedSeat,
         players: { kira: { endpoint: 'local', model: 'pc-model' } },
       },
     })
@@ -107,6 +113,26 @@ describe('runIndex', () => {
     expect(checked.rebuilt).toBe(false);
     expect(checked.meta!.builtAt).toBe(first.meta!.builtAt);
     expect(formatIndexSummary(checked).join('\n')).toContain('stale');
+  });
+});
+
+describe('embedderFor', () => {
+  it('builds an embedder from the embed seat', async () => {
+    const { campaignsDir, campaign } = await fixture();
+    expect(embedderFor(await loadCampaign(campaignsDir, campaign)).model).toBe('embed-model');
+  });
+
+  it('rejects an embed seat that declares fallbacks rather than ignoring them', async () => {
+    // `resolve()` in campaign.ts validates fallbacks at load time, so a seat could declare them,
+    // look like a configured safety net, and never have them reached. Saying no is honest;
+    // accepting config that does nothing is not.
+    const { campaignsDir, campaign } = await fixture({
+      endpoint: 'local',
+      model: 'embed-model',
+      fallbacks: [{ endpoint: 'studio', model: 'other-embed-model' }],
+    });
+    const loaded = await loadCampaign(campaignsDir, campaign);
+    expect(() => embedderFor(loaded)).toThrow(/seats\.embed does not support fallbacks/);
   });
 });
 

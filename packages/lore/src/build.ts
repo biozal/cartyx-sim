@@ -48,11 +48,24 @@ export type IndexIdentity = Omit<
   dims?: number;
 };
 
+/**
+ * Delays before each retry of a failed embedding batch, in milliseconds — three attempts in all.
+ * A build sends ~200 requests for the real corpus over several minutes, and a single transient
+ * HTTP hiccup at chunk 5,000 of 6,145 used to abort the whole run with no partial progress.
+ * Shorter than the director's own `[1000, 4000, 15000]`: a session pauses for a human to fix the
+ * seat, while a build is a batch job that should either get through or fail quickly.
+ */
+export const EMBED_RETRY_DELAYS_MS = [1000, 4000] as const;
+
 export interface BuildOptions {
   lorePath: string;
   indexDir: string;
   embedder: Embedder;
   log?: (line: string) => void;
+  /** Overridden by tests; production uses `EMBED_RETRY_DELAYS_MS`. */
+  retryDelaysMs?: readonly number[];
+  /** Overridden by tests, so a retry test does not actually wait. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface BuildResult {
@@ -131,14 +144,41 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
   }
   log(`Chunked into ${chunks.length} chunks across ${entities.byName.size} known entities`);
 
+  if (chunks.length === 0) {
+    throw new Error(
+      `No lore chunks found under ${options.lorePath}. Check lorePath in campaign.json: it must ` +
+        'point at a directory of markdown files (a typo in the path, or a checkout that has not ' +
+        'been cloned yet, both look like this).'
+    );
+  }
+
+  const delays = options.retryDelaysMs ?? EMBED_RETRY_DELAYS_MS;
+  const sleep = options.sleep ?? ((ms: number) => new Promise((done) => setTimeout(done, ms)));
   const rows: { chunk: StoredChunk; vector: Float32Array }[] = [];
   for (let start = 0; start < chunks.length; start += EMBED_BATCH) {
     const batch = chunks.slice(start, start + EMBED_BATCH);
     // The heading path travels with the body so a short section keeps its context.
-    const vectors = await options.embedder.embedDocuments(
-      batch.map((chunk) => `${chunk.title}\n\n${chunk.text}`)
-    );
-    batch.forEach((chunk, index) => rows.push({ chunk, vector: vectors[index]! }));
+    const texts = batch.map((chunk) => `${chunk.title}\n\n${chunk.text}`);
+    // A bounded retry around each batch: the embedder itself sets `maxRetries: 0`, and losing a
+    // multi-minute build to one transient 503 is the failure this exists to prevent. Every retry
+    // is logged, so a build that takes unusually long says why.
+    let vectors: Float32Array[] | undefined;
+    for (let attempt = 0; attempt <= delays.length; attempt++) {
+      try {
+        vectors = await options.embedder.embedDocuments(texts);
+        break;
+      } catch (error) {
+        const delay = delays[attempt];
+        if (delay === undefined) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        log(
+          `Embedding chunks ${start + 1}-${start + batch.length} failed (${message}); ` +
+            `retrying in ${delay}ms (attempt ${attempt + 2} of ${delays.length + 1})`
+        );
+        await sleep(delay);
+      }
+    }
+    batch.forEach((chunk, index) => rows.push({ chunk, vector: vectors![index]! }));
     log(`Embedded ${Math.min(start + EMBED_BATCH, chunks.length)}/${chunks.length}`);
   }
 

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildIndex, isStale, readMeta, CHUNKER_VERSION } from '../src/build';
-import { FakeEmbedder, DOCUMENT_PREFIX, QUERY_PREFIX } from '../src/embed';
+import { FakeEmbedder, DOCUMENT_PREFIX, QUERY_PREFIX, type Embedder } from '../src/embed';
 import { LanceStore } from '../src/lance';
 import type { ScoredChunk } from '../src/store';
 
@@ -61,6 +61,79 @@ describe('buildIndex', () => {
     const rows = await indexedRows(indexDir, embedder);
     expect(rows).toHaveLength(2);
     expect(new Set(rows.map((row) => row.entityId))).toEqual(new Set(['kanka-2418574']));
+  });
+
+  it('retries a failed embedding batch rather than losing the whole build', async () => {
+    const lorePath = await loreRepo();
+    const indexDir = join(await mkdtemp(join(tmpdir(), 'lore-index-')), 'lore-index');
+    const real = new FakeEmbedder(16);
+    let calls = 0;
+    const flaky: Embedder = {
+      model: real.model,
+      embedQuery: (text) => real.embedQuery(text),
+      async embedDocuments(texts) {
+        calls++;
+        if (calls === 1) throw new Error('503 Service Unavailable');
+        return real.embedDocuments(texts);
+      },
+    };
+    const lines: string[] = [];
+    const slept: number[] = [];
+
+    const result = await buildIndex({
+      lorePath,
+      indexDir,
+      embedder: flaky,
+      log: (line) => lines.push(line),
+      retryDelaysMs: [5, 10],
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+
+    expect(calls).toBe(2);
+    expect(slept).toEqual([5]);
+    expect(result.meta.chunks).toBe(2);
+    expect(await indexedRows(indexDir, real)).toHaveLength(2);
+    // A slow build has to be explicable from its own output.
+    expect(lines.join('\n')).toContain('503 Service Unavailable');
+    expect(lines.join('\n')).toContain('retrying in 5ms');
+  });
+
+  it('gives up after the last retry, surfacing the endpoint error', async () => {
+    const lorePath = await loreRepo();
+    const indexDir = join(await mkdtemp(join(tmpdir(), 'lore-index-')), 'lore-index');
+    let calls = 0;
+    const dead: Embedder = {
+      model: 'dead',
+      async embedQuery() {
+        throw new Error('connect ECONNREFUSED');
+      },
+      async embedDocuments() {
+        calls++;
+        throw new Error('connect ECONNREFUSED');
+      },
+    };
+    await expect(
+      buildIndex({
+        lorePath,
+        indexDir,
+        embedder: dead,
+        retryDelaysMs: [1, 1],
+        sleep: async () => {},
+      })
+    ).rejects.toThrow(/ECONNREFUSED/);
+    expect(calls).toBe(3);
+  });
+
+  it('names the lorePath when the directory holds no indexable markdown', async () => {
+    // What a first-time operator with a typo'd lorePath hits. Without this guard the build dies
+    // inside LanceDB with a raw Rust error naming a cargo registry path.
+    const empty = await mkdtemp(join(tmpdir(), 'lore-empty-'));
+    const indexDir = join(await mkdtemp(join(tmpdir(), 'lore-index-')), 'lore-index');
+    await expect(
+      buildIndex({ lorePath: empty, indexDir, embedder: new FakeEmbedder(16) })
+    ).rejects.toThrow(`No lore chunks found under ${empty}. Check lorePath in campaign.json`);
   });
 
   it('reports nothing ambiguous for a clean corpus', async () => {

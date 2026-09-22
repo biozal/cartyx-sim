@@ -45,7 +45,8 @@ export class OpenAICompatibleEmbedder implements Embedder {
     const { embeddings } = await embedMany({
       model: this.embeddingModel(),
       values: texts.map((text) => `${DOCUMENT_PREFIX}${text}`),
-      // The caller owns retries and pausing, as it does for chat seats.
+      // The caller owns retries and pausing, as it does for chat seats: `buildIndex` retries a
+      // failed batch (build.ts), and the director's seat-failure path covers a query at run time.
       maxRetries: 0,
       abortSignal: AbortSignal.timeout(this.timeoutMs),
     });
