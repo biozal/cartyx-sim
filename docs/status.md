@@ -18,7 +18,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 
 **Repository:** `main` is pushed to GitHub.
 
-**Checks on `feat/dm-pc-control-checker`:** `npm run typecheck`, `npm test` (56 files, 1202 tests plus 1 expected failure), and `npm run format:check` all pass.
+**Checks on `main`:** `npm run typecheck`, `npm test` (68 files, 1332 tests plus 1 expected failure and 6 gated lore tests that skip without `CARTYX_LORE_PATH`), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -424,7 +424,7 @@ Findings 1–4 are fixed in `197b339` plus a follow-up after review; finding 5 i
 
 ## Where we are (2026-09-20)
 
-**Branch `feat/dm-pc-control-checker`: 121 commits ahead of `origin/main`, nothing pushed.** `npm run typecheck`, `npm test` (56 files, 1202 passed plus 1 expected failure) and `npm run format:check` all pass on the branch head.
+**`main` is 47 commits ahead of `origin/main`, nothing pushed.** `feat/dm-pc-control-checker` merged at `d2a166a`, and Plan 2B merged at `3ea334f`. `npm run typecheck`, `npm test` (68 files, 1332 passed plus 1 expected failure and 6 skipped) and `npm run format:check` all pass on `main`.
 
 The expected failure is deliberate: it documents the quote-majority split's known cost (`"Who's next?" I nod to You.`), and will start passing only if that rule is revisited.
 
@@ -452,9 +452,10 @@ Aaron's call (2026-09-19): a session has room for a single fight, as a rule of t
 
 ### Next steps, in order
 
-1. **Decide the release**: push and open a PR, merge to `main` locally, or run session 014 first to confirm a run with nothing to fix. Nothing is pushed yet.
-2. Consider giving Bram and Tomas starting gear in the Avalon party files.
-3. Then the plan work already queued: Plan 2B (lore), the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike.
+1. **Run session 014 — the first session against real lore.** Nothing in Plan 2B has been exercised by a 1-hour run, and it changes what the DM sees on every `lookup_lore`. Run `sim bench` first (it now checks the embed seat and its vector width), then `sim index`, then the session, then `sim audit`.
+2. **Watch the relevance threshold.** 0.69 was calibrated on five clean queries with a 0.102 margin; real sessions ask messier questions. If the audit reports gaps for lore that demonstrably exists, lower it via `loreThreshold` in `campaign.json` rather than editing the engine.
+3. Consider giving Bram and Tomas starting gear in the Avalon party files.
+4. Then: the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike. Nothing is pushed yet.
 
 ### Operating notes from these runs
 
