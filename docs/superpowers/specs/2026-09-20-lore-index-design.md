@@ -233,7 +233,7 @@ A fresh `sim run --campaign` computes the lore version and, on a missing or stal
 
 ### 7.3 `sim bench`
 
-Gains an `embed` trial when the campaign configures one: embed a short string, assert the response's dimension count matches `meta.json`'s (or the model's first response, on a first run). A misconfigured embedding endpoint then fails in seconds rather than at minute 12 of a 1-hour session.
+Gains an `embed` trial when the campaign configures one: embed a short string, assert the response's dimension count matches `meta.json`'s. On a first run there is no index to compare against and the trial simply passes — comparing a response against itself is the defect this check exists to avoid. A misconfigured embedding endpoint then fails in seconds rather than at minute 12 of a 1-hour session.
 
 ### 7.4 `sim audit`
 
@@ -266,7 +266,7 @@ The checker uses the `checker` seat, as `sim script` does, and `--no-model` skip
 
 **Gated on the real corpus** (`CARTYX_LORE_PATH` plus a reachable embedding endpoint; skipped otherwise): the known-answer retrieval tests of v1 design §13 — "who teaches applied crystal engines at Avalon?" → Professor Sella Vaunt, and a handful more across locations, factions and gods.
 
-A gated test that never runs proves nothing. The implementation plan carries an explicit task that builds the live index, runs the known-answer set, records the observed score spread for both hits and non-hits, and **sets the `loreThreshold` default from those numbers**. The current default of 0.35 is a guess inherited from Plan 1 and has never been measured against a real embedding model. That task is not complete until the measured numbers are written into the plan's notes.
+A gated test that never runs proves nothing, so the implementation plan carried an explicit task that built the live index, ran the known-answer set, recorded the observed score spread for both hits and non-hits, and **set the `loreThreshold` default from those numbers**. That has now happened. The default inherited from Plan 1 was 0.35, which the measurement showed filtered nothing at all — an unrelated control query scored 0.621. The default is now `DEFAULT_LORE_THRESHOLD` (0.69), and the numbers behind it are recorded in the plan's Task 15 `**Measured:**` section. The gated tests assert relevant hits at or above that constant and the control below it, so a regression in retrieval quality fails them rather than passing quietly.
 
 Repo-wide: `npm run typecheck` gains `packages/lore/tsconfig.json`, and `npm run format:check` must pass.
 
