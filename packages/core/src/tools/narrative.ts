@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { HandOffTarget } from '../events';
+import type { LoreHit } from '../model';
 import { ownEntry, selectResponders } from '../state';
 import { slugify } from '../text';
 import { coercedEmotion, defineTool, SpokenText, ToolError } from './types';
@@ -117,14 +118,33 @@ export const lookupLore = defineTool({
     'Search the Cartyx world lore (people, places, factions, history). Look details up before inventing them.',
   parameters: z.object({ query: z.string().trim().min(3).max(200) }),
   async run(args, { recorder, lore, loreThreshold }) {
-    const hits = await lore.search(args.query, LORE_RESULT_LIMIT);
-    const used = hits.filter((hit) => hit.score >= loreThreshold);
+    // Ask for more than the result limit: duplicates of one entity (the Kanka stub and the dm
+    // writeup) collapse below, and the remaining slots should still be filled with other entities.
+    const hits = await lore.search(args.query, LORE_RESULT_LIMIT * 4);
+    const ranked = [...hits].sort((a, b) => b.score - a.score);
+    const bestByEntity = new Map<string, LoreHit>();
+    for (const hit of ranked) {
+      if (!bestByEntity.has(hit.entityId)) bestByEntity.set(hit.entityId, hit);
+    }
+    const used = [...bestByEntity.values()]
+      .filter((hit) => hit.score >= loreThreshold)
+      .slice(0, LORE_RESULT_LIMIT);
+    const usedIds = new Set(used.map((hit) => hit.chunkId));
     recorder.emit({
       type: 'lore_lookup',
       visibility: 'dm',
       query: args.query,
-      hits: hits.map(({ chunkId, source, score }) => ({ chunkId, source, score })),
-      used: used.map((hit) => hit.chunkId),
+      // Every candidate is logged, collapsed ones included, so the audit can see what was
+      // suppressed; `used` lists only what the DM was actually shown.
+      hits: ranked.map(({ chunkId, source, score, entityId, entityName, entityType }) => ({
+        chunkId,
+        source,
+        score,
+        entityId,
+        entityName,
+        entityType,
+      })),
+      used: [...usedIds],
     });
     if (used.length === 0) {
       return {

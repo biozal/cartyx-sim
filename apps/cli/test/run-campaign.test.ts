@@ -1,13 +1,20 @@
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { initialState, TurnRecorder } from '@cartyx-sim/core';
+import { initialState, TurnRecorder, type SimEvent } from '@cartyx-sim/core';
+import { FakeEmbedder, LanceStore, readMeta } from '@cartyx-sim/lore';
 import { startFakeOpenAIServer, type FakeOpenAIServer } from '@cartyx-sim/models/testing';
 import { makeCombatant } from '@cartyx-sim/rules/testing';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadCampaign } from '../src/campaign';
+import { loreIndexDir } from '../src/index-lore';
 import { JsonlFileSink } from '../src/jsonl-sink';
 import { sessionEventsPath } from '../src/paths';
-import { runSession } from '../src/run';
+import { directorConfig, runSession } from '../src/run';
+
+async function readEvents(eventsPath: string) {
+  return new JsonlFileSink(eventsPath).readAll();
+}
 
 const KIRA = {
   id: 'kira',
@@ -313,5 +320,223 @@ describe('runSession --resume against a campaign', () => {
       runSession({ campaignsDir, campaign: 'resume-c', session: 1, resume: true })
     ).rejects.toThrow('Resume with the original party');
     expect(fake.requests).toHaveLength(0);
+  });
+});
+
+describe('runSession with lore', () => {
+  let campaignsDir: string;
+  let fake: FakeOpenAIServer;
+
+  // The fixture's one lore section, as a single heading and a one-paragraph body: `chunkMarkdown`
+  // produces exactly `{ title: LORE_TITLE, text: LORE_BODY }` for it (no heading path separator,
+  // since there's only one heading; trimmed to just the body line). `buildIndex` embeds
+  // `${title}\n\n${text}` for that chunk, so `LORE_QUERY` is byte-identical to what was embedded —
+  // with `FakeEmbedder` (no real semantics), that guarantees the query's vector exactly matches
+  // the document's, rather than depending on similarity a hash-based embedder cannot provide.
+  const LORE_TITLE = 'Avalon Artificers Academy';
+  const LORE_BODY =
+    'A polished rival school north of the river, famous for its duels, its bake-offs and its ' +
+    'extremely well-funded workshops.';
+  const LORE_QUERY = `${LORE_TITLE}\n\n${LORE_BODY}`;
+
+  beforeEach(async () => {
+    campaignsDir = await mkdtemp(join(tmpdir(), 'cartyx-sim-lore-'));
+    // The DM always looks up the fixture's own lore, narrates, sets a scene, and hands off to the
+    // party — but Kira is written in at 0 HP, so she is never "up" to receive that hand-off. Each
+    // such beat is therefore an idle hand-off; after `idleHandOffLimit` (3) of them in a row, the
+    // backstop pauses the session on its own, with no player turn ever needed. targetMinutes is
+    // generous (5) so this never also trips the word-count clock, which would end the session
+    // outright instead of pausing it.
+    fake = await startFakeOpenAIServer(() => ({
+      toolCalls: [
+        { name: 'lookup_lore', arguments: { query: LORE_QUERY } },
+        {
+          name: 'narrate',
+          arguments: {
+            text: 'Dust motes drift through the shafts of light falling across the archive floor.',
+          },
+        },
+        {
+          name: 'scene_change',
+          arguments: { location: 'Avalon Archive Vault', artPrompt: 'A dusty vault of scrolls' },
+        },
+        { name: 'hand_off', arguments: { target: { kind: 'party' } } },
+      ],
+    }));
+  });
+
+  afterEach(async () => {
+    await fake.close();
+    await rm(campaignsDir, { recursive: true, force: true });
+  });
+
+  /**
+   * Writes a campaign whose lorePath points at a tiny lore repo, with an embed seat pointing at
+   * the fake server (never actually called: every test injects a FakeEmbedder), and a party of
+   * one — Kira, downed from the start so the DM's own hand-offs pause the session quickly instead
+   * of requiring a scripted player turn.
+   */
+  async function loreFixture(extra: Record<string, unknown> = {}): Promise<{
+    campaignsDir: string;
+    campaign: string;
+    lorePath: string;
+  }> {
+    const campaign = 'live';
+    const dir = join(campaignsDir, campaign);
+    const lorePath = join(dir, 'lore');
+    await mkdir(join(lorePath, 'dm'), { recursive: true });
+    await writeFile(join(lorePath, 'dm', 'avalon.md'), `# ${LORE_TITLE}\n\n${LORE_BODY}\n`);
+    await mkdir(join(dir, 'characters'), { recursive: true });
+    await writeFile(
+      join(dir, 'campaign.json'),
+      JSON.stringify({
+        name: 'Lore live',
+        targetMinutes: 5,
+        lorePath,
+        ...extra,
+        endpoints: { local: { baseURL: fake.baseURL } },
+        seats: {
+          dm: { endpoint: 'local', model: 'dm-model' },
+          embed: { endpoint: 'local', model: 'embed-model' },
+          players: { kira: { endpoint: 'local', model: 'player-model' } },
+        },
+      })
+    );
+    await writeFile(join(dir, 'characters', 'kira.json'), JSON.stringify({ ...KIRA, hp: 0 }));
+    return { campaignsDir, campaign, lorePath };
+  }
+
+  async function indexDirFor(campaign: string): Promise<string> {
+    return loreIndexDir(await loadCampaign(campaignsDir, campaign));
+  }
+
+  it('builds a missing index before a fresh session and records the lore commit', async () => {
+    const { campaign } = await loreFixture();
+    const result = await runSession({
+      campaignsDir,
+      campaign,
+      session: 1,
+      resume: false,
+      embedder: new FakeEmbedder(16),
+    });
+    const events = await readEvents(result.eventsPath);
+    const start = events.find((event) => event.type === 'session_start');
+    expect(start).toMatchObject({ loreCommit: expect.stringMatching(/^(nogit-|[0-9a-f]{40})/) });
+  });
+
+  it('refuses a resume when the on-disk index no longer matches the logged lore', async () => {
+    const { campaign, lorePath } = await loreFixture();
+    await runSession({
+      campaignsDir,
+      campaign,
+      session: 1,
+      resume: false,
+      embedder: new FakeEmbedder(16),
+    });
+    await writeFile(
+      join(lorePath, 'dm', 'avalon.md'),
+      '# Avalon Artificers Academy\n\nRewritten lore that no longer matches the logged session, ' +
+        'and long enough that the chunker keeps it too.\n'
+    );
+    await expect(
+      runSession({
+        campaignsDir,
+        campaign,
+        session: 1,
+        resume: true,
+        embedder: new FakeEmbedder(16),
+      })
+    ).rejects.toThrow(/lore has changed since session 1 started.*the lore repository is now at/s);
+  });
+
+  it('does not rebuild the index on resume', async () => {
+    const { campaign } = await loreFixture();
+    await runSession({
+      campaignsDir,
+      campaign,
+      session: 1,
+      resume: false,
+      embedder: new FakeEmbedder(16),
+    });
+    const before = await readMeta(await indexDirFor(campaign));
+    await runSession({
+      campaignsDir,
+      campaign,
+      session: 1,
+      resume: true,
+      embedder: new FakeEmbedder(16),
+    });
+    const after = await readMeta(await indexDirFor(campaign));
+    expect(after!.builtAt).toBe(before!.builtAt);
+  });
+
+  it('finds real lore for a matching lookup_lore query', async () => {
+    const { campaign } = await loreFixture();
+    const result = await runSession({
+      campaignsDir,
+      campaign,
+      session: 1,
+      resume: false,
+      embedder: new FakeEmbedder(16),
+    });
+    const events = await readEvents(result.eventsPath);
+    const lookup = events.find(
+      (event): event is Extract<SimEvent, { type: 'lore_lookup' }> => event.type === 'lore_lookup'
+    );
+    expect(lookup).toBeDefined();
+    expect(lookup!.query).toBe(LORE_QUERY);
+    // A real search, not a stub: `used` is non-empty (a search that always returns nothing would
+    // pass every other test in this file), and the hit it names carries the fixture's own entity
+    // metadata rather than a placeholder, proving it was read back from the real LanceDB index.
+    expect(lookup!.used.length).toBeGreaterThan(0);
+    const usedHit = lookup!.hits.find((hit) => hit.chunkId === lookup!.used[0]);
+    expect(usedHit).toMatchObject({ entityName: LORE_TITLE, entityId: expect.any(String) });
+  });
+
+  it('threads a campaign-configured loreThreshold through to the director', async () => {
+    const { campaign } = await loreFixture({ loreThreshold: 0.42 });
+    const loaded = await loadCampaign(campaignsDir, campaign);
+    expect(loaded.loreThreshold).toBe(0.42);
+    const config = directorConfig(
+      loaded,
+      { campaignsDir, campaign, session: 1, resume: false },
+      'lore-abc'
+    );
+    expect(config).toMatchObject({ session: 1, loreCommit: 'lore-abc', loreThreshold: 0.42 });
+  });
+
+  it('leaves the threshold to the engine default when the campaign configures none', async () => {
+    const { campaign } = await loreFixture();
+    const loaded = await loadCampaign(campaignsDir, campaign);
+    // Absent, not `undefined`: the director's `config.loreThreshold ?? DEFAULT_LORE_THRESHOLD`
+    // must see nothing at all rather than an explicit override that happens to be empty.
+    expect(
+      directorConfig(loaded, { campaignsDir, campaign, session: 1, resume: false }, 'lore-abc')
+    ).not.toHaveProperty('loreThreshold');
+  });
+
+  it('closes the lore index even when the session lock is already held', async () => {
+    const { campaign } = await loreFixture();
+    const eventsPath = sessionEventsPath(campaignsDir, campaign, 1);
+    const holder = new JsonlFileSink(eventsPath);
+    await holder.acquireLock();
+    const closeSpy = vi.spyOn(LanceStore.prototype, 'close');
+    try {
+      // campaignSetup opens a real LanceDB handle before runSession ever tries the lock; this
+      // proves that handle is still closed even though acquireLock throws right after.
+      await expect(
+        runSession({
+          campaignsDir,
+          campaign,
+          session: 1,
+          resume: false,
+          embedder: new FakeEmbedder(16),
+        })
+      ).rejects.toThrow(/another run may be active/i);
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      closeSpy.mockRestore();
+      await holder.releaseLock();
+    }
   });
 });

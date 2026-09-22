@@ -26,7 +26,10 @@
       "source": "kanka-export/markdown/characters/2418574-2418574.md",
       "title": "Professor Sella Vaunt",
       "text": "Professor Sella Vaunt teaches applied crystal engines at Avalon Artificers Academy.",
-      "score": 0
+      "score": 0,
+      "entityId": "kanka-2418574",
+      "entityName": "Professor Sella Vaunt",
+      "entityType": "character"
     }
   ],
   "script": {

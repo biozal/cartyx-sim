@@ -1,8 +1,10 @@
 import { Command } from 'commander';
 import { parseNumber } from './args';
+import { formatAuditSummary, runAudit } from './audit';
 import { benchPassed, runBench } from './bench';
 import { formatCommandError } from './command-errors';
 import { releaseHeldLocks } from './jsonl-sink';
+import { formatIndexSummary, runIndex } from './index-lore';
 import { formatPauseMessage } from './pause-message';
 import { runSession } from './run';
 import { formatScriptSummary, makeScript } from './script';
@@ -33,12 +35,27 @@ interface BenchCommandOptions {
   campaignsDir: string;
 }
 
+interface IndexCommandOptions {
+  campaign: string;
+  force: boolean;
+  check: boolean;
+  campaignsDir: string;
+}
+
 interface ScriptCommandOptions {
   campaign: string;
   session: number;
   /** False with --no-model. */
   model: boolean;
   refresh: boolean;
+  campaignsDir: string;
+}
+
+interface AuditCommandOptions {
+  campaign: string;
+  session: number;
+  /** False with --no-model. */
+  model: boolean;
   campaignsDir: string;
 }
 
@@ -108,7 +125,27 @@ program
         log: (line) => console.log(line),
       });
       console.log(`\nBench report: ${report.reportPath}`);
-      if (!benchPassed(report.results)) process.exitCode = 1;
+      if (!benchPassed(report.results, report.embed)) process.exitCode = 1;
+    })
+  );
+
+program
+  .command('index')
+  .description("Build or refresh the lore index from the campaign's cartyx-lore checkout")
+  .requiredOption('--campaign <id>', 'campaign id (a folder under the campaigns directory)')
+  .option('--force', 'rebuild even when the index is fresh', false)
+  .option('--check', 'report freshness without building', false)
+  .option('--campaigns-dir <path>', 'campaigns directory', 'campaigns')
+  .action(
+    action<IndexCommandOptions>(async (options) => {
+      const result = await runIndex({
+        campaignsDir: options.campaignsDir,
+        campaign: options.campaign,
+        force: options.force,
+        check: options.check,
+        log: (line) => console.log(line),
+      });
+      for (const line of formatIndexSummary(result)) console.log(line);
     })
   );
 
@@ -133,6 +170,26 @@ program
         log: (line) => console.log(line),
       });
       for (const line of formatScriptSummary(result)) console.log(line);
+    })
+  );
+
+program
+  .command('audit')
+  .description('Report what the lore covered, what it missed, and what the DM invented')
+  .requiredOption('--campaign <id>', 'campaign id (a folder under the campaigns directory)')
+  .option('--session <n>', 'session number', parseNumber('integer'), 1)
+  .option('--no-model', 'skip the checker pass for possible contradictions')
+  .option('--campaigns-dir <path>', 'campaigns directory', 'campaigns')
+  .action(
+    action<AuditCommandOptions>(async (options) => {
+      const result = await runAudit({
+        campaignsDir: options.campaignsDir,
+        campaign: options.campaign,
+        session: options.session,
+        useModel: options.model,
+        log: (line) => console.log(line),
+      });
+      for (const line of formatAuditSummary(result)) console.log(line);
     })
   );
 

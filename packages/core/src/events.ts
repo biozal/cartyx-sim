@@ -123,7 +123,19 @@ export const SimEvent = z.discriminatedUnion('type', [
     ...base,
     type: z.literal('lore_lookup'),
     query: z.string().min(1),
-    hits: z.array(z.object({ chunkId: z.string(), source: z.string(), score: z.number() })),
+    hits: z.array(
+      z.object({
+        chunkId: z.string().min(1),
+        source: z.string().min(1),
+        score: z.number(),
+        // Optional so sessions 001–013, logged before Plan 2B, still parse. EVENT_SCHEMA_VERSION
+        // stays 1: these are additive.
+        entityId: z.string().min(1).optional(),
+        entityName: z.string().min(1).optional(),
+        /** `character`, `location`, `document`, … — what `sim audit` groups coverage by. */
+        entityType: z.string().min(1).optional(),
+      })
+    ),
     used: z.array(z.string()),
   }),
   z.object({
@@ -132,6 +144,12 @@ export const SimEvent = z.discriminatedUnion('type', [
     fact: z.string().min(1),
     reason: z.string().min(1),
     query: z.string().optional(),
+    /**
+     * The narration this invention supports, resolved by the recorder when the turn commits: the
+     * DM records an invention before narrating the detail, so the model is never asked for it.
+     * Optional, so logs written before Plan 2B still parse.
+     */
+    narrationSeq: z.number().int().min(0).optional(),
   }),
   z.object({
     ...base,

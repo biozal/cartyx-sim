@@ -1,6 +1,6 @@
 import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadCampaign } from '../src/campaign';
@@ -270,5 +270,62 @@ describe('loadCampaign', () => {
     await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
       'seats.script uses unknown endpoint "nowhere"'
     );
+  });
+
+  it('resolves lorePath against the campaign directory and exposes the embed seat', async () => {
+    const file = config();
+    Object.assign(file, { lorePath: '../../lore-repo' });
+    Object.assign(file.seats, {
+      embed: { endpoint: 'studio', model: 'text-embedding-nomic-embed-text-v1.5' },
+    });
+    await writeCampaign(file, { 'kira.json': KIRA });
+    const campaign = await loadCampaign(campaignsDir, 'test');
+    expect(campaign.lorePath).toBe(resolve(join(campaignsDir, 'test'), '../../lore-repo'));
+    expect(campaign.embedSeat).toBe('embed');
+    expect(campaign.models.embed!.model).toBe('text-embedding-nomic-embed-text-v1.5');
+  });
+
+  it('keeps an absolute lorePath as given', async () => {
+    const file = config();
+    Object.assign(file, { lorePath: '/Users/someone/Developer/cartyx-lore' });
+    Object.assign(file.seats, { embed: { endpoint: 'studio', model: 'nomic' } });
+    await writeCampaign(file, { 'kira.json': KIRA });
+    const campaign = await loadCampaign(campaignsDir, 'test');
+    expect(campaign.lorePath).toBe('/Users/someone/Developer/cartyx-lore');
+  });
+
+  it('refuses a campaign that sets both lorePath and loreCommit', async () => {
+    const file = config();
+    Object.assign(file, { lorePath: '/lore', loreCommit: 'abc123' });
+    Object.assign(file.seats, { embed: { endpoint: 'studio', model: 'nomic' } });
+    await writeCampaign(file, { 'kira.json': KIRA });
+    await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
+      /loreCommit is derived from lorePath; remove it/
+    );
+  });
+
+  it('refuses a campaign with lore but no embed seat', async () => {
+    const file = config();
+    Object.assign(file, { lorePath: '/lore' });
+    await writeCampaign(file, { 'kira.json': KIRA });
+    await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
+      /lorePath is set but seats\.embed is missing/
+    );
+  });
+
+  it('refuses an embed seat with no lorePath', async () => {
+    const file = config();
+    Object.assign(file.seats, { embed: { endpoint: 'studio', model: 'nomic' } });
+    await writeCampaign(file, { 'kira.json': KIRA });
+    await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(
+      /seats\.embed is set but lorePath is missing/
+    );
+  });
+
+  it('still loads a lore-less campaign with its loreCommit default', async () => {
+    await writeCampaign(config(), { 'kira.json': KIRA });
+    const campaign = await loadCampaign(campaignsDir, 'test');
+    expect(campaign.loreCommit).toBe('unversioned');
+    expect(campaign.lorePath).toBeUndefined();
   });
 });

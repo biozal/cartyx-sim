@@ -1,0 +1,18 @@
+{
+  "name": "@cartyx-sim/lore",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.48",
+    "@cartyx-sim/core": "*",
+    "@cartyx-sim/models": "*",
+    "@lancedb/lancedb": "^0.39.0",
+    "ai": "^7.0.99",
+    "apache-arrow": "18.1.0",
+    "zod": "^4.6.4"
+  }
+}

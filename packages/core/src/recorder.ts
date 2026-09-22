@@ -63,4 +63,23 @@ export class TurnRecorder {
     this.working = checkpoint.state;
     this.emitted.length = checkpoint.eventCount;
   }
+
+  /**
+   * Attaches each invention to the narration it supports. Called once when the turn finishes,
+   * before the director appends it: the DM looks lore up, finds a gap, records what it invented,
+   * and only then narrates, so the link runs forward and falls back to the last narration before.
+   */
+  linkInventions(): void {
+    for (const [index, event] of this.emitted.entries()) {
+      if (event.type !== 'lore_invention' || event.narrationSeq !== undefined) continue;
+      const after = this.emitted
+        .slice(index + 1)
+        .find((candidate) => candidate.type === 'narration');
+      const before = this.emitted
+        .slice(0, index)
+        .findLast((candidate) => candidate.type === 'narration');
+      const narration = after ?? before;
+      if (narration) this.emitted[index] = { ...event, narrationSeq: narration.seq };
+    }
+  }
 }
