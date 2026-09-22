@@ -136,12 +136,13 @@ export const lookupLore = defineTool({
       query: args.query,
       // Every candidate is logged, collapsed ones included, so the audit can see what was
       // suppressed; `used` lists only what the DM was actually shown.
-      hits: ranked.map(({ chunkId, source, score, entityId, entityName }) => ({
+      hits: ranked.map(({ chunkId, source, score, entityId, entityName, entityType }) => ({
         chunkId,
         source,
         score,
         entityId,
         entityName,
+        entityType,
       })),
       used: [...usedIds],
     });

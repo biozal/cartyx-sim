@@ -189,7 +189,7 @@ The three entity fields are **required**, not optional, so no consumer grows an 
 
 ### 6.2 The `lore_lookup` event
 
-Each logged hit gains `entityId` and `entityName` beside today's `chunkId`, `source` and `score`, so `sim audit` runs entirely off the event log with no index present. Both are **optional in the event schema** so sessions 001–013 still parse and re-script; the audit falls back to `chunkId` for a hit that predates them.
+Each logged hit gains `entityId`, `entityName` and `entityType` beside today's `chunkId`, `source` and `score`, so `sim audit` runs entirely off the event log with no index present. §7.4's coverage section groups by `entityId` and `entityType`, so the type has to travel on the hit like the other two. All three are **optional in the event schema** so sessions 001–013 still parse and re-script; the audit falls back to `chunkId` for a hit with no `entityId`/`entityName`, and reports an absent `entityType` as unrecorded rather than guessing one.
 
 ### 6.3 Entity collapse in `lookup_lore`
 

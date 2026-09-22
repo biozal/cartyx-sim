@@ -42,6 +42,28 @@ export interface CoverageEntry {
   lookups: number;
 }
 
+/** The type recorded for a hit logged before `lore_lookup` carried one (sessions 001–013). */
+export const UNKNOWN_ENTITY_TYPE = 'unknown';
+
+/**
+ * "12 characters, 3 locations, 2 factions" — what the coverage section is actually for, read at a
+ * glance. Ranked by count, then alphabetically so equal counts have a stable order.
+ */
+export function summarizeEntityTypes(coverage: readonly CoverageEntry[]): string {
+  const counts = new Map<string, number>();
+  for (const entry of coverage)
+    counts.set(entry.entityType, (counts.get(entry.entityType) ?? 0) + 1);
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([type, count]) =>
+      // "3 unknowns" would read as a type named "unknown"; it is the absence of one.
+      type === UNKNOWN_ENTITY_TYPE
+        ? `${count} of unrecorded type`
+        : `${count} ${type}${count === 1 ? '' : 's'}`
+    )
+    .join(', ');
+}
+
 export interface NpcEntry {
   npcId: string;
   name: string;
@@ -190,9 +212,9 @@ export function buildAudit(input: {
         coverage.set(entityId, {
           entityId,
           entityName: hit.entityName ?? hit.chunkId,
-          // The event records an entity's id and name but not its type, so the audit does not
-          // claim one. `sim index`'s meta has types if a richer report ever needs them.
-          entityType: 'unknown',
+          // A log written before the field existed says nothing about the entity's type, and the
+          // audit does not guess one for it.
+          entityType: hit.entityType ?? UNKNOWN_ENTITY_TYPE,
           lookups: 1,
         });
     }
@@ -390,9 +412,16 @@ export function renderAuditMarkdown(audit: Audit): string {
   lines.push('## Coverage', '');
   if (audit.coverage.length === 0) lines.push('No lore was used.', '');
   else {
-    lines.push('| entity | id | lookups |', '| --- | --- | --- |');
+    lines.push(
+      `${audit.coverage.length} entit${audit.coverage.length === 1 ? 'y' : 'ies'} used: ` +
+        `${summarizeEntityTypes(audit.coverage)}.`,
+      ''
+    );
+    lines.push('| entity | type | id | lookups |', '| --- | --- | --- | --- |');
     for (const entry of audit.coverage) {
-      lines.push(`| ${entry.entityName} | \`${entry.entityId}\` | ${entry.lookups} |`);
+      lines.push(
+        `| ${entry.entityName} | ${entry.entityType} | \`${entry.entityId}\` | ${entry.lookups} |`
+      );
     }
     lines.push('');
   }

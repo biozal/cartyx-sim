@@ -13,6 +13,7 @@ import {
   formatAuditSummary,
   normalizeQuery,
   renderAuditMarkdown,
+  summarizeEntityTypes,
   runAudit,
   type Audit,
 } from '../src/audit';
@@ -79,6 +80,7 @@ describe('buildAudit', () => {
           score: 0.71,
           entityId: 'kanka-2418574',
           entityName: 'Professor Sella Vaunt',
+          entityType: 'character',
         },
         {
           chunkId: 'c2',
@@ -86,6 +88,7 @@ describe('buildAudit', () => {
           score: 0.64,
           entityId: 'kanka-2418574',
           entityName: 'Professor Sella Vaunt',
+          entityType: 'character',
         },
       ],
       used: ['c1'],
@@ -163,7 +166,7 @@ describe('buildAudit', () => {
       {
         entityId: 'kanka-2418574',
         entityName: 'Professor Sella Vaunt',
-        entityType: 'unknown',
+        entityType: 'character',
         lookups: 1,
       },
     ]);
@@ -234,6 +237,72 @@ describe('buildAudit with a log written before Plan 2B', () => {
       { entityId: 'chunk-77', entityName: 'chunk-77', entityType: 'unknown', lookups: 2 },
     ]);
     expect(audit.gaps).toEqual([]);
+  });
+});
+
+describe('coverage by entity type', () => {
+  function lookup(chunkId: string, entityId: string, entityType: string): SimEvent {
+    return event({
+      type: 'lore_lookup',
+      query: `about ${entityId}`,
+      hits: [
+        {
+          chunkId,
+          source: `dm/${chunkId}.md`,
+          score: 0.8,
+          entityId,
+          entityName: entityId,
+          entityType,
+        },
+      ],
+      used: [chunkId],
+    });
+  }
+
+  const audit = buildAudit({
+    campaign: 'avalon',
+    session: 1,
+    events: [
+      lookup('c1', 'kanka-1', 'character'),
+      lookup('c2', 'kanka-2', 'character'),
+      lookup('c3', 'kanka-3', 'location'),
+    ],
+  });
+
+  it('records the type the lookup logged, not a placeholder', () => {
+    expect(audit.coverage.map((entry) => entry.entityType)).toEqual([
+      'character',
+      'character',
+      'location',
+    ]);
+  });
+
+  it('summarizes the mix for a lore author, ranked by count', () => {
+    expect(summarizeEntityTypes(audit.coverage)).toBe('2 characters, 1 location');
+  });
+
+  it('says nothing about the type of a hit logged before the field existed', () => {
+    const old = buildAudit({
+      campaign: 'avalon',
+      session: 1,
+      events: [
+        event({
+          type: 'lore_lookup',
+          query: 'the Sunken Archive',
+          hits: [{ chunkId: 'chunk-77', source: 'dm/archive.md', score: 0.8 }],
+          used: ['chunk-77'],
+        }),
+      ],
+    });
+    expect(old.coverage[0]!.entityType).toBe('unknown');
+    expect(summarizeEntityTypes(old.coverage)).toBe('1 of unrecorded type');
+  });
+
+  it('prints the mix and a type column in the markdown', () => {
+    const markdown = renderAuditMarkdown({ ...audit, contradictions: null });
+    expect(markdown).toContain('3 entities used: 2 characters, 1 location.');
+    expect(markdown).toContain('| entity | type | id | lookups |');
+    expect(markdown).toContain('| kanka-3 | location | `kanka-3` | 1 |');
   });
 });
 
