@@ -95,14 +95,16 @@ interface VectorStore {
 
 `LanceStore` wraps `@lancedb/lancedb` (0.39.0; a prebuilt `darwin-arm64` binary exists, so there is no native build step on the M5 Max). Table `chunks`, cosine metric, one row per chunk:
 
-| Column                                 | Type            |
-| -------------------------------------- | --------------- |
-| `vector`                               | float32[768]    |
-| `chunkId`, `source`, `title`, `text`   | string          |
-| `entityId`, `entityName`, `entityType` | string          |
-| `kankaId`                              | int64, nullable |
+| Column                                 | Type              |
+| -------------------------------------- | ----------------- |
+| `vector`                               | float32[768]      |
+| `chunkId`, `source`, `title`, `text`   | string            |
+| `entityId`, `entityName`, `entityType` | string            |
+| `kankaId`                              | float64, nullable |
 
 `score` is cosine similarity (`1 - distance`), in `[0, 1]`, matching the sense of the existing `loreThreshold`.
+
+The table is created with an **explicit Arrow schema** rather than by inference: a corpus with no Kanka export leaves `kankaId` null in every row, and inference throws on an all-null column. `kankaId` is `float64`, not `int64`, because Arrow reads an int64 column back as a JavaScript `BigInt`, which would fail `LoreHit`'s `z.number()` downstream; Kanka ids are far inside float64's exact-integer range.
 
 `MemoryStore` holds the same rows in an array and scores by cosine in JS. It is the store the tests use.
 
