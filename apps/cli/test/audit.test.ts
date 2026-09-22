@@ -29,6 +29,11 @@ function event(partial: Record<string, unknown>): SimEvent {
   } as SimEvent;
 }
 
+/** The same event, in a named turn: the default fixture turn is `t1` for everything. */
+function turnEvent(turnId: string, partial: Record<string, unknown>): SimEvent {
+  return event({ turnId, ...partial });
+}
+
 describe('normalizeQuery', () => {
   it('lowercases, drops filler, and keeps meaningful words', () => {
     expect(normalizeQuery('Who is the Warden of the Old Stone Bridge?')).toEqual([
@@ -442,6 +447,82 @@ describe('findContradictions', () => {
     await findContradictions({ events: twoNarrations, model, seat: 'checker', chunkText });
     expect(calls).toBe(1);
   });
+
+  it('does not pair a lookup with a narration from a later turn', async () => {
+    // The DM looks lore up and hands off without narrating, so turn t1 narrates nothing. The
+    // narration in t2 was written against whatever t2 retrieved — nothing here — and pairing it
+    // with t1's chunks would record those ids in audit.json as its evidence (spec §7.4 item 4).
+    const acrossTurns: SimEvent[] = [
+      turnEvent('t1', {
+        type: 'lore_lookup',
+        query: 'Professor Sella Vaunt',
+        hits: [
+          {
+            chunkId: 'c1',
+            source: 'dm/avalon.md',
+            score: 0.8,
+            entityId: 'kanka-1',
+            entityName: 'Sella Vaunt',
+          },
+        ],
+        used: ['c1'],
+      }),
+      turnEvent('t1', { type: 'hand_off', target: { kind: 'party' }, responders: [] }),
+      turnEvent('t1', { type: 'turn_end', actor: 'dm' }),
+      turnEvent('t2', {
+        type: 'narration',
+        visibility: 'public',
+        text: 'The corridor smells of cold iron.',
+      }),
+    ];
+    let calls = 0;
+    const model: ModelClient = {
+      async complete() {
+        calls++;
+        return { text: '{"conflicts": false}', toolCalls: [], model: 'checker' };
+      },
+    };
+    await findContradictions({ events: acrossTurns, model, seat: 'checker', chunkText });
+    expect(calls).toBe(0);
+  });
+
+  it('still pairs a lookup with a narration in its own turn', async () => {
+    const sameTurn: SimEvent[] = [
+      turnEvent('t7', {
+        type: 'lore_lookup',
+        query: 'Professor Sella Vaunt',
+        hits: [
+          {
+            chunkId: 'c1',
+            source: 'dm/avalon.md',
+            score: 0.8,
+            entityId: 'kanka-1',
+            entityName: 'Sella Vaunt',
+          },
+        ],
+        used: ['c1'],
+      }),
+      turnEvent('t7', {
+        type: 'narration',
+        visibility: 'public',
+        text: 'Vaunt teaches technical dueling.',
+      }),
+    ];
+    const found = await findContradictions({
+      events: sameTurn,
+      chunkText,
+      model: stubModel(['{"conflicts": true, "note": "mismatch"}']),
+      seat: 'checker',
+    });
+    expect(found).toEqual([
+      {
+        seq: expect.any(Number),
+        narration: 'Vaunt teaches technical dueling.',
+        chunkIds: ['c1'],
+        note: 'mismatch',
+      },
+    ]);
+  });
 });
 
 describe('runAudit', () => {
@@ -790,7 +871,12 @@ describe('runAudit', () => {
       });
 
       expect(result.audit.contradictions).toBeNull();
+      // Reports what is known — the pass failed, and with what message — without claiming a
+      // diagnosis it never made. The broad catch also sees errors that have nothing to do with
+      // the index, and this string is persisted into audit.json and printed into audit.md.
+      expect(result.audit.contradictionsSkipped).toContain('the contradiction pass failed');
       expect(result.audit.contradictionsSkipped).toContain('lance is angry');
+      expect(result.audit.contradictionsSkipped).not.toContain('index could not be read');
       expect(modelCalled).toBe(false);
       // The rest of the audit — built from the event log alone — is untouched by the store
       // failure: this session's usable lookup still counts as coverage.
@@ -803,6 +889,32 @@ describe('runAudit', () => {
 
       byChunkIdSpy.mockRestore();
       closeSpy.mockRestore();
+    });
+
+    it('degrades to null, keeping the rest of the audit intact, when campaign.json is malformed', async () => {
+      // `loadCampaign` happens inside the contradiction pass, and a config it cannot parse is a
+      // reason to skip the fourth section — not to fail an audit whose other three sections were
+      // already computed from the event log alone.
+      const dir = join(campaignsDir, 'live');
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'campaign.json'), '{ "name": "Broken"');
+
+      const result = await runAudit({
+        campaignsDir,
+        campaign: 'live',
+        session: 1,
+        useModel: true,
+        model: {
+          async complete() {
+            throw new Error('the checker must never be reached');
+          },
+        },
+      });
+
+      expect(result.audit.contradictions).toBeNull();
+      expect(result.audit.contradictionsSkipped).toContain('the contradiction pass failed');
+      expect(result.audit.loreCommit).toBe('lore-abc');
+      expect(result.audit.inventions).toHaveLength(1);
     });
   });
 

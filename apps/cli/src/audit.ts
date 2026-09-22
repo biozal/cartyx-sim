@@ -279,15 +279,24 @@ export async function findContradictions(input: {
   chunkText: (chunkId: string) => Promise<string | undefined>;
 }): Promise<Contradiction[]> {
   const found: Contradiction[] = [];
-  let pending: string[] | undefined;
+  let pending: { turnId: string; chunkIds: string[] } | undefined;
   for (const event of input.events) {
+    // Spec §7.4 item 4: the narrations that followed a lore lookup with usable hits *in the same
+    // turn*. A DM turn that looks lore up and then hands off without narrating must not have its
+    // chunks paired with whatever the next turn happens to narrate — those chunk ids are
+    // persisted into `audit.json` as the evidence behind a finding, and evidence from another
+    // turn is evidence the narration was never written against.
+    if (pending && event.turnId !== pending.turnId) pending = undefined;
     if (event.type === 'lore_lookup') {
       const used = event.hits.filter((hit) => event.used.includes(hit.chunkId));
-      pending = used.length === 0 ? undefined : used.map((hit) => hit.chunkId);
+      pending =
+        used.length === 0
+          ? undefined
+          : { turnId: event.turnId, chunkIds: used.map((hit) => hit.chunkId) };
       continue;
     }
     if (event.type !== 'narration' || !pending) continue;
-    const chunkIds = pending;
+    const chunkIds = pending.chunkIds;
     pending = undefined;
 
     // The log records chunk ids and scores, never the text. Bare ids tell the checker nothing, so
@@ -443,12 +452,13 @@ interface ContradictionPassResult {
 /**
  * Runs the contradiction checker when `useModel` is true, the campaign has a `checker` seat, and
  * a lore index exists — otherwise returns `contradictions: null` with the reason, after logging
- * it. Opening and querying the lore index can still fail after all three conditions check out —
- * an IO error, corruption, or lock contention with a concurrent `sim index` — and that failure
- * must degrade this section exactly like a missing index does, not fail the whole audit: the
- * other three sections read only the event log and are meant to stay usable long after the lore
- * has moved on, so a bad lore store can never take them down with it. The lore index, once opened,
- * is always closed before returning, whichever of those outcomes happens.
+ * it. Anything this section does can fail instead: a malformed `campaign.json`, a checker seat
+ * pointing at an endpoint the client refuses to construct, or an IO error, corruption, or lock
+ * contention with a concurrent `sim index` while the store is open. Every one of those must
+ * degrade this section exactly like a missing index does, not fail the whole audit: the other
+ * three sections read only the event log and are meant to stay usable long after the lore has
+ * moved on, so nothing here can take them down with it. Hence the whole body is inside the try.
+ * The lore index, once opened, is always closed before returning, whichever outcome happens.
  */
 async function contradictionPass(
   options: AuditOptions,
@@ -460,17 +470,21 @@ async function contradictionPass(
     return { contradictions: null, skipped: reason };
   };
   if (!options.useModel) return skip('--no-model was passed');
-  const campaign = await loadCampaign(options.campaignsDir, options.campaign);
-  const seat = campaign.seats.checker;
-  if (!seat) return skip('campaign.json has no checker seat');
-  const indexDir = loreIndexDir(campaign);
-  const meta = await readMeta(indexDir);
-  if (!meta) {
-    return skip(`no lore index at ${indexDir}; run \`sim index --campaign ${campaign.id}\``);
-  }
-  const model = options.model ?? new OpenAICompatibleModelClient(campaign.models);
   let store: LanceStore | undefined;
   try {
+    // Everything this section needs is inside the try, including loading the campaign and
+    // constructing the model client: a malformed `campaign.json` or a bad checker endpoint is a
+    // reason to degrade this section, exactly like a missing index, never a reason to fail an
+    // audit whose first three sections were already computed from the event log alone.
+    const campaign = await loadCampaign(options.campaignsDir, options.campaign);
+    const seat = campaign.seats.checker;
+    if (!seat) return skip('campaign.json has no checker seat');
+    const indexDir = loreIndexDir(campaign);
+    const meta = await readMeta(indexDir);
+    if (!meta) {
+      return skip(`no lore index at ${indexDir}; run \`sim index --campaign ${campaign.id}\``);
+    }
+    const model = options.model ?? new OpenAICompatibleModelClient(campaign.models);
     store = await LanceStore.open(indexDir);
     const openedStore = store;
     const contradictions = await findContradictions({
@@ -481,8 +495,13 @@ async function contradictionPass(
     });
     return { contradictions };
   } catch (error) {
+    // Deliberately broad — anything this section touches degrades it rather than failing the
+    // audit — and therefore deliberately vague about the cause. The reason is persisted into
+    // `audit.json` as `contradictionsSkipped` and printed into `audit.md`, so naming the lore
+    // index here would send someone to debug an index over, say, a `TypeError` from a refactor.
     const message = error instanceof Error ? error.message : String(error);
-    return skip(`the lore index could not be read (${message})`);
+    if (process.env.SIM_DEBUG === '1' && error instanceof Error && error.stack) log(error.stack);
+    return skip(`the contradiction pass failed (${message})`);
   } finally {
     await store?.close();
   }
