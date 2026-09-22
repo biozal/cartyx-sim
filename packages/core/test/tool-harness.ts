@@ -1,5 +1,6 @@
 import { scriptedRng, type Rng } from '@cartyx-sim/rules';
 import type { ClockPhase } from '../src/clock';
+import { DEFAULT_LORE_THRESHOLD } from '../src/director';
 import type { SimEvent } from '../src/events';
 import type { LoreHit, LoreIndex } from '../src/model';
 import { TurnRecorder } from '../src/recorder';
@@ -57,7 +58,8 @@ export function toolHarness(
     history: started.history,
     rng: options.rng ?? scriptedRng([]),
     lore: options.lore ?? new StaticLoreIndex([SELLA_CHUNK]),
-    loreThreshold: 0.35,
+    // The production default, so a test about the threshold is a test about the real one.
+    loreThreshold: DEFAULT_LORE_THRESHOLD,
     actorId,
     seat: options.seat ?? actorId,
     clockPhase: () => options.clockPhase ?? 'running',

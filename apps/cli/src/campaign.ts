@@ -29,6 +29,13 @@ export const CampaignFile = z.object({
   loreCommit: z.string().min(1).default('unversioned'),
   /** Path to the cartyx-lore checkout, absolute or relative to the campaign directory. */
   lorePath: z.string().min(1).optional(),
+  /**
+   * Minimum lore search score the DM is shown, overriding the engine's calibrated default
+   * (`DEFAULT_LORE_THRESHOLD`). Scores are cosine similarities in [0, 1]. A campaign on a
+   * different embedding model scores on a different scale, and this is how an operator retunes it
+   * without editing engine source.
+   */
+  loreThreshold: z.number().min(0).max(1).optional(),
   endpoints: z.record(z.string(), Endpoint),
   seats: z.object({
     dm: SeatRef,
@@ -62,6 +69,8 @@ export interface Campaign {
   lorePath?: string;
   /** Seat id for embeddings, present exactly when `lorePath` is. */
   embedSeat?: string;
+  /** Overrides the engine's default lore relevance threshold, when the campaign sets one. */
+  loreThreshold?: number;
   party: Combatant[];
   /** Seat ids for the director. */
   seats: { dm: string; players: Record<string, string>; checker?: string };
@@ -228,5 +237,6 @@ export async function loadCampaign(campaignsDir: string, campaignId: string): Pr
     ...(scriptSeat ? { scriptSeat } : {}),
     ...(file.lorePath ? { lorePath: resolvePath(dir, file.lorePath) } : {}),
     ...(file.seats.embed ? { embedSeat: EMBED_SEAT } : {}),
+    ...(file.loreThreshold === undefined ? {} : { loreThreshold: file.loreThreshold }),
   };
 }

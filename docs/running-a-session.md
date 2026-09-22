@@ -73,7 +73,7 @@ npm run sim -- bench --campaign avalon
 
 For each seat this reports whether the server answered, whether it lists the configured model id, generation speed in tokens per second, and how many of the tool-call trials (default 5, `--trials N`) were well-formed. For a `toolChoice: auto` seat, a trial where the model replies with text instead of a tool call counts as usable too and is shown separately, e.g. `3/5 (+2 text)`. A report is saved to `campaigns/avalon/bench/<timestamp>.json`. The command exits with code 1 if any seat is unreachable or any trial is not a well-formed `roll_dice` call (for a `toolChoice: auto` seat, a plain-text reply also counts as usable).
 
-With `lorePath` and an `embed` seat configured (§9), `sim bench` also makes one embedding call against that seat, reporting whether it was reachable, the vector's dimensions, and its latency. A misconfigured embedding endpoint fails here in seconds instead of showing up at the first `lookup_lore`, a dozen minutes into a session. The command exits 1 if the embed seat is unreachable too.
+With `lorePath` and an `embed` seat configured (§9), `sim bench` also makes one embedding call against that seat, reporting whether it was reachable, the vector's dimensions, and its latency. When an index already exists, the response's dimension count is checked against the width that index was built with, and a mismatch fails the trial naming both numbers — every stored vector would be unsearchable by that model. A misconfigured embedding endpoint fails here in seconds instead of showing up at the first `lookup_lore`, a dozen minutes into a session. The command exits 1 if the embed seat is unreachable or answers in the wrong width.
 
 ## 5. Play a session
 
@@ -223,7 +223,17 @@ This walks every markdown file in the lore repository, chunks it by heading, res
 
 This is a work item for the lore repository (rename or disambiguate the entities), not a failure of the build — the index still builds, those chunks just resolve to a less specific id than a uniquely-named entity gets.
 
-Run it again any time to refresh a stale index; `--force` rebuilds even when it is fresh. `--check` reports whether the index is stale — comparing a digest over the ingested files, the embedding model and dimensions, the document/query prefixes, the chunker version, and `lorePath` itself — and builds nothing. The git commit is deliberately not part of that comparison: a commit that touches no file under `lorePath` costs no rebuild, while an uncommitted edit to a lore file does count as stale.
+Run it again any time to refresh a stale index; `--force` rebuilds even when it is fresh. `--check` reports whether the index is stale — comparing a digest over the ingested files, the embedding model, the document/query prefixes, the chunker version, and `lorePath` itself — and builds nothing. The git commit is deliberately not part of that comparison: a commit that touches no file under `lorePath` costs no rebuild, while an uncommitted edit to a lore file does count as stale. Neither is the vector width: it is only observable from an embedding response, and neither `--check` nor a fresh run makes one. A model that has started answering in a different width is caught by `sim bench`'s embed trial (§7), which compares the response against the width the index records.
+
+### Tune the relevance threshold (optional)
+
+A lore hit reaches the DM when its score — a cosine similarity in `[0, 1]` — clears the engine's threshold, calibrated at **0.69** against the real corpus with `text-embedding-nomic-embed-text-v1.5`. A campaign on a different embedding model scores on a different scale, so `campaign.json` can override it:
+
+```json
+{ "loreThreshold": 0.6 }
+```
+
+Lower it and more (weaker) hits reach the DM; raise it and more lookups report a gap. Leave it out to take the calibrated default.
 
 ### Auto-rebuild on a fresh run
 

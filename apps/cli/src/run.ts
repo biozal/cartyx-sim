@@ -12,7 +12,7 @@ import { ScriptedModelClient, StaticLoreIndex } from '@cartyx-sim/core/testing';
 import { openIndex, readMeta, type Embedder } from '@cartyx-sim/lore';
 import { OpenAICompatibleModelClient } from '@cartyx-sim/models';
 import { scriptedRng, secureRng, seededRng, type Rng } from '@cartyx-sim/rules';
-import { loadCampaign } from './campaign';
+import { loadCampaign, type Campaign } from './campaign';
 import { loadFixture } from './fixture';
 import { currentIdentity, embedderFor, ensureIndex, loreIndexDir } from './index-lore';
 import { JsonlFileSink } from './jsonl-sink';
@@ -43,6 +43,28 @@ interface SessionSetup {
 
 function rngFor(seed: number | undefined): Rng {
   return seed === undefined ? secureRng() : seededRng(seed);
+}
+
+/**
+ * The director's configuration for a campaign session. The three campaign paths — no lore, resume,
+ * and fresh — differ only in where the lore version comes from, so that is the one thing they pass
+ * in; everything else being shared is the point, since a field added to one path and forgotten on
+ * the others is a session that plays by different rules depending on how it started.
+ */
+export function directorConfig(
+  campaign: Campaign,
+  options: RunOptions,
+  loreCommit: string
+): DirectorConfig {
+  return {
+    session: options.session,
+    targetMinutes: options.targetMinutes ?? campaign.targetMinutes,
+    loreCommit,
+    party: campaign.party,
+    seats: campaign.seats,
+    // Omitted rather than passed as undefined, so the director's own default applies.
+    ...(campaign.loreThreshold === undefined ? {} : { loreThreshold: campaign.loreThreshold }),
+  };
 }
 
 async function fixtureSetup(options: RunOptions, fixturePath: string): Promise<SessionSetup> {
@@ -85,13 +107,7 @@ async function campaignSetup(options: RunOptions): Promise<SessionSetup> {
   const campaign = await loadCampaign(options.campaignsDir, options.campaign);
   if (!campaign.lorePath) {
     return {
-      config: {
-        session: options.session,
-        targetMinutes: options.targetMinutes ?? campaign.targetMinutes,
-        loreCommit: campaign.loreCommit,
-        party: campaign.party,
-        seats: campaign.seats,
-      },
+      config: directorConfig(campaign, options, campaign.loreCommit),
       model: new OpenAICompatibleModelClient(campaign.models),
       // A campaign with no lorePath plays with no lore: every lookup reports a gap.
       lore: new StaticLoreIndex([]),
@@ -137,13 +153,7 @@ async function campaignSetup(options: RunOptions): Promise<SessionSetup> {
     }
     const lore = await openIndex(indexDir, embedder);
     return {
-      config: {
-        session: options.session,
-        targetMinutes: options.targetMinutes ?? campaign.targetMinutes,
-        loreCommit: meta.loreCommit,
-        party: campaign.party,
-        seats: campaign.seats,
-      },
+      config: directorConfig(campaign, options, meta.loreCommit),
       model: new OpenAICompatibleModelClient(campaign.models),
       lore,
       rng: rngFor(options.seed),
@@ -159,13 +169,7 @@ async function campaignSetup(options: RunOptions): Promise<SessionSetup> {
   if (index.rebuilt) options.log?.(`Rebuilt the lore index: ${index.indexDir}`);
   const lore = await openIndex(index.indexDir, embedder);
   return {
-    config: {
-      session: options.session,
-      targetMinutes: options.targetMinutes ?? campaign.targetMinutes,
-      loreCommit: index.meta!.loreCommit,
-      party: campaign.party,
-      seats: campaign.seats,
-    },
+    config: directorConfig(campaign, options, index.meta!.loreCommit),
     model: new OpenAICompatibleModelClient(campaign.models),
     lore,
     rng: rngFor(options.seed),

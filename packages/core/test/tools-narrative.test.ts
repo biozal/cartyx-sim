@@ -11,6 +11,7 @@ import {
   sceneChange,
 } from '../src/tools/narrative';
 import { startCombat } from '../src/tools/combat';
+import { DEFAULT_LORE_THRESHOLD } from '../src/director';
 import { SimEvent } from '../src/events';
 import type { LoreHit, LoreIndex } from '../src/model';
 import { toToolSchema } from '../src/tools/types';
@@ -304,7 +305,9 @@ describe('lookup_lore', () => {
             source: 'test',
             title: 'Threshold Hit',
             text: 'Right at the line.',
-            score: 0.35,
+            // Exactly the threshold the harness runs at: the point of the test is that the
+            // comparison is `>=`, so this value must move with the threshold, never away from it.
+            score: DEFAULT_LORE_THRESHOLD,
             entityId: 'kanka-9001',
             entityName: 'Threshold Hit',
             entityType: 'character',
@@ -335,9 +338,11 @@ describe('lookup_lore', () => {
       lore: {
         async search() {
           return [
-            stub('stub', 'kanka-1', 0.6),
-            stub('writeup', 'kanka-1', 0.8),
-            stub('other', 'kanka-2', 0.5),
+            // All three clear the threshold, so what the test measures is the entity collapse
+            // and nothing else.
+            stub('stub', 'kanka-1', 0.75),
+            stub('writeup', 'kanka-1', 0.85),
+            stub('other', 'kanka-2', 0.7),
           ];
         },
       },

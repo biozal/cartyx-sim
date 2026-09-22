@@ -1,6 +1,7 @@
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_LORE_THRESHOLD } from '@cartyx-sim/core';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { buildIndex, openIndex, type LoreIndexImpl } from '../src/build';
 import { OpenAICompatibleEmbedder } from '../src/embed';
@@ -54,7 +55,11 @@ describe.skipIf(!lorePath)('known-answer retrieval', () => {
           .join(' | ')}`
       );
       expect(joined).toMatch(testCase.expect);
-      expect(hits[0]!.score).toBeGreaterThan(0.4);
+      // The calibration itself, not a loose sanity bound: `DEFAULT_LORE_THRESHOLD` is only
+      // defensible while every relevant query's top hit clears it in production. A regression
+      // that halved every score would leave a `> 0.4` assertion green while the engine reported
+      // a gap for all four of these.
+      expect(hits[0]!.score).toBeGreaterThanOrEqual(DEFAULT_LORE_THRESHOLD);
     });
   }
 
@@ -80,12 +85,15 @@ describe.skipIf(!lorePath)('known-answer retrieval', () => {
     }
   );
 
-  it('scores an unrelated query below the top of a relevant one', async () => {
+  it('scores an unrelated query below the threshold, and below a relevant one', async () => {
     const relevant = await index.search('who teaches applied crystal engines at Avalon?', 1);
     const unrelated = await index.search('zzzz quantum bicycle repair manual', 1);
     console.log(
       `relevant top ${relevant[0]!.score.toFixed(3)}; unrelated top ${unrelated[0]!.score.toFixed(3)}`
     );
     expect(unrelated[0]!.score).toBeLessThan(relevant[0]!.score);
+    // The other half of the calibration: the control must fall on the gap side of the threshold,
+    // or `DEFAULT_LORE_THRESHOLD` separates nothing and every query would look answered.
+    expect(unrelated[0]!.score).toBeLessThan(DEFAULT_LORE_THRESHOLD);
   });
 });

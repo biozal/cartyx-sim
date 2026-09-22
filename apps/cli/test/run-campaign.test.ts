@@ -10,7 +10,7 @@ import { loadCampaign } from '../src/campaign';
 import { loreIndexDir } from '../src/index-lore';
 import { JsonlFileSink } from '../src/jsonl-sink';
 import { sessionEventsPath } from '../src/paths';
-import { runSession } from '../src/run';
+import { directorConfig, runSession } from '../src/run';
 
 async function readEvents(eventsPath: string) {
   return new JsonlFileSink(eventsPath).readAll();
@@ -376,7 +376,7 @@ describe('runSession with lore', () => {
    * one — Kira, downed from the start so the DM's own hand-offs pause the session quickly instead
    * of requiring a scripted player turn.
    */
-  async function loreFixture(): Promise<{
+  async function loreFixture(extra: Record<string, unknown> = {}): Promise<{
     campaignsDir: string;
     campaign: string;
     lorePath: string;
@@ -393,6 +393,7 @@ describe('runSession with lore', () => {
         name: 'Lore live',
         targetMinutes: 5,
         lorePath,
+        ...extra,
         endpoints: { local: { baseURL: fake.baseURL } },
         seats: {
           dm: { endpoint: 'local', model: 'dm-model' },
@@ -490,6 +491,28 @@ describe('runSession with lore', () => {
     expect(lookup!.used.length).toBeGreaterThan(0);
     const usedHit = lookup!.hits.find((hit) => hit.chunkId === lookup!.used[0]);
     expect(usedHit).toMatchObject({ entityName: LORE_TITLE, entityId: expect.any(String) });
+  });
+
+  it('threads a campaign-configured loreThreshold through to the director', async () => {
+    const { campaign } = await loreFixture({ loreThreshold: 0.42 });
+    const loaded = await loadCampaign(campaignsDir, campaign);
+    expect(loaded.loreThreshold).toBe(0.42);
+    const config = directorConfig(
+      loaded,
+      { campaignsDir, campaign, session: 1, resume: false },
+      'lore-abc'
+    );
+    expect(config).toMatchObject({ session: 1, loreCommit: 'lore-abc', loreThreshold: 0.42 });
+  });
+
+  it('leaves the threshold to the engine default when the campaign configures none', async () => {
+    const { campaign } = await loreFixture();
+    const loaded = await loadCampaign(campaignsDir, campaign);
+    // Absent, not `undefined`: the director's `config.loreThreshold ?? DEFAULT_LORE_THRESHOLD`
+    // must see nothing at all rather than an explicit override that happens to be empty.
+    expect(
+      directorConfig(loaded, { campaignsDir, campaign, session: 1, resume: false }, 'lore-abc')
+    ).not.toHaveProperty('loreThreshold');
   });
 
   it('closes the lore index even when the session lock is already held', async () => {
