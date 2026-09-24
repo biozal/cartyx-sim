@@ -83,25 +83,73 @@ export function parseKankaFile(path: string, markdown: string): KankaEntity | un
   };
 }
 
+/**
+ * Which type prose means when one name belongs to several kinds of entity. A wiki holds a map of
+ * Brookhaven beside the location Brookhaven, and an empire as both a place and an organisation —
+ * facets of one thing rather than a naming mistake, and a `dm/` heading naming it means the
+ * substantive one. Anything not listed sorts last.
+ */
+const TYPE_PRECEDENCE = [
+  'character',
+  'location',
+  'organisation',
+  'family',
+  'race',
+  'creature',
+  'item',
+  'event',
+  'quest',
+  'journal',
+  'note',
+  'tag',
+  'ability',
+  'conversation',
+  'calendar',
+  'timeline',
+  'map',
+];
+
+function precedence(entityType: string): number {
+  const rank = TYPE_PRECEDENCE.indexOf(entityType);
+  return rank === -1 ? TYPE_PRECEDENCE.length : rank;
+}
+
+/**
+ * The one entity a name means, or `'ambiguous'` when the wiki genuinely cannot say. Entities of
+ * *different* types are facets of one subject, so the highest-precedence type wins. Two entities of
+ * the *same* type sharing a name are a real duplicate in the wiki — that is the case worth
+ * reporting, and the case where guessing would silently miscount.
+ */
+function resolveCollision(entities: readonly KankaEntity[]): KankaEntity | 'ambiguous' {
+  const best = Math.min(...entities.map((entity) => precedence(entity.entityType)));
+  const winners = entities.filter((entity) => precedence(entity.entityType) === best);
+  return winners.length === 1 ? winners[0]! : 'ambiguous';
+}
+
 export function buildEntityIndex(files: readonly { path: string; text: string }[]): EntityIndex {
-  const byName = new Map<string, KankaEntity | 'ambiguous'>();
-  const ambiguous = new Map<string, string>();
+  const candidates = new Map<string, { display: string; entities: KankaEntity[] }>();
   for (const file of files) {
     const entity = parseKankaFile(file.path, file.text);
     if (!entity) continue;
     const key = normalizeName(entity.entityName);
     if (key === '') continue;
-    const existing = byName.get(key);
-    if (existing === undefined) {
-      byName.set(key, entity);
-      continue;
-    }
+    const bucket = candidates.get(key) ?? { display: entity.entityName, entities: [] };
     // A second file for the same Kanka id is the same entity, not a collision.
-    if (existing !== 'ambiguous' && existing.kankaId === entity.kankaId) continue;
-    byName.set(key, 'ambiguous');
-    ambiguous.set(key, entity.entityName);
+    if (!bucket.entities.some((other) => other.kankaId === entity.kankaId)) {
+      bucket.entities.push(entity);
+    }
+    candidates.set(key, bucket);
   }
-  return { byName, ambiguous: [...ambiguous.values()].sort() };
+
+  const byName = new Map<string, KankaEntity | 'ambiguous'>();
+  const ambiguous: string[] = [];
+  for (const [key, bucket] of candidates) {
+    const resolved =
+      bucket.entities.length === 1 ? bucket.entities[0]! : resolveCollision(bucket.entities);
+    byName.set(key, resolved);
+    if (resolved === 'ambiguous') ambiguous.push(bucket.display);
+  }
+  return { byName, ambiguous: ambiguous.sort() };
 }
 
 function pathEntity(chunk: Chunk): ChunkEntity {

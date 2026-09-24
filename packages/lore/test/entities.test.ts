@@ -11,13 +11,23 @@ const FILES = [
     path: 'kanka-export/markdown/locations/1465238-1465238.md',
     text: '# Avalon Artificers Academy\n\n**Type:** School\n\nA polished rival school.\n',
   },
+  // Two characters of the SAME type: a real duplicate in the wiki, and the case worth reporting.
   {
     path: 'kanka-export/markdown/characters/9000001-9000001.md',
     text: '# Borin Ash\n\nA smith.\n',
   },
   {
-    path: 'kanka-export/markdown/locations/9000002-9000002.md',
-    text: '# Borin Ash\n\nA hamlet named for the smith.\n',
+    path: 'kanka-export/markdown/characters/9000003-9000003.md',
+    text: '# Borin Ash\n\nA different smith entirely.\n',
+  },
+  // A location and its own map: facets of one subject, not a naming mistake.
+  {
+    path: 'kanka-export/markdown/locations/9000004-9000004.md',
+    text: '# Brookhaven\n\nA district north of the river.\n',
+  },
+  {
+    path: 'kanka-export/markdown/maps/9000005-9000005.md',
+    text: '# Brookhaven\n\nA map of the district.\n',
   },
   { path: 'kanka-export/markdown/characters/_index.md', text: '# characters (3)\n\n- [x](y.md)\n' },
 ];
@@ -47,7 +57,9 @@ describe('parseKankaFile', () => {
   });
 
   it('ignores an index stub', () => {
-    expect(parseKankaFile(FILES[4]!.path, FILES[4]!.text)).toBeUndefined();
+    // Found by name, not position: adding a fixture above must not silently retarget this.
+    const stub = FILES.find((file) => file.path.endsWith('_index.md'))!;
+    expect(parseKankaFile(stub.path, stub.text)).toBeUndefined();
   });
 
   it('ignores a file outside the kanka export', () => {
@@ -56,9 +68,18 @@ describe('parseKankaFile', () => {
 });
 
 describe('buildEntityIndex', () => {
-  it('marks a name shared by two entities as ambiguous and reports it', () => {
+  it('marks a name shared by two entities OF THE SAME TYPE as ambiguous and reports it', () => {
     expect(INDEX.byName.get(normalizeName('Borin Ash'))).toBe('ambiguous');
     expect(INDEX.ambiguous).toEqual(['Borin Ash']);
+  });
+
+  it('resolves a name shared across DIFFERENT types by precedence, and does not report it', () => {
+    // A wiki holds a map of Brookhaven beside the location Brookhaven. Prose naming it means the
+    // location, so this is not a duplicate to fix — reporting it would send someone to "clean up"
+    // data that is correct.
+    const hit = INDEX.byName.get(normalizeName('Brookhaven'));
+    expect(hit).toMatchObject({ entityType: 'location', kankaId: 9000004 });
+    expect(INDEX.ambiguous).not.toContain('Brookhaven');
   });
 });
 
