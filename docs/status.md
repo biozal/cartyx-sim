@@ -16,9 +16,9 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 | 4 — Playback page                                         | Not written                                             |
 | Avalon Artificers Academy lore (rival school, Alpharetta) | Separate sub-project, not started                       |
 
-**Repository:** `main` is pushed to GitHub.
+**Repository:** `origin/main` is on GitHub at `d2a166a`; local `main` is 50 commits ahead and unpushed.
 
-**Checks on `main`:** `npm run typecheck`, `npm test` (68 files, 1332 tests plus 1 expected failure and 6 gated lore tests that skip without `CARTYX_LORE_PATH`), and `npm run format:check` all pass.
+**Checks on `main`:** `npm run typecheck`, `npm test` (68 files, 1333 tests plus 1 expected failure and 6 gated lore tests that skip without `CARTYX_LORE_PATH`), and `npm run format:check` all pass.
 
 ## What works today
 
@@ -249,6 +249,70 @@ Findings 1–6 are fixed (`bc334ff..656f4ce`); finding 7 is still open.
 
 The batch had one review; its findings (a leak cut breaking quotes, over-broad `order of battle`/`0 hit points`/bulleted-name matches, titles splitting sentences, exact-only checker name matching, turn-order shapes missed) are fixed in the follow-up commit.
 
+## Tenth 1-hour run (session 014, 2026-10-07) — the first against real lore
+
+Run on HEAD `20ded41`, the first session with a lore index behind `lookup_lore`. It reached
+`target_reached` at 63.5 spoken minutes in **58.5 wall minutes with no pauses** — the fastest clean
+run so far.
+
+| Measure               | 012      | 013      | 014             |
+| --------------------- | -------- | -------- | --------------- |
+| Wall / spoken minutes | 60 / ~74 | 84 / ~61 | **58.5 / 63.5** |
+| Pauses                | none     | 1 (seat) | **none**        |
+| DM share              | 79%      | 70%      | 66%             |
+| Fights                | 1        | 1        | 1               |
+| Checker flags         | 8        | 11       | 6               |
+| Tool errors           | 1        | 4        | 3               |
+| Lore lookups          | 2 (gaps) | 3 (gaps) | **1 (gap)**     |
+
+488 events, 46 narrations, 3 scenes (the Whispering Crossroads, the Frozen Glade, the Sunken
+Metropolis Approach), one fight. Word share: DM 66%, Kira 15%, Mira 9%, Bram 6%, Tomas 4%. 17
+validator flags: `dm_controls_pc_checker` 6, `dm_state_leak` 4, `tool_error` 3,
+`player_controls_other` 3, `no_turn_action` 1.
+
+**The headline is the audit, and it is not flattering to the premise.** `sim audit` works end to
+end — gaps clustered, the invention linked to the exact narration it supports at 10.4 spoken
+minutes, the checker pass finding no contradictions — and its coverage section reads, verbatim:
+
+> No lore was used.
+>
+> NPCs introduced: 0 (0 invented).
+>
+> Scenes: 3 (0 tied to lore).
+
+The session consulted a 6,833-chunk index **once**, for "Whispering Crossroads", a place the DM had
+just invented. That lookup correctly returned a gap (the phrase appears nowhere in `cartyx-lore`),
+the DM recorded the invention, and narrated from it. Everything in the retrieval path behaved
+exactly as designed, answering in ~40 ms. Nothing anchored the session in the world: no Atlanta, no
+Avalon Academy, none of the 2.29 MB of Georgia lore sitting indexed and unread.
+
+**This is not a Plan 2B regression.** Lookups per session across the whole history: 005 three, 008
+six, 010 one, 011 four, 012 two, 013 three, 014 one. The DM has never consulted lore more than six
+times in an hour, and before this run every lookup was a gap by construction because there was no
+index. Plan 2B made retrieval correct; it did not make the DM curious.
+
+Findings:
+
+1. **The DM has no reason to consult lore.** Nothing seeds a session in a real place, so the model
+   invents a setting and then looks up its own invention. This is the `sim prep` and DM-persona
+   work in Plan 2C, and the audit now points straight at it.
+2. **The threshold is still untested in anger.** One lookup, correctly a gap, so 0.69 was never
+   asked to discriminate a real hit from a real miss on a DM's own phrasing. The calibration
+   caveat stands until a session actually queries lore that exists.
+3. **Four `dm_state_leak` strips and six checker catches**, in line with recent runs; the leak
+   strip and the checker are both doing their jobs.
+4. **Death saves have still never fired live** — now eleven sessions without a PC reaching 0 HP.
+
+### Hardware changed with this run
+
+Tomas moved off the Mac Studio onto `linus` (192.168.1.220, Ubuntu 26.04, RTX 5060 Ti 16 GB) running
+Ollama with `qwen3:14b` and `reasoningEffort: "none"`. Benched **24.3 tok/s / 22.0 s → 43.1 tok/s /
+1.9 s**, and Kira — now alone on the Mac Studio after its unused 262K-context Gemma was unloaded —
+went 16.5 → 20.7 tok/s. Two settings were needed and both matter: without `reasoningEffort` qwen3
+spends 249–559 tokens to produce one line of dialogue (13–25 with it), and `OLLAMA_KEEP_ALIVE=2h`
+stops Ollama evicting the 9.3 GB model between calls, which was producing wildly inconsistent bench
+figures. `gemma3:12b` is also pulled on `linus` as a no-thinking fallback.
+
 ## Ninth 1-hour run (session 013, 2026-09-20)
 
 Run on HEAD `bfc3582`, after the session-012 batch. It reached `target_reached` at ~61 spoken minutes, with one pause.
@@ -413,38 +477,48 @@ Findings 1–4 are fixed in `197b339` plus a follow-up after review; finding 5 i
 
 ## Hardware
 
-| Machine              | Role today                        | Later                     |
-| -------------------- | --------------------------------- | ------------------------- |
-| M5 Max               | Engine and DM                     | OBS recording             |
-| Mac Studio M2 Ultra  | Players kira and tomas            |                           |
-| Ampere (RTX 3090)    | Player mira (Ollama)              | ComfyUI art after the run |
-| Ampere (RTX 4070)    | Not used yet (Ollama sees ~24 GB) | Scribe; TTS               |
-| Windows PC (5070 Ti) | Player bram                       |                           |
-| Alienware            | Avoid (loud fans)                 |                           |
+| Machine                         | Role today                            | Later                     |
+| ------------------------------- | ------------------------------------- | ------------------------- |
+| M5 Max                          | Engine, DM, and the `embed` seat      | OBS recording             |
+| Mac Studio M2 Ultra             | Player kira (alone since session 014) |                           |
+| `linus` — Ubuntu 26.04, 5060 Ti | Player tomas (Ollama, `qwen3:14b`)    |                           |
+| Ampere (RTX 3090)               | Player mira, checker (Ollama)         | ComfyUI art after the run |
+| Ampere (RTX 4070)               | Not used yet (Ollama sees ~24 GB)     | Scribe; TTS               |
+| Windows PC (5070 Ti)            | Player bram                           |                           |
+| Alienware                       | Avoid (loud fans)                     |                           |
 
-## Where we are (2026-09-20)
+`linus` is 192.168.1.220 (16 cores, 60 GB RAM, RTX 5060 Ti 16 GB). Ollama binds to `0.0.0.0:11434`
+and keeps models resident for two hours via a systemd drop-in. 16 GB rules out the 18–19 GB models
+the Ampere runs (`glm-4.7-flash`, `muse-glimmer:30b`) — those would spill to CPU, the failure the
+Gemma-4-31B note below records.
 
-**`main` is 47 commits ahead of `origin/main`, nothing pushed.** `feat/dm-pc-control-checker` merged at `d2a166a`, and Plan 2B merged at `3ea334f`. `npm run typecheck`, `npm test` (68 files, 1332 passed plus 1 expected failure and 6 skipped) and `npm run format:check` all pass on `main`.
+## Where we are (2026-10-07)
 
-The expected failure is deliberate: it documents the quote-majority split's known cost (`"Who's next?" I nod to You.`), and will start passing only if that rule is revisited.
+**`main` is 50 commits ahead of `origin/main`, nothing pushed.** `feat/dm-pc-control-checker` merged at `d2a166a`, Plan 2B at `3ea334f`. `npm run typecheck`, `npm test` (68 files, 1333 passed plus 1 expected failure and 6 skipped gated lore tests) and `npm run format:check` all pass on `main`.
 
-**Session 013 is the cleanest run so far: a script with no leaks at all, both combat rules holding live, and a clean close on a scene change.** Its only findings were two tool-call ergonomics issues, both now settled, and one seat that needed a fallback. Nine 1-hour sessions have run (005–013), each followed by a reviewed batch of fixes, and the batches have shrunk each time. The release gate is Aaron's: one more run to confirm a session with nothing to fix, or push now.
+The expected failure is deliberate: it documents the quote-majority split's known cost (`"Who's next?" I nod to You.`), and will start passing only if that rule is revisited. The 6 skips are the known-answer retrieval tests, which need `CARTYX_LORE_PATH` and a live embedding endpoint.
+
+**Session 014 came back with nothing to fix — and told us the lore is not reaching the table.** It ran 58.5 wall minutes with no pauses, the fastest clean run yet, and `sim audit` reported "No lore was used": one lookup in 488 events, for a location the DM had invented. Every part of Plan 2B works; the DM simply does not ask. Ten 1-hour sessions have run (005–014), each followed by a reviewed batch of fixes, and the batches have shrunk to nothing.
+
+**The release gate is met on Aaron's own terms** — a session with no findings against the engine. What session 014 surfaced is Plan 2C work (prep and prompts), not a Plan 2B defect, so it does not argue for another fix-and-rerun cycle before pushing.
 
 ### What each batch did
 
-| Batch          | Trigger                     | Commits            | What changed                                                                                                                   |
-| -------------- | --------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| Script stage   | Reviews of sessions 002–004 | `cc4eb6e..bf09ef5` | The ten script findings, including the speech-direction grammar (5 review rounds)                                              |
-| First run      | Session 005                 | `347f6d7..dd50ea2` | Death saves, combat closing, state-leak strip, repeat cutting, NPC continuity, tool-error logging                              |
-| Second run     | Session 006                 | `2deb439..86cdeb0` | Combat narration caps, player repeat re-prompt, tool-shape coercions, hard-stop rule, read-aloud labels                        |
-| Third run      | Session 007                 | `1d2f823..643befb` | Wider leak patterns, strict `hand_off` shape, attacks in the DM prompt, NPC-id resolution, cross-beat repeats, checker tuning  |
-| Fourth run     | Session 008                 | `bc334ff..0bb260d` | Sentence-level leak strip, HP-in-prose and turn-order leaks, NPC checker findings, no fight past the target, quote repair      |
-| Fifth run      | Session 009                 | `197b339..95785ad` | Instruction-echo and HP/health leaks, checker allows enemy blows on PCs, `hand_off` to monsters explained                      |
-| Sixth run      | Session 010                 | `c75717c..80ac5e0` | Retelling (paraphrase loop) rejection with a per-turn cap, bare-line tool-call leaks                                           |
-| Seventh run    | Session 011                 | `7b4d55d..e036678` | One action per combatant per turn, combat hand-offs, carried items in the DM prompt, turn announcements, checker allows a miss |
-| One-fight rule | Aaron's call after 011      | `3a2606d..e81074d` | One fight a session, in the engine, the prompt and the spec                                                                    |
-| Eighth run     | Session 012                 | `5cc2095..912f2e3` | DM word-share nudge, repeated closing press, bold tool call and meta-talk leaks, recoverable refusals                          |
-| Ninth run      | Session 013                 | `78a1c28..HEAD`    | Blank act target; request_check refusal lists the skills and never guesses                                                     |
+| Batch          | Trigger                     | Commits            | What changed                                                                                                                    |
+| -------------- | --------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| Script stage   | Reviews of sessions 002–004 | `cc4eb6e..bf09ef5` | The ten script findings, including the speech-direction grammar (5 review rounds)                                               |
+| First run      | Session 005                 | `347f6d7..dd50ea2` | Death saves, combat closing, state-leak strip, repeat cutting, NPC continuity, tool-error logging                               |
+| Second run     | Session 006                 | `2deb439..86cdeb0` | Combat narration caps, player repeat re-prompt, tool-shape coercions, hard-stop rule, read-aloud labels                         |
+| Third run      | Session 007                 | `1d2f823..643befb` | Wider leak patterns, strict `hand_off` shape, attacks in the DM prompt, NPC-id resolution, cross-beat repeats, checker tuning   |
+| Fourth run     | Session 008                 | `bc334ff..0bb260d` | Sentence-level leak strip, HP-in-prose and turn-order leaks, NPC checker findings, no fight past the target, quote repair       |
+| Fifth run      | Session 009                 | `197b339..95785ad` | Instruction-echo and HP/health leaks, checker allows enemy blows on PCs, `hand_off` to monsters explained                       |
+| Sixth run      | Session 010                 | `c75717c..80ac5e0` | Retelling (paraphrase loop) rejection with a per-turn cap, bare-line tool-call leaks                                            |
+| Seventh run    | Session 011                 | `7b4d55d..e036678` | One action per combatant per turn, combat hand-offs, carried items in the DM prompt, turn announcements, checker allows a miss  |
+| One-fight rule | Aaron's call after 011      | `3a2606d..e81074d` | One fight a session, in the engine, the prompt and the spec                                                                     |
+| Eighth run     | Session 012                 | `5cc2095..912f2e3` | DM word-share nudge, repeated closing press, bold tool call and meta-talk leaks, recoverable refusals                           |
+| Ninth run      | Session 013                 | `78a1c28..d2a166a` | Blank act target; request_check refusal lists the skills and never guesses                                                      |
+| Plan 2B (lore) | Roadmap plan                | `379d85e..20ded41` | The `lore` package, `sim index`, `sim audit`, the `embed` seat, entity ids on lore hits, invention links, threshold calibration |
+| Tenth run      | Session 014                 | —                  | No engine findings. Hardware only: tomas to `linus`, kira alone on the Mac Studio                                               |
 
 ### Rule added after session 011: one fight a session
 
@@ -452,17 +526,20 @@ Aaron's call (2026-09-19): a session has room for a single fight, as a rule of t
 
 ### Next steps, in order
 
-1. **Run session 014 — the first session against real lore.** Nothing in Plan 2B has been exercised by a 1-hour run, and it changes what the DM sees on every `lookup_lore`. Run `sim bench` first (it now checks the embed seat and its vector width), then `sim index`, then the session, then `sim audit`.
-2. **Watch the relevance threshold.** 0.69 was calibrated on five clean queries with a 0.102 margin; real sessions ask messier questions. If the audit reports gaps for lore that demonstrably exists, lower it via `loreThreshold` in `campaign.json` rather than editing the engine.
-3. Consider giving Bram and Tomas starting gear in the Avalon party files.
-4. Then: the Avalon Artificers Academy lore expansion, Plan 2C, and optionally the Plan 3 Ampere spike. Nothing is pushed yet.
+1. **Decide the release.** The gate is met: session 014 produced no engine findings. Push and open a PR, or hold. Nothing is pushed yet.
+2. **Plan 2C is now the critical path, and session 014 says which part.** `sim prep` seeding a session outline in a real Georgia location, and a DM persona that looks lore up before inventing, are what stand between a correct index and lore that actually reaches the table. The retrieval work is done; the appetite for it is missing.
+3. **The threshold still needs a real test.** 0.69 was calibrated on five clean queries with a 0.102 margin and session 014 never exercised it. Once the DM queries lore that exists, check whether the audit reports gaps for lore you know is there; if so, lower it via `loreThreshold` in `campaign.json` rather than editing the engine.
+4. Consider giving Bram and Tomas starting gear in the Avalon party files.
+5. Then: the Avalon Artificers Academy lore expansion, and optionally the Plan 3 Ampere spike.
 
 ### Operating notes from these runs
 
-- **A run takes 1–2.5 hours of wall time** for 60 spoken minutes. Shorter narration makes the word-based clock advance more slowly, so the caps added in the second batch lengthen wall time.
+- **A run takes 1–2.5 hours of wall time** for 60 spoken minutes (session 014 managed 58.5 minutes after Tomas moved to `linus` and Kira got the Mac Studio to herself). Shorter narration makes the word-based clock advance more slowly, so the caps added in the second batch lengthen wall time.
 - **The DM's LM Studio wedged once** mid-`GENERATING`, answering nothing while still listing its model. `lms unload` then `lms load` fixed it; run `sim bench` before every session.
 - **The Ampere machine dropped off the network** mid-session 007 and again mid-session 009 (back within ~10–30 minutes both times) (Mira's seat, the checker's primary). `--resume` picked up cleanly once it was back.
 - **`player-bram` has a fallback target** in `campaign.json` after its seat paused session 005 by answering four times without a tool call; `player-tomas` got one after session 013 paused the same way. Every player seat now has a fallback.
+- **`kanka_export.py download` skips any list page already cached**, so `all` silently regenerates markdown from stale data and never picks up new or deleted entities. Clearing `kanka-export/_raw/lists/<type>/` first is what forces a real refresh — doing that on 2026-09-24 recovered **682 characters** the local mirror had been missing (560 → 1,242), which the index had therefore never seen.
+- **Ollama evicts an idle model after ~5 minutes.** `OLLAMA_KEEP_ALIVE=2h` is set on `linus`; without it a 9.3 GB reload lands in the middle of a bench and makes the numbers meaningless.
 - The SDD workspaces for all four batches are under `.superpowers/sdd/` (git-ignored) with their ledgers, briefs, reports and review packages.
 
 ## Open backlog
