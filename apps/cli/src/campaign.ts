@@ -85,7 +85,7 @@ export interface Campaign {
   scriptSeat?: string;
 }
 
-function isNotFound(error: unknown): boolean {
+export function isNotFound(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 

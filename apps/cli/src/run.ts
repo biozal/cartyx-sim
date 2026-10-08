@@ -12,11 +12,12 @@ import { ScriptedModelClient, StaticLoreIndex } from '@cartyx-sim/core/testing';
 import { openIndex, readMeta, type Embedder } from '@cartyx-sim/lore';
 import { OpenAICompatibleModelClient } from '@cartyx-sim/models';
 import { scriptedRng, secureRng, seededRng, type Rng } from '@cartyx-sim/rules';
-import { loadCampaign, type Campaign } from './campaign';
+import { isNotFound, loadCampaign, type Campaign } from './campaign';
 import { loadFixture } from './fixture';
 import { currentIdentity, embedderFor, ensureIndex, loreIndexDir } from './index-lore';
 import { JsonlFileSink } from './jsonl-sink';
 import { sessionEventsPath } from './paths';
+import { parsePrepHeader, prepPath } from './prep';
 
 export interface RunOptions {
   campaignsDir: string;
@@ -54,7 +55,8 @@ function rngFor(seed: number | undefined): Rng {
 export function directorConfig(
   campaign: Campaign,
   options: RunOptions,
-  loreCommit: string
+  loreCommit: string,
+  prepOutline?: string
 ): DirectorConfig {
   return {
     session: options.session,
@@ -64,6 +66,9 @@ export function directorConfig(
     seats: campaign.seats,
     // Omitted rather than passed as undefined, so the director's own default applies.
     ...(campaign.loreThreshold === undefined ? {} : { loreThreshold: campaign.loreThreshold }),
+    ...(campaign.premise ? { premise: campaign.premise } : {}),
+    ...(campaign.personas ? { personas: campaign.personas } : {}),
+    ...(prepOutline ? { prepOutline } : {}),
   };
 }
 
@@ -103,6 +108,37 @@ async function loggedLoreCommit(eventsPath: string): Promise<string | undefined>
   return undefined;
 }
 
+/**
+ * The session's prep outline, or undefined with a warning when there is none. A missing file
+ * warns and plays: a prep failure must not block a session, and the audit shows the difference.
+ * A file that exists but has a malformed header is an error, since the engine can't trust it.
+ */
+async function readPrepOutline(
+  campaign: Campaign,
+  session: number,
+  campaignsDir: string,
+  log: ((line: string) => void) | undefined
+): Promise<string | undefined> {
+  const path = prepPath(campaignsDir, campaign.id, session);
+  let text: string;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch (error) {
+    // Only a missing outline warns and plays. One that exists but cannot be read (EACCES, EISDIR)
+    // is the operator's prep going silently unused, so it stops the session instead.
+    if (!isNotFound(error)) throw error;
+    log?.(`No prep outline at ${path}. Playing without one; run \`sim prep\` to seed the session.`);
+    return undefined;
+  }
+  if (!parsePrepHeader(text)) {
+    throw new Error(
+      `The prep outline ${path} is unusable: its front-matter header is malformed. It needs both location and ` +
+        `locationEntityId. Fix the header or re-run \`sim prep\`.`
+    );
+  }
+  return text;
+}
+
 async function campaignSetup(options: RunOptions): Promise<SessionSetup> {
   const campaign = await loadCampaign(options.campaignsDir, options.campaign);
   if (!campaign.lorePath) {
@@ -115,6 +151,12 @@ async function campaignSetup(options: RunOptions): Promise<SessionSetup> {
     };
   }
 
+  const prepOutline = await readPrepOutline(
+    campaign,
+    options.session,
+    options.campaignsDir,
+    options.log
+  );
   const embedder = options.embedder ?? embedderFor(campaign);
   const indexDir = loreIndexDir(campaign);
 
@@ -153,7 +195,7 @@ async function campaignSetup(options: RunOptions): Promise<SessionSetup> {
     }
     const lore = await openIndex(indexDir, embedder);
     return {
-      config: directorConfig(campaign, options, meta.loreCommit),
+      config: directorConfig(campaign, options, meta.loreCommit, prepOutline),
       model: new OpenAICompatibleModelClient(campaign.models),
       lore,
       rng: rngFor(options.seed),
@@ -169,7 +211,7 @@ async function campaignSetup(options: RunOptions): Promise<SessionSetup> {
   if (index.rebuilt) options.log?.(`Rebuilt the lore index: ${index.indexDir}`);
   const lore = await openIndex(index.indexDir, embedder);
   return {
-    config: directorConfig(campaign, options, index.meta!.loreCommit),
+    config: directorConfig(campaign, options, index.meta!.loreCommit, prepOutline),
     model: new OpenAICompatibleModelClient(campaign.models),
     lore,
     rng: rngFor(options.seed),
