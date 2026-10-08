@@ -322,6 +322,42 @@ describe('loadCampaign', () => {
     );
   });
 
+  it('loads a premise and exposes it on the campaign', async () => {
+    const file = config();
+    (file as Record<string, unknown>).premise = { world: 'Cartyx', region: 'Atlanta metro' };
+    await writeCampaign(file, { 'kira.json': KIRA });
+    const campaign = await loadCampaign(campaignsDir, 'test');
+    expect(campaign.premise).toEqual({ world: 'Cartyx', region: 'Atlanta metro' });
+  });
+
+  it('loads a persona and keeps it out of the mechanical combatant', async () => {
+    await writeCampaign(config(), {
+      'kira.json': {
+        ...KIRA,
+        persona: { motivation: 'Clear her name.', loreEntityIds: ['kanka-1'] },
+      },
+    });
+    const campaign = await loadCampaign(campaignsDir, 'test');
+    expect(campaign.personas?.kira).toEqual({
+      motivation: 'Clear her name.',
+      loreEntityIds: ['kanka-1'],
+    });
+    // The party stays purely mechanical: Combatant has no persona field.
+    expect(campaign.party[0]).not.toHaveProperty('persona');
+  });
+
+  it('still loads a campaign with neither a premise nor personas', async () => {
+    await writeCampaign(config(), { 'kira.json': KIRA });
+    const campaign = await loadCampaign(campaignsDir, 'test');
+    expect(campaign.premise).toBeUndefined();
+    expect(campaign.personas).toBeUndefined();
+  });
+
+  it('rejects a malformed persona rather than dropping it silently', async () => {
+    await writeCampaign(config(), { 'kira.json': { ...KIRA, persona: { motivation: 42 } } });
+    await expect(loadCampaign(campaignsDir, 'test')).rejects.toThrow(/persona/i);
+  });
+
   it('still loads a lore-less campaign with its loreCommit default', async () => {
     await writeCampaign(config(), { 'kira.json': KIRA });
     const campaign = await loadCampaign(campaignsDir, 'test');
