@@ -276,3 +276,56 @@ describe('dm prompt premise', () => {
     expect(without).toContain('You are the Dungeon Master');
   });
 });
+
+describe('personas in prompts', () => {
+  const personas = {
+    kira: {
+      motivation: 'Clear the shop’s name.',
+      ties: 'Owes Professor Vaunt.',
+      backstory: 'Alpharetta born.',
+    },
+    tomas: { motivation: 'Find his brother.', backstory: 'A long secret.' },
+  };
+
+  it('gives the DM one line per PC, not the full blocks', () => {
+    const { state } = startedState();
+    const user = basicPrompts.dm({ state, transcript: '', instruction: 'Go.', personas })[1]!
+      .content;
+    expect(user).toContain('Clear the shop’s name.');
+    expect(user).toContain('Owes Professor Vaunt.');
+    // The DM gets motives and ties, never the backstory prose.
+    expect(user).not.toContain('Alpharetta born.');
+    expect(user).not.toContain('A long secret.');
+  });
+
+  it('gives a player their own persona in full', () => {
+    const { state } = startedState();
+    const [system] = basicPrompts.player({
+      view: playerView(state, 'kira'),
+      transcript: '',
+      instruction: 'Say something.',
+      persona: personas.kira,
+    });
+    expect(system!.content).toContain('Alpharetta born.');
+    expect(system!.content).toContain('Clear the shop’s name.');
+  });
+
+  it('never shows one player another player’s persona', () => {
+    const { state } = startedState();
+    const messages = basicPrompts.player({
+      view: playerView(state, 'kira'),
+      transcript: '',
+      instruction: 'Go.',
+      persona: personas.kira,
+    });
+    const all = messages.map((message) => message.content).join('\n');
+    expect(all).not.toContain('Find his brother.');
+    expect(all).not.toContain('A long secret.');
+  });
+
+  it('is unchanged when no personas are given', () => {
+    const { state } = startedState();
+    const user = basicPrompts.dm({ state, transcript: '', instruction: 'Go.' })[1]!.content;
+    expect(user).toContain('Party:');
+  });
+});
