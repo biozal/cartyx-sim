@@ -6,6 +6,7 @@ export * from './hand-off-prose';
 export * from './json-reply';
 export * from './model';
 export * from './pc-control';
+export * from './persona';
 export * from './prompts';
 export * from './recorder';
 export * from './sink';
