@@ -277,6 +277,42 @@ describe('dm prompt premise', () => {
   });
 });
 
+describe('dm prompt outline and ambient lore', () => {
+  it('puts the session outline after the rules in the system message', () => {
+    const { state } = startedState();
+    const content = basicPrompts.dm({
+      state,
+      transcript: '',
+      instruction: 'Go.',
+      premise: { world: 'Cartyx, a fantasy Earth.' },
+      prepOutline: 'Outline: the heist at the academy.',
+    })[0]!.content;
+    expect(content.indexOf('World: Cartyx')).toBeLessThan(content.indexOf('All dice'));
+    expect(content.indexOf('All dice')).toBeLessThan(content.indexOf('Outline: the heist'));
+  });
+
+  it('shows ambient lore beside the scene, and nothing when there is none', () => {
+    const { state } = startedState();
+    const withLore = basicPrompts.dm({
+      state,
+      transcript: '',
+      instruction: 'Go.',
+      ambientLore: '[avalon#sella-vaunt] Professor Sella Vaunt',
+    })[1]!.content;
+    expect(withLore).toContain('Lore for this scene:\n[avalon#sella-vaunt] Professor Sella Vaunt');
+    expect(withLore.indexOf('Scene:')).toBeLessThan(withLore.indexOf('Lore for this scene:'));
+    const without = basicPrompts.dm({
+      state,
+      transcript: '',
+      instruction: 'Go.',
+      ambientLore: '',
+    })[1]!.content;
+    expect(without).not.toContain('Lore for this scene:');
+    // No blank section is left behind where the lore would have been.
+    expect(without).not.toContain('\n\n\n\n');
+  });
+});
+
 describe('personas in prompts', () => {
   const personas = {
     kira: {

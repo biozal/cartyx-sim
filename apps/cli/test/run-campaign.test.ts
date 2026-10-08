@@ -108,6 +108,8 @@ describe('runSession with campaign model seats', () => {
       'narration',
       'hand_off',
       'turn_end',
+      // The DM's scene_change makes the engine fetch lore for the new location.
+      'lore_lookup',
       'dialogue',
       'turn_end',
       'narration',

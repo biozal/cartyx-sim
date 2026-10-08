@@ -21,12 +21,14 @@ import {
   verifyFindings,
   type PcControlFinding,
 } from './pc-control';
+import type { Persona, Premise } from './persona';
 import type { PromptBuilder } from './prompts';
 import { TurnRecorder } from './recorder';
 import { cutRepeats, retellsNarration, repeatedSentences } from './repeats';
 import type { EventSink } from './sink';
 import { advanceCombat, foldEvents, nextActor, ownEntry, takesTurn, type GameState } from './state';
 import { emitCombatantChanges } from './tools/mechanics';
+import { LORE_RESULT_LIMIT, loreHitPayload, rankLoreHits, renderLoreHits } from './tools/narrative';
 import {
   DM_TOOLS,
   MECHANICS_TOOL_NAMES,
@@ -97,6 +99,12 @@ export interface DirectorConfig {
   retryDelaysMs?: number[];
   /** Consecutive checker failures before narration stops being checked for the run. Default 3. */
   maxCheckerFailures?: number;
+  /** The campaign's standing premise, passed to the DM prompt. */
+  premise?: Premise;
+  /** Personas by party member id, recorded on session_start and passed to the prompts. */
+  personas?: Record<string, Persona>;
+  /** The session outline from `sim prep`, injected into the DM system prompt for the session. */
+  prepOutline?: string;
 }
 
 export interface DirectorDeps {
@@ -360,6 +368,8 @@ export class Director {
   private checkerFailures = 0;
   /** Set once the checker has failed too often; lasts for this run only. */
   private checkerDisabled = false;
+  /** Lore the engine fetched on the DM's behalf, carried into the next DM prompt. */
+  private ambientLore = '';
   private readonly now: () => Date;
   private readonly newTurnId: () => string;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -565,8 +575,72 @@ export class Director {
       loreCommit: this.config.loreCommit,
       targetMinutes: this.config.targetMinutes,
       party: this.config.party,
+      ...(this.config.personas ? { personas: this.config.personas } : {}),
     });
+    // One lookup per PC, on that PC's own prose: one query over the whole party's backstories
+    // averages their topics into lore generically "about the setting", and can overflow a small
+    // embedder's context. The query is prose, not entity ids: an id has nothing to embed.
+    const personas = this.config.personas ?? {};
+    const found = new Map<string, LoreHit>();
+    for (const pc of this.config.party) {
+      const persona = ownEntry(personas, pc.id);
+      if (!persona) continue;
+      const query = [persona.backstory, persona.motivation, persona.ties]
+        .filter((part): part is string => part !== undefined && part !== '')
+        .join(' ');
+      if (query === '') continue;
+      const used = await this.retrieveAmbient(
+        recorder,
+        query,
+        'party',
+        new Set(persona.loreEntityIds ?? [])
+      );
+      for (const hit of used) if (!found.has(hit.chunkId)) found.set(hit.chunkId, hit);
+    }
+    this.ambientLore = renderLoreHits([...found.values()]);
     await this.commit(recorder);
+  }
+
+  /**
+   * Retrieves lore the DM did not ask for, records it as a lookup and returns the hits the DM
+   * should see. Emits the same `lore_lookup` a tool call does, with a `trigger`, so `sim audit`
+   * needs no changes. The search goes through the lore seat's retries, but once those run out it
+   * degrades to no ambient lore instead of pausing: a lore outage must not end a session.
+   */
+  private async retrieveAmbient(
+    recorder: TurnRecorder,
+    query: string,
+    trigger: 'scene' | 'party',
+    /** Authored ties: a hit on one of these is kept even below the threshold. */
+    promote: ReadonlySet<string> = new Set()
+  ): Promise<LoreHit[]> {
+    let hits: LoreHit[];
+    try {
+      // The same over-fetch lookup_lore uses: duplicates of one entity collapse below, and the
+      // remaining slots should still be filled with other entities.
+      hits = await this.searchLore(query, LORE_RESULT_LIMIT * 4);
+    } catch (error) {
+      // Includes the SessionPausedError searchLore throws once its retries are spent. The note is
+      // DM-only and no transcript renders it, so it traces the skip in the log for the operator
+      // without the query, which for a party lookup is a PC's backstory.
+      const reason = error instanceof Error ? error.message : String(error);
+      recorder.emit({
+        type: 'ooc_note',
+        visibility: 'dm',
+        text: `Ambient lore lookup (${trigger}) skipped: the lore search failed (${reason}).`,
+      });
+      return [];
+    }
+    const { ranked, used } = rankLoreHits(hits, this.loreThreshold, promote);
+    recorder.emit({
+      type: 'lore_lookup',
+      visibility: 'dm',
+      query,
+      trigger,
+      hits: loreHitPayload(ranked),
+      used: used.map((hit) => hit.chunkId),
+    });
+    return used;
   }
 
   private async dmBeat(
@@ -583,6 +657,10 @@ export class Director {
       state: this.state,
       transcript: this.transcript('dm'),
       instruction: this.dmInstruction(reason, combatantId, nudge),
+      premise: this.config.premise,
+      personas: this.config.personas,
+      prepOutline: this.config.prepOutline,
+      ambientLore: this.ambientLore,
     });
     const context = this.toolContext(recorder, 'dm', seat);
     const partyForHandOff = this.state.partyIds.map((id) => ({
@@ -967,6 +1045,12 @@ export class Director {
     if (sceneBreak && (phase === 'end_at_scene_break' || phase === 'hard_stop')) {
       this.closeCombatIfRunning(recorder);
       recorder.emit({ type: 'session_end', reason: 'target_reached' });
+    } else if (sceneBreak) {
+      // Only when the session continues: fetching lore for a scene nobody will play is waste.
+      const location = recorder.state.scene?.location;
+      if (location) {
+        this.ambientLore = renderLoreHits(await this.retrieveAmbient(recorder, location, 'scene'));
+      }
     }
     await this.commit(recorder);
   }
@@ -985,6 +1069,8 @@ export class Director {
       view: playerView(this.state, pcId),
       transcript: this.transcript('player'),
       instruction,
+      // `ownEntry`, not bracket access: the persona map comes from config.
+      persona: this.config.personas ? ownEntry(this.config.personas, pcId) : undefined,
     });
     const otherPcNames = this.state.partyIds
       .filter((id) => id !== pcId)

@@ -18,6 +18,10 @@ export interface PromptInput {
   premise?: Premise;
   /** One persona per party member id. The DM sees a one-line summary of each, never the prose. */
   personas?: Record<string, Persona>;
+  /** The session outline from `sim prep`, appended to the system message for this session. */
+  prepOutline?: string;
+  /** Lore the engine retrieved on the DM's behalf for the current scene or party. */
+  ambientLore?: string;
 }
 
 export interface PlayerPromptInput {
@@ -112,7 +116,7 @@ function describeNpc(npc: NpcRecord): string {
 }
 
 export const basicPrompts: PromptBuilder = {
-  dm({ state, transcript, instruction, premise, personas }) {
+  dm({ state, transcript, instruction, premise, personas, prepOutline, ambientLore }) {
     const party = state.partyIds
       .map((id) => state.combatants[id])
       .filter((combatant) => combatant !== undefined)
@@ -129,10 +133,15 @@ export const basicPrompts: PromptBuilder = {
       .map(describeCombatant);
     const npcs = Object.values(state.npcs).map(describeNpc);
     const world = renderPremise(premise);
+    const outline = prepOutline ?? '';
     return [
-      // The premise leads: the model has to know what world it is in before it is told how dice
-      // work. Session 014 ran with no premise at all and invented a setting from nothing.
-      { role: 'system', content: world === '' ? DM_SYSTEM : `${world}\n\n${DM_SYSTEM}` },
+      {
+        role: 'system',
+        // Premise first (what world this is), then the rules, then this session's outline. The
+        // premise leads because the model has to know what world it is in before it is told how
+        // dice work: session 014 ran with no premise at all and invented a setting from nothing.
+        content: [world, DM_SYSTEM, outline].filter((part) => part !== '').join('\n\n'),
+      },
       {
         role: 'user',
         content: [
@@ -140,6 +149,7 @@ export const basicPrompts: PromptBuilder = {
           `Other combatants:\n${others.join('\n') || '- none'}`,
           `NPCs:\n${npcs.join('\n') || '- none'}`,
           `Scene: ${state.scene?.location ?? 'not set'}`,
+          ambientLore ? `Lore for this scene:\n${ambientLore}` : '',
           // Said in the moment as well as in the system rules, since by the time it matters the
           // system message is far up a long prompt.
           state.fightsSoFar > 0
@@ -147,7 +157,9 @@ export const basicPrompts: PromptBuilder = {
             : 'This session has not had its fight yet. It has room for one.',
           `Recent events:\n${transcript || '(the session is just starting)'}`,
           instruction,
-        ].join('\n\n'),
+        ]
+          .filter((part) => part !== '')
+          .join('\n\n'),
       },
     ];
   },

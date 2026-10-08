@@ -37,6 +37,7 @@ function deps(
     rolls?: number[];
     turnPrefix?: string;
     sleep?: DirectorDeps['sleep'];
+    lore?: LoreIndex;
   } = {}
 ) {
   let turn = 0;
@@ -44,7 +45,7 @@ function deps(
   const sink = options.sink ?? new MemorySink();
   const built: DirectorDeps = {
     model,
-    lore: new StaticLoreIndex([SELLA_CHUNK]),
+    lore: options.lore ?? new StaticLoreIndex([SELLA_CHUNK]),
     rng: scriptedRng(options.rolls ?? []),
     sink,
     prompts: basicPrompts,
@@ -214,6 +215,8 @@ describe('Director', () => {
       'dialogue',
       'hand_off',
       'turn_end',
+      // The DM's scene_change makes the engine fetch lore for the new location.
+      'lore_lookup',
       'dialogue',
       'action',
       'turn_end',
@@ -377,6 +380,8 @@ describe('Director', () => {
       'ooc_note',
       'hand_off',
       'turn_end',
+      // The DM's scene_change makes the engine fetch lore for the new location.
+      'lore_lookup',
     ]);
     expect(sink.events[2]).toMatchObject({
       visibility: 'dm',
@@ -405,6 +410,8 @@ describe('Director', () => {
       'narration',
       'hand_off',
       'turn_end',
+      // The DM's scene_change makes the engine fetch lore for the new location.
+      'lore_lookup',
     ]);
     expect(sink.events[3]).toMatchObject({ type: 'hand_off', responders: ['tomas'] });
   });
