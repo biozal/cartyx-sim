@@ -252,3 +252,27 @@ describe('basicPrompts.player in combat', () => {
     expect(system!.content).not.toContain('Say one short line in character');
   });
 });
+
+describe('dm prompt premise', () => {
+  it('puts the world before the mechanical rules, because a model needs to know where it is first', () => {
+    const { state } = startedState();
+    const [system] = basicPrompts.dm({
+      state,
+      transcript: '',
+      instruction: 'Open the scene.',
+      premise: { world: 'Cartyx, a fantasy Earth.', region: 'Atlanta metro.' },
+    });
+    const content = system!.content;
+    expect(content).toContain('World: Cartyx, a fantasy Earth.');
+    expect(content).toContain('Region: Atlanta metro.');
+    // The premise must precede the dice rules, not trail them.
+    expect(content.indexOf('World: Cartyx')).toBeLessThan(content.indexOf('All dice'));
+  });
+
+  it('is unchanged when a campaign has no premise', () => {
+    const { state } = startedState();
+    const without = basicPrompts.dm({ state, transcript: '', instruction: 'Go.' })[0]!.content;
+    expect(without).not.toContain('World:');
+    expect(without).toContain('You are the Dungeon Master');
+  });
+});

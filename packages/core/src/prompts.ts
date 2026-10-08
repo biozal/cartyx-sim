@@ -1,5 +1,6 @@
 import type { Combatant, DeathSaves } from '@cartyx-sim/rules';
 import type { ChatMessage } from './model';
+import { renderPremise, type Premise } from './persona';
 import type { GameState, NpcRecord } from './state';
 import type { PlayerView } from './view';
 
@@ -7,6 +8,8 @@ export interface PromptInput {
   state: GameState;
   transcript: string;
   instruction: string;
+  /** The campaign's standing premise, if it has one. */
+  premise?: Premise;
 }
 
 export interface PlayerPromptInput {
@@ -99,7 +102,7 @@ function describeNpc(npc: NpcRecord): string {
 }
 
 export const basicPrompts: PromptBuilder = {
-  dm({ state, transcript, instruction }) {
+  dm({ state, transcript, instruction, premise }) {
     const party = state.partyIds
       .map((id) => state.combatants[id])
       .filter((combatant) => combatant !== undefined)
@@ -108,8 +111,11 @@ export const basicPrompts: PromptBuilder = {
       .filter((combatant) => combatant.kind !== 'pc')
       .map(describeCombatant);
     const npcs = Object.values(state.npcs).map(describeNpc);
+    const world = renderPremise(premise);
     return [
-      { role: 'system', content: DM_SYSTEM },
+      // The premise leads: the model has to know what world it is in before it is told how dice
+      // work. Session 014 ran with no premise at all and invented a setting from nothing.
+      { role: 'system', content: world === '' ? DM_SYSTEM : `${world}\n\n${DM_SYSTEM}` },
       {
         role: 'user',
         content: [
