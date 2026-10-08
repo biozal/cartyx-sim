@@ -29,6 +29,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 - **Campaign config**: `campaign.json` (endpoints, seats) plus `characters/*.json`; an example lives in `apps/cli/examples/local-campaign/`.
 - **`sim script --campaign <id> --session <n>`**: turns an event log into `script.json` (speaker-attributed, TTS-ready lines and cues) and `script.md` (a readable script); see `docs/running-a-session.md` §8.
 - **`sim index --campaign <id> [--force] [--check]`**: builds or refreshes the lore index from the campaign's `cartyx-lore` checkout — chunks markdown by heading, resolves each chunk to its Kanka entity, embeds through the campaign's `embed` seat, stores it in LanceDB — and reports every ambiguous entity name it declined to guess. `--check` reports staleness and builds nothing. A fresh `sim run` rebuilds a stale index automatically; `--resume` never does. See `docs/running-a-session.md` §9.
+- **`sim prep --campaign <id> --session <n> [--location "<name>"] [--force]`**: writes a session outline to `campaigns/<id>/prep/session-NNN.md`, opening in a real indexed lore entity (named with `--location`, or chosen by the DM seat near `premise.region`); refuses rather than invent a location when nothing clears the lore threshold. `sim run` plays the outline, an optional `premise` in `campaign.json`, and per-character `persona` blocks, and the director retrieves lore at session start and on scene changes (`lore_lookup` events with a `trigger`). See `docs/running-a-session.md` §10.
 - **`sim audit --campaign <id> --session <n> [--no-model]`**: writes `audit.md` and `audit.json` for a session — gaps, inventions (linked to the narration each supports), coverage, and possible contradictions between narration and retrieved lore (skipped without a checker seat, a lore index, or with `--no-model`).
 
 Operator guide: `docs/running-a-session.md`.
@@ -302,6 +303,11 @@ Findings:
 3. **Four `dm_state_leak` strips and six checker catches**, in line with recent runs; the leak
    strip and the checker are both doing their jobs.
 4. **Death saves have still never fired live** — now eleven sessions without a PC reaching 0 HP.
+
+Finding 1 is answered by the prep, persona, and ambient-lore work (`sim prep`, `premise`, `persona`,
+and `lore_lookup` events with a `trigger`), delivered ahead of the rest of Plan 2C in response to the
+"No lore was used" result. It is unmeasured until session 015 reports entities covered and scenes
+tied to lore above zero.
 
 ### Hardware changed with this run
 

@@ -111,6 +111,20 @@ Writes `audit.md` and `audit.json` into a session's directory: gaps (empty looku
 | `--no-model`             | Skip the checker pass for possible contradictions. |
 | `--campaigns-dir <path>` | Campaigns directory (default `campaigns`).         |
 
+### `sim prep`
+
+Writes a session outline to `campaigns/<id>/prep/session-NNN.md` that opens in a real lore entity: the one named by `--location`, or one the DM seat picks near `premise.region`. Builds or refreshes the lore index first. Refuses, writing nothing, when no entity clears the relevance threshold, and refuses to overwrite an outline without `--force`. `sim run` plays with the outline, the campaign `premise`, and character `persona` blocks when present, and warns and plays on if there is no outline.
+
+| Option                   | Meaning                                                    |
+| ------------------------ | ---------------------------------------------------------- |
+| `--campaign <id>`        | Required.                                                  |
+| `--session <n>`          | Session number (default 1).                                |
+| `--location <name>`      | Open at this lore entity instead of letting the DM choose. |
+| `--force`                | Overwrite an existing outline.                             |
+| `--campaigns-dir <path>` | Campaigns directory (default `campaigns`).                 |
+
+See [`docs/running-a-session.md`](docs/running-a-session.md) §10.
+
 ## A campaign folder
 
 ```text
@@ -118,6 +132,7 @@ campaigns/<id>/
   campaign.json          name, targetMinutes, endpoints, seats (dm + one per player)
   characters/<pc>.json   one file per party member; each needs a seat under seats.players
   .cache/lore-index/     built by `sim index`, when lorePath and an embed seat are set
+  prep/session-NNN.md    written by `sim prep`
   sessions/NNN/events.jsonl
   sessions/NNN/audit.md, audit.json   written by `sim audit`
   bench/<timestamp>.json
@@ -140,7 +155,7 @@ All three checks (`typecheck`, `test`, `format:check`) must pass before a commit
 ## Documentation
 
 - [`docs/status.md`](docs/status.md): where the project stands, what works, next steps, and the backlog highlights.
-- [`docs/running-a-session.md`](docs/running-a-session.md): setting up model servers, a campaign, `sim bench`, `sim run`, pauses, and playing against a lore index with `sim index` and `sim audit`.
+- [`docs/running-a-session.md`](docs/running-a-session.md): setting up model servers, a campaign, `sim bench`, `sim run`, pauses, and playing against a lore index with `sim index` and `sim audit`, and seeding a session with a premise, personas, and `sim prep`.
 - [`docs/superpowers/specs/2026-09-13-cartyx-sim-v1-design.md`](docs/superpowers/specs/2026-09-13-cartyx-sim-v1-design.md): the v1 design (event log contract, session flow, tools, media, playback).
 - [`docs/superpowers/plans/2026-09-13-cartyx-sim-v1-roadmap.md`](docs/superpowers/plans/2026-09-13-cartyx-sim-v1-roadmap.md): the plan sequence, deviations from the spec, and the full backlog.
 
@@ -151,7 +166,7 @@ All three checks (`typecheck`, `test`, `format:check`) must pass before a commit
 | 1    | Engine core: rules, director, event log, `sim run` against fixtures                  | Implemented |
 | 2A   | Live models: model client, campaign config, `sim bench`, `sim run` on real endpoints | Implemented |
 | 2B   | Lore: ingest `cartyx-lore`, embeddings, `sim index`, `sim audit`                     | Implemented |
-| 2C   | SRD import, production prompts, scribe, `sim chargen`, `sim prep`                    | Not written |
+| 2C   | SRD import, production prompts, scribe, `sim chargen` (`sim prep` delivered early)   | Not written |
 | 3    | Media: ComfyUI art and TTS voices, rendered after the run                            | Not written |
 | 4    | Playback page for OBS recording                                                      | Not written |
 
