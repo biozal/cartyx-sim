@@ -6,6 +6,7 @@ import { formatCommandError } from './command-errors';
 import { releaseHeldLocks } from './jsonl-sink';
 import { formatIndexSummary, runIndex } from './index-lore';
 import { formatPauseMessage } from './pause-message';
+import { formatPrepSummary, runPrep } from './prep';
 import { runSession } from './run';
 import { formatScriptSummary, makeScript } from './script';
 
@@ -48,6 +49,14 @@ interface ScriptCommandOptions {
   /** False with --no-model. */
   model: boolean;
   refresh: boolean;
+  campaignsDir: string;
+}
+
+interface PrepCommandOptions {
+  campaign: string;
+  session: number;
+  location?: string;
+  force: boolean;
   campaignsDir: string;
 }
 
@@ -190,6 +199,28 @@ program
         log: (line) => console.log(line),
       });
       for (const line of formatAuditSummary(result)) console.log(line);
+    })
+  );
+
+program
+  .command('prep')
+  .description("Write a session outline that opens in a real place from the campaign's lore")
+  .requiredOption('--campaign <id>', 'campaign id (a folder under the campaigns directory)')
+  .option('--session <n>', 'session number', parseNumber('integer'), 1)
+  .option('--location <name>', 'open at this lore entity instead of letting the DM seat choose')
+  .option('--force', 'overwrite an existing outline', false)
+  .option('--campaigns-dir <path>', 'campaigns directory', 'campaigns')
+  .action(
+    action<PrepCommandOptions>(async (options) => {
+      const result = await runPrep({
+        campaignsDir: options.campaignsDir,
+        campaign: options.campaign,
+        session: options.session,
+        location: options.location,
+        force: options.force,
+        log: (line) => console.log(line),
+      });
+      for (const line of formatPrepSummary(result)) console.log(line);
     })
   );
 
