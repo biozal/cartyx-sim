@@ -723,7 +723,7 @@ export class Director {
       step < this.maxDmStepsPerBeat && !ended && !callLimitHit && !retellLimitHit;
       step++
     ) {
-      const response = await this.callModel(seat, recorder.turnId, messages, DM_TOOL_SCHEMAS);
+      const response = await this.callModel(seat, recorder, messages, DM_TOOL_SCHEMAS);
       const { calls: rawCalls, proseCallId } = dmCallsFromResponse(
         response,
         `auto-narrate-${step}`
@@ -1080,7 +1080,7 @@ export class Director {
     let repeatRePrompted = false;
 
     for (let attempt = 0; ; attempt++) {
-      const response = await this.callModel(seat, recorder.turnId, messages, PLAYER_TOOL_SCHEMAS);
+      const response = await this.callModel(seat, recorder, messages, PLAYER_TOOL_SCHEMAS);
       const calls = callsFromResponse(response, 'speak', `auto-speak-${attempt}`);
       messages.push({
         role: 'assistant',
@@ -1423,7 +1423,7 @@ export class Director {
   /** Calls the model and validates its response; a malformed response is a failed attempt. */
   private callModel(
     seat: string,
-    turnId: string,
+    recorder: TurnRecorder,
     messages: ChatMessage[],
     tools: ToolSchema[]
   ): Promise<ModelResponse> {
@@ -1431,13 +1431,27 @@ export class Director {
       const parsed = ModelResponse.safeParse(
         // Every turn must end in a tool call (hand_off, speak, act, pass...), so require one;
         // a seat's client config may relax this for servers that do not support it.
-        await this.deps.model.complete({ seat, turnId, messages, tools, toolChoice: 'required' })
+        await this.deps.model.complete({
+          seat,
+          turnId: recorder.turnId,
+          messages,
+          tools,
+          toolChoice: 'required',
+        })
       );
       if (!parsed.success) {
         const issues = parsed.error.issues.map(
           (issue) => `${issue.path.join('.') || 'response'}: ${issue.message}`
         );
         throw new Error(`Malformed model response (${issues.join('; ')})`);
+      }
+      const failed = parsed.data.failedAttempts ?? [];
+      if (failed.length > 0) {
+        recorder.emit({
+          type: 'ooc_note',
+          visibility: 'dm',
+          text: `Seat ${seat} answered on ${parsed.data.model ?? 'a retry'} after: ${failed.join('; ')}`,
+        });
       }
       return parsed.data;
     });

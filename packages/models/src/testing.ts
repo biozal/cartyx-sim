@@ -33,6 +33,13 @@ export interface FakeReply {
   status?: number;
   delayMs?: number;
   completionTokens?: number;
+  /**
+   * Sent as `usage.prompt_tokens`; defaults to one token per four request characters, as a server
+   * that read the whole prompt would report. A small value on a big request mimics truncation.
+   */
+  promptTokens?: number;
+  /** Sent as `usage.prompt_tokens_details.cached_tokens` when set. */
+  cachedTokens?: number;
   /** Sent as `finish_reason`. Defaults to `tool_calls` when there are tool calls, else `stop`. */
   finishReason?: string;
 }
@@ -78,7 +85,9 @@ export async function startFakeOpenAIServer(
         sendJson(response, 404, { error: { message: `No route for ${request.url}` } });
         return;
       }
-      const body = JSON.parse(await readBody(request)) as ChatCompletionRequest;
+      const raw = await readBody(request);
+      const body = JSON.parse(raw) as ChatCompletionRequest;
+      const wholePrompt = Math.ceil(raw.length / 4);
       const index = requests.push(body) - 1;
       const planned = await reply(body, index);
       if (planned.delayMs) await new Promise((resolve) => setTimeout(resolve, planned.delayMs));
@@ -114,9 +123,12 @@ export async function startFakeOpenAIServer(
           },
         ],
         usage: {
-          prompt_tokens: 10,
+          prompt_tokens: planned.promptTokens ?? wholePrompt,
           completion_tokens: planned.completionTokens ?? 5,
-          total_tokens: 10 + (planned.completionTokens ?? 5),
+          total_tokens: (planned.promptTokens ?? wholePrompt) + (planned.completionTokens ?? 5),
+          ...(planned.cachedTokens === undefined
+            ? {}
+            : { prompt_tokens_details: { cached_tokens: planned.cachedTokens } }),
         },
       });
     })().catch((error: unknown) => {

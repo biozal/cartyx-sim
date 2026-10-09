@@ -12,6 +12,11 @@ export const ModelResponse = z.object({
   toolCalls: z.array(ToolCall).default([]),
   /** The model that produced this reply (a fallback's id when the primary failed), when known. */
   model: z.string().optional(),
+  /**
+   * Why earlier attempts at this reply failed, when it took a retry or a fallback target. A reply
+   * that succeeded on a fallback otherwise looks like any other, and the failure goes unseen.
+   */
+  failedAttempts: z.array(z.string()).optional(),
 });
 export type ModelResponse = z.output<typeof ModelResponse>;
 
