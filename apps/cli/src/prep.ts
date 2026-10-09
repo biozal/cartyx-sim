@@ -1,8 +1,16 @@
 import { access, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { DEFAULT_LORE_THRESHOLD, ownEntry, type LoreHit, type ModelClient } from '@cartyx-sim/core';
+import {
+  DEFAULT_LORE_THRESHOLD,
+  ownEntry,
+  personaLoreQuery,
+  LORE_RESULT_LIMIT,
+  rankLoreHits,
+  type LoreHit,
+  type ModelClient,
+} from '@cartyx-sim/core';
 import { openIndex, type Embedder } from '@cartyx-sim/lore';
-import { OpenAICompatibleModelClient } from '@cartyx-sim/models';
+import { OpenAICompatibleModelClient, type SeatConfigInput } from '@cartyx-sim/models';
 import { writeFileAtomic } from './atomic-write';
 import { loadCampaign, type Campaign } from './campaign';
 import { embedderFor, ensureIndex } from './index-lore';
@@ -31,13 +39,29 @@ export interface PrepResult {
 }
 
 /** Bump when the prompts below change in a way that changes what an outline looks like. */
-export const PREP_PROMPT_VERSION = 1;
+export const PREP_PROMPT_VERSION = 2;
 
 /** How many hits a pinned `--location` search reads. */
 const LOCATION_LIMIT = 10;
 /** How many hits the region search reads when the DM seat chooses the location. */
 const CANDIDATE_LIMIT = 20;
 const INCOMPLETE_REPLY_ATTEMPTS = 2;
+/** How many chunks describe the opening location: its own, then the rest of what its name finds. */
+const PLACE_CHUNK_LIMIT = 8;
+/**
+ * How many of those may be the location entity's own. A well-covered entity found by a region
+ * search can bring more than the whole cap, which would crowd out the DM write-up about the same
+ * place: the failure the place search exists to fix.
+ */
+const OWN_CHUNK_LIMIT = PLACE_CHUNK_LIMIT / 2;
+/** How many entities each PC's persona brings in, after the place's chunks are taken out. */
+const PARTY_CHUNK_LIMIT = 5;
+/**
+ * The DM seat's output floor for the outline. A session's DM turn is short, so seats are sized for
+ * that; an outline is several times longer, and a reasoning model spends part of the limit
+ * thinking first. At a 4000-token seat limit qwen3.6 ran out before finishing, twice.
+ */
+export const PREP_MAX_OUTPUT_TOKENS = 16000;
 
 const CHOOSE_SYSTEM =
   'You are preparing a tabletop role-playing session. Choose the opening location from the ' +
@@ -47,7 +71,10 @@ const OUTLINE_SYSTEM =
   'You are the game master preparing a tabletop role-playing session. Write a session outline ' +
   'in markdown with these sections: "## Hook", "## Scenes" (3 to 5 scenes), "## NPCs" (each ' +
   'with a motive), "## Secrets and Clues", and "## Likely Endings". The session opens at the ' +
-  'location given. Use only places and people the lore supports. Reply with the outline only.';
+  'location given. Use only places and people the lore supports: when the lore names someone ' +
+  'who fits a role, use that person, under the exact name the lore gives, rather than inventing ' +
+  'one. Invent a minor named character only when no one in the lore fits. Reply with the outline ' +
+  'only.';
 
 /** Where a session's outline lives. Zero-padded to three digits, like the session log paths. */
 export function prepPath(campaignsDir: string, campaign: string, session: number): string {
@@ -206,7 +233,85 @@ export async function chooseLocation(input: {
   return { hit, hits };
 }
 
-function outlinePrompt(campaign: Campaign, location: LoreHit, chunks: LoreHit[]): string {
+/**
+ * The campaign's models with the DM seat's output limit raised to at least
+ * {@link PREP_MAX_OUTPUT_TOKENS}, for prep only: a session still plays at the configured limit.
+ * Exported for tests.
+ */
+export function prepModels(campaign: Campaign): Record<string, SeatConfigInput> {
+  const dm = campaign.models[campaign.seats.dm];
+  if (!dm) return campaign.models;
+  const maxOutputTokens = Math.max(dm.maxOutputTokens ?? 0, PREP_MAX_OUTPUT_TOKENS);
+  return { ...campaign.models, [campaign.seats.dm]: { ...dm, maxOutputTokens } };
+}
+
+export interface PrepLore {
+  /** The opening location's own chunks first, then the best of what a search on its name finds. */
+  place: LoreHit[];
+  /** Per PC with a persona, the entities that persona's prose finds, its tied entities promoted. */
+  party: { name: string; hits: LoreHit[] }[];
+}
+
+/**
+ * The lore the outline is written from. Not just the location entity's chunks: a place's Kanka
+ * entry can be a two-line stub while the DM write-up about it is a separate entity per section,
+ * and a DM who is shown neither the write-up nor the people the PCs are tied to invents a cast.
+ * The party lookups use the director's query and ranking, so the outline is written from what the
+ * session will retrieve, but keep fewer entities per PC and put the authored ties first, so a tie
+ * that scored low is not the one the cap cuts. Exported for tests.
+ */
+export async function gatherPrepLore(input: {
+  campaign: Campaign;
+  search: (query: string, limit: number) => Promise<LoreHit[]>;
+  threshold: number;
+  location: LoreHit;
+  /** The hits the location was chosen from, so its own chunks are kept even if a re-search misses. */
+  locationHits: readonly LoreHit[];
+}): Promise<PrepLore> {
+  const { campaign, threshold, location } = input;
+  const own = input.locationHits
+    .filter((hit) => hit.entityId === location.entityId)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, OWN_CHUNK_LIMIT);
+  const named = (await input.search(location.entityName, PLACE_CHUNK_LIMIT * 2))
+    .filter((hit) => hit.score >= threshold)
+    .sort((a, b) => b.score - a.score);
+  const seen = new Set<string>();
+  const place: LoreHit[] = [];
+  for (const hit of [...own, ...named]) {
+    if (place.length >= PLACE_CHUNK_LIMIT) break;
+    if (seen.has(hit.chunkId)) continue;
+    seen.add(hit.chunkId);
+    place.push(hit);
+  }
+
+  const party: PrepLore['party'] = [];
+  const personas = campaign.personas ?? {};
+  for (const pc of campaign.party) {
+    const persona = ownEntry(personas, pc.id);
+    if (!persona) continue;
+    const query = personaLoreQuery(persona);
+    if (query === '') continue;
+    // As many candidates as the director reads, so prep sees every tie the session would.
+    const hits = await input.search(query, LORE_RESULT_LIMIT * 4);
+    const ties = new Set(persona.loreEntityIds ?? []);
+    const { used } = rankLoreHits(hits, threshold, ties);
+    const unseen = used.filter((hit) => !seen.has(hit.chunkId));
+    const fresh = [
+      ...unseen.filter((hit) => ties.has(hit.entityId)),
+      ...unseen.filter((hit) => !ties.has(hit.entityId)),
+    ].slice(0, PARTY_CHUNK_LIMIT);
+    for (const hit of fresh) seen.add(hit.chunkId);
+    if (fresh.length > 0) party.push({ name: pc.name, hits: fresh });
+  }
+  return { place, party };
+}
+
+function renderChunk(chunk: LoreHit): string {
+  return `[${chunk.chunkId}] ${chunk.text}`;
+}
+
+function outlinePrompt(campaign: Campaign, location: LoreHit, lore: PrepLore): string {
   const premise = campaign.premise;
   const premiseLines = [
     premise?.world && `World: ${premise.world}`,
@@ -227,10 +332,15 @@ function outlinePrompt(campaign: Campaign, location: LoreHit, chunks: LoreHit[])
     `Opening location: ${location.entityName}`,
     '',
     'Lore for the opening location:',
-    ...chunks.map((chunk) => `[${chunk.chunkId}] ${chunk.text}`),
+    ...lore.place.map(renderChunk),
     '',
     'Party:',
     ...party,
+    ...lore.party.flatMap(({ name, hits }) => [
+      '',
+      `Lore tied to ${name}:`,
+      ...hits.map(renderChunk),
+    ]),
   ].join('\n');
 }
 
@@ -267,7 +377,7 @@ export async function runPrep(options: PrepOptions): Promise<PrepResult> {
   if (!options.force && (await exists(path))) {
     throw new Error(`${path} already exists. Pass --force to overwrite it.`);
   }
-  const model = options.model ?? new OpenAICompatibleModelClient(campaign.models);
+  const model = options.model ?? new OpenAICompatibleModelClient(prepModels(campaign));
   const embedder = options.embedder ?? embedderFor(campaign);
   // Build or refresh the index first, as `runSession` does: a missing index would otherwise fail
   // with an opaque LanceDB error, and a stale one could offer an entity the next `sim run`'s
@@ -290,14 +400,22 @@ export async function runPrep(options: PrepOptions): Promise<PrepResult> {
       model,
       log,
     });
-    const chunks = hits.filter((h) => h.entityId === hit.entityId);
-    const chunkIds = chunks.map((chunk) => chunk.chunkId);
+    const lore = await gatherPrepLore({
+      campaign,
+      search: (query, limit) => index.search(query, limit),
+      threshold,
+      location: hit,
+      locationHits: hits,
+    });
+    const chunkIds = [...lore.place, ...lore.party.flatMap((pc) => pc.hits)].map(
+      (chunk) => chunk.chunkId
+    );
     const reply = await model.complete({
       seat: campaign.seats.dm,
       turnId: `prep-v${PREP_PROMPT_VERSION}-outline`,
       messages: [
         { role: 'system', content: OUTLINE_SYSTEM },
-        { role: 'user', content: outlinePrompt(campaign, hit, chunks) },
+        { role: 'user', content: outlinePrompt(campaign, hit, lore) },
       ],
       tools: [],
       toolChoice: 'auto',

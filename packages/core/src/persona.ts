@@ -66,3 +66,14 @@ export function renderPersonaLine(name: string, persona: Persona | undefined): s
   );
   return parts.length === 0 ? `- ${name}` : `- ${name} — ${parts.join(' ')}`;
 }
+
+/**
+ * The text a persona's lore is looked up by: its prose, never its entity ids, which have nothing
+ * to embed. Shared by the director's party lookups and `sim prep`, so both ask the index the same
+ * question about a character. Empty when the persona has no prose.
+ */
+export function personaLoreQuery(persona: Persona): string {
+  return [persona.backstory, persona.motivation, persona.ties]
+    .filter((part): part is string => part !== undefined && part !== '')
+    .join(' ');
+}

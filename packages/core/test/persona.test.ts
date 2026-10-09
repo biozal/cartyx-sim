@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { Persona, Premise, renderPersona, renderPersonaLine, renderPremise } from '../src/persona';
+import {
+  Persona,
+  personaLoreQuery,
+  Premise,
+  renderPersona,
+  renderPersonaLine,
+  renderPremise,
+} from '../src/persona';
 
 describe('Premise', () => {
   it('accepts an empty object and any subset of fields', () => {
@@ -77,5 +84,23 @@ describe('renderPersonaLine', () => {
   it('falls back to the name alone when there is no persona', () => {
     expect(renderPersonaLine('Kira Vale', undefined)).toBe('- Kira Vale');
     expect(renderPersonaLine('Kira Vale', {})).toBe('- Kira Vale');
+  });
+});
+
+describe('personaLoreQuery', () => {
+  it('asks by backstory, motivation and ties, never by personality or entity ids', () => {
+    expect(
+      personaLoreQuery({
+        backstory: 'A Lens Way junior.',
+        motivation: 'Earn a patent.',
+        personality: 'Precise.',
+        ties: 'Studies under Professor Vaunt.',
+        loreEntityIds: ['kanka-2418574'],
+      })
+    ).toBe('A Lens Way junior. Earn a patent. Studies under Professor Vaunt.');
+  });
+
+  it('is empty for a persona with no prose to embed', () => {
+    expect(personaLoreQuery({ personality: 'Precise.', loreEntityIds: ['kanka-1'] })).toBe('');
   });
 });

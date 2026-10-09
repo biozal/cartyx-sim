@@ -16,4 +16,5 @@ export * from './transcript';
 export * from './validators';
 export * from './view';
 export { DM_TOOLS, PLAYER_TOOLS } from './tools/registry';
+export { LORE_RESULT_LIMIT, rankLoreHits } from './tools/narrative';
 export { ToolError, toToolSchema, type ToolContext, type ToolDef } from './tools/types';

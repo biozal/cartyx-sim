@@ -6,7 +6,16 @@ import type { LoreHit, ModelClient, ModelRequest } from '@cartyx-sim/core';
 import { describe, expect, it } from 'vitest';
 import { loadCampaign } from '../src/campaign';
 import { loreIndexDir, runIndex } from '../src/index-lore';
-import { chooseLocation, formatPrepSummary, parsePrepHeader, prepPath, runPrep } from '../src/prep';
+import {
+  chooseLocation,
+  formatPrepSummary,
+  gatherPrepLore,
+  parsePrepHeader,
+  PREP_MAX_OUTPUT_TOKENS,
+  prepModels,
+  prepPath,
+  runPrep,
+} from '../src/prep';
 
 /**
  * `FakeEmbedder`'s hash spread, moved into the positive orthant so every cosine is at least 0.
@@ -179,6 +188,154 @@ async function choose(
   return { ...result, lines, offered };
 }
 
+/** A hit with its own chunk id, for entities that contribute several chunks. */
+function chunk(entityId: string, n: number, score: number, entityType = 'document'): LoreHit {
+  return { ...hit(entityId, entityId, entityType, score), chunkId: `${entityId}#${n}` };
+}
+
+describe('gatherPrepLore', () => {
+  async function gather(
+    searches: Record<string, LoreHit[]>,
+    persona: object | undefined,
+    locationHits: LoreHit[] = []
+  ) {
+    const { campaignsDir } = await fixture(0, undefined, { indexed: false });
+    const campaign = await loadCampaign(campaignsDir, 'test');
+    const queries: string[] = [];
+    const lore = await gatherPrepLore({
+      campaign: { ...campaign, personas: persona ? { kira: persona } : {} },
+      search: async (query) => {
+        queries.push(query);
+        return searches[query] ?? [];
+      },
+      threshold: 0.5,
+      location: hit('kanka-1', 'Academy', 'location', 0.9),
+      locationHits,
+    });
+    return { lore, queries };
+  }
+
+  it('describes the place with its own chunks and the other entities its name finds', async () => {
+    // The Kanka stub is the location; the DM write-up's sections are separate document entities.
+    const { lore } = await gather(
+      {
+        Academy: [
+          chunk('kanka-1', 0, 0.9, 'location'),
+          chunk('file:dm/academy.md#overview', 0, 0.85),
+          chunk('file:dm/academy.md#faculty', 0, 0.8),
+          chunk('file:dm/elsewhere.md#x', 0, 0.2),
+        ],
+      },
+      undefined,
+      [chunk('kanka-1', 1, 0.6, 'location')]
+    );
+    expect(lore.place.map((h) => h.chunkId)).toEqual([
+      'kanka-1#1',
+      'kanka-1#0',
+      'file:dm/academy.md#overview#0',
+      'file:dm/academy.md#faculty#0',
+    ]);
+  });
+
+  it('caps the place at eight chunks', async () => {
+    const many = Array.from({ length: 12 }, (_, n) =>
+      chunk(`file:dm/a.md#s${n}`, 0, 0.9 - n / 100)
+    );
+    const { lore } = await gather({ Academy: many }, undefined);
+    expect(lore.place).toHaveLength(8);
+  });
+
+  it('adds what each persona finds, promoting its ties and leaving out what the place shows', async () => {
+    const persona = {
+      backstory: 'A Lens Way junior.',
+      motivation: 'Earn a patent.',
+      loreEntityIds: ['kanka-tie'],
+    };
+    const { lore, queries } = await gather(
+      {
+        Academy: [chunk('file:dm/academy.md#overview', 0, 0.9)],
+        'A Lens Way junior. Earn a patent.': [
+          chunk('file:dm/academy.md#overview', 0, 0.9),
+          chunk('file:dm/npcs.md#vaunt', 0, 0.8),
+          chunk('kanka-tie', 0, 0.3, 'character'),
+          chunk('kanka-unrelated', 0, 0.2, 'character'),
+        ],
+      },
+      persona
+    );
+    expect(queries).toContain('A Lens Way junior. Earn a patent.');
+    expect(lore.party).toEqual([
+      {
+        name: 'Kira Vale',
+        hits: [
+          // Below the threshold, but an authored tie, so kept and put first.
+          expect.objectContaining({ chunkId: 'kanka-tie#0' }),
+          expect.objectContaining({ chunkId: 'file:dm/npcs.md#vaunt#0' }),
+        ],
+      },
+    ]);
+  });
+
+  it('keeps a low-scoring tie when the persona finds more than the cap', async () => {
+    const query = 'A Lens Way junior.';
+    const strong = Array.from({ length: 6 }, (_, n) =>
+      chunk(`file:dm/npcs.md#s${n}`, 0, 0.9 - n / 100)
+    );
+    const { lore } = await gather(
+      { [query]: [...strong, chunk('kanka-tie', 0, 0.3, 'character')] },
+      { backstory: query, loreEntityIds: ['kanka-tie'] }
+    );
+    const ids = lore.party[0]!.hits.map((h) => h.chunkId);
+    expect(ids).toHaveLength(5);
+    expect(ids[0]).toBe('kanka-tie#0');
+  });
+
+  it('lets the location’s own chunks fill at most half the place', async () => {
+    // A region search can bring many chunks of the chosen entity; the write-up must still fit.
+    const own = Array.from({ length: 10 }, (_, n) =>
+      chunk('kanka-1', n, 0.9 - n / 100, 'location')
+    );
+    const { lore } = await gather(
+      { Academy: [chunk('file:dm/academy.md#overview', 0, 0.8)] },
+      undefined,
+      own
+    );
+    expect(lore.place.filter((h) => h.entityId === 'kanka-1')).toHaveLength(4);
+    expect(lore.place.map((h) => h.chunkId)).toContain('file:dm/academy.md#overview#0');
+  });
+
+  it('asks nothing for a PC whose persona has no prose', async () => {
+    const { lore, queries } = await gather({}, { personality: 'Precise.' });
+    expect(queries).toEqual(['Academy']);
+    expect(lore.party).toEqual([]);
+  });
+});
+
+describe('prepModels', () => {
+  it('raises only the DM seat to the outline floor', async () => {
+    const { campaignsDir } = await fixture(0, undefined, { indexed: false });
+    const campaign = await loadCampaign(campaignsDir, 'test');
+    const models = prepModels(campaign);
+    expect(models[campaign.seats.dm]!.maxOutputTokens).toBe(PREP_MAX_OUTPUT_TOKENS);
+    for (const seat of Object.keys(campaign.models).filter((s) => s !== campaign.seats.dm)) {
+      expect(models[seat]).toEqual(campaign.models[seat]);
+    }
+    // The campaign itself is untouched: a session still plays at the configured limit.
+    expect(campaign.models[campaign.seats.dm]!.maxOutputTokens).toBeUndefined();
+  });
+
+  it('keeps a DM limit that is already higher', async () => {
+    const { campaignsDir } = await fixture(0, undefined, { indexed: false });
+    const campaign = await loadCampaign(campaignsDir, 'test');
+    const dm = campaign.seats.dm;
+    const roomy = {
+      ...campaign,
+      models: { ...campaign.models, [dm]: { ...campaign.models[dm]!, maxOutputTokens: 32000 } },
+    };
+    expect(prepModels(roomy)[dm]!.maxOutputTokens).toBe(32000);
+  });
+});
+
 describe('chooseLocation', () => {
   it('offers the DM seat only places when any clear the threshold', async () => {
     const { hit: chosen, offered } = await choose([
@@ -306,6 +463,31 @@ describe('runPrep', () => {
     expect(written).toContain(`loreChunkIds: [${result.chunkIds.join(', ')}]`);
     expect(written).toContain('## Hook');
     expect(formatPrepSummary(result).join('\n')).toContain(result.locationEntityId);
+  });
+
+  it('shows the DM lore from other entities, not only the location entity’s own chunks', async () => {
+    // A Kanka stub and a DM write-up about one place are separate entities; so is everyone the
+    // PCs are tied to. Filtering to the location entity alone left the DM to invent a cast.
+    const { campaignsDir } = await fixture(0, {
+      'alpharetta.md': ALPHARETTA,
+      'kanka-export/markdown/characters/202-202.md': SELLA_PERSON,
+    });
+    const { model, requests } = choosingModel('unused');
+    const result = await runPrep({
+      campaignsDir,
+      campaign: 'test',
+      session: 1,
+      location: 'Alpharetta',
+      embedder: new PositiveEmbedder(),
+      model,
+    });
+    const prompt = requests
+      .at(-1)!
+      .messages.map((message) => message.content)
+      .join('\n');
+    expect(prompt).toContain('applied crystal engines');
+    // Everything the DM was shown is recorded, so the audit can trace the outline to its lore.
+    expect(result.chunkIds.some((id) => id.includes('202-202'))).toBe(true);
   });
 
   it('lets the DM seat choose among real entities near the premise region', async () => {

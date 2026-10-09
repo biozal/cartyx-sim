@@ -21,7 +21,7 @@ import {
   verifyFindings,
   type PcControlFinding,
 } from './pc-control';
-import type { Persona, Premise } from './persona';
+import { personaLoreQuery, type Persona, type Premise } from './persona';
 import type { PromptBuilder } from './prompts';
 import { TurnRecorder } from './recorder';
 import { cutRepeats, retellsNarration, repeatedSentences } from './repeats';
@@ -585,9 +585,7 @@ export class Director {
     for (const pc of this.config.party) {
       const persona = ownEntry(personas, pc.id);
       if (!persona) continue;
-      const query = [persona.backstory, persona.motivation, persona.ties]
-        .filter((part): part is string => part !== undefined && part !== '')
-        .join(' ');
+      const query = personaLoreQuery(persona);
       if (query === '') continue;
       const used = await this.retrieveAmbient(
         recorder,
