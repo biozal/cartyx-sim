@@ -39,7 +39,7 @@ export interface PrepResult {
 }
 
 /** Bump when the prompts below change in a way that changes what an outline looks like. */
-export const PREP_PROMPT_VERSION = 2;
+export const PREP_PROMPT_VERSION = 3;
 
 /** How many hits a pinned `--location` search reads. */
 const LOCATION_LIMIT = 10;
@@ -73,8 +73,10 @@ const OUTLINE_SYSTEM =
   'with a motive), "## Secrets and Clues", and "## Likely Endings". The session opens at the ' +
   'location given. Use only places and people the lore supports: when the lore names someone ' +
   'who fits a role, use that person, under the exact name the lore gives, rather than inventing ' +
-  'one. Invent a minor named character only when no one in the lore fits. Reply with the outline ' +
-  'only.';
+  'one. Invent a minor named character only when no one in the lore fits. Places work the same ' +
+  'way: name a place only as the lore names it, and describe any other spot plainly (an orchard ' +
+  'row, a side corridor) instead of coining a proper name for it, since during play the DM ' +
+  'looks such names up and finds nothing. Reply with the outline only.';
 
 /** Where a session's outline lives. Zero-padded to three digits, like the session log paths. */
 export function prepPath(campaignsDir: string, campaign: string, session: number): string {
