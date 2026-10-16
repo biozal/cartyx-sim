@@ -184,6 +184,31 @@ an hour. Not needed yet; noted in case a run outgrows the 3090.
 The scorecard comes first because "better" means nothing until we can measure it — and measuring
 today's models also tells us which one is the best starting point.
 
+### Glossary
+
+- **Parameters / weights:** the numbers that make up a model. "9B" = 9 billion.
+- **Token:** a chunk of text the model reads or writes, about ¾ of a word.
+- **Context / context window:** everything the model sees at once — prompt plus reply.
+- **Quantization:** storing weights with fewer bits (8-bit, 4-bit) to save memory.
+- **Fine-tuning:** further training a finished model on your own examples.
+- **LoRA / QLoRA:** fine-tuning a small add-on adapter instead of the whole model; QLoRA keeps the
+  frozen model in 4-bit.
+- **SFT:** training on example prompts with ideal replies.
+- **DPO:** training on pairs of a better and a worse reply.
+- **RAG / retrieval:** looking information up and putting it in the prompt at answer time.
+- **Teacher model:** a stronger model whose good outputs become training examples for a smaller one.
+- **GGUF:** the file format Ollama and LM Studio load models from.
+- **SRD:** the free, openly licensed core of the D&D rules.
+
+### Sources
+
+- Ovadia et al., _Fine-Tuning or Retrieval? Comparing Knowledge Injection in LLMs_ (EMNLP 2024): https://arxiv.org/pdf/2312.05934
+- Gekhman et al., _Does Fine-Tuning LLMs on New Knowledge Encourage Hallucinations?_ (EMNLP 2024): https://aclanthology.org/2024.emnlp-main.444
+- SRD 5.2 announcement: https://www.dndbeyond.com/posts/1949-you-can-now-publish-your-own-creations-using-the
+- Unsloth, Qwen3.5 fine-tuning (VRAM figures, QLoRA advice): https://unsloth.ai/docs/models/qwen3.5/fine-tune
+- Unsloth, Gemma 4 training: https://unsloth.ai/docs/models/gemma-4/train
+- Unsloth, multi-GPU training: https://unsloth.ai/docs/basics/multi-gpu-training-with-unsloth
+
 ---
 
 ## Chapter 2 — Measuring "better" before changing anything (2026-10-15)
@@ -247,28 +272,3 @@ trusted to its memory.
   training examples.
 - **Baseline:** the scores of today's models, measured before any training, that later results are
   compared against.
-
-### Glossary
-
-- **Parameters / weights:** the numbers that make up a model. "9B" = 9 billion.
-- **Token:** a chunk of text the model reads or writes, about ¾ of a word.
-- **Context / context window:** everything the model sees at once — prompt plus reply.
-- **Quantization:** storing weights with fewer bits (8-bit, 4-bit) to save memory.
-- **Fine-tuning:** further training a finished model on your own examples.
-- **LoRA / QLoRA:** fine-tuning a small add-on adapter instead of the whole model; QLoRA keeps the
-  frozen model in 4-bit.
-- **SFT:** training on example prompts with ideal replies.
-- **DPO:** training on pairs of a better and a worse reply.
-- **RAG / retrieval:** looking information up and putting it in the prompt at answer time.
-- **Teacher model:** a stronger model whose good outputs become training examples for a smaller one.
-- **GGUF:** the file format Ollama and LM Studio load models from.
-- **SRD:** the free, openly licensed core of the D&D rules.
-
-### Sources
-
-- Ovadia et al., _Fine-Tuning or Retrieval? Comparing Knowledge Injection in LLMs_ (EMNLP 2024): https://arxiv.org/pdf/2312.05934
-- Gekhman et al., _Does Fine-Tuning LLMs on New Knowledge Encourage Hallucinations?_ (EMNLP 2024): https://aclanthology.org/2024.emnlp-main.444
-- SRD 5.2 announcement: https://www.dndbeyond.com/posts/1949-you-can-now-publish-your-own-creations-using-the
-- Unsloth, Qwen3.5 fine-tuning (VRAM figures, QLoRA advice): https://unsloth.ai/docs/models/qwen3.5/fine-tune
-- Unsloth, Gemma 4 training: https://unsloth.ai/docs/models/gemma-4/train
-- Unsloth, multi-GPU training: https://unsloth.ai/docs/basics/multi-gpu-training-with-unsloth
