@@ -108,6 +108,40 @@ Unlike playing a session, training needs the whole card, so while a training run
 leaves the sim: Ollama stops, and Mira and the checker's fallback move to other machines in the
 campaign config.
 
+### Using every machine we have
+
+One training run can't be spread across several computers in any practical way: the machines would
+spend more time sending numbers to each other over the network than computing. So extra machines
+don't make _one_ run faster. They make the _project_ faster, in three ways:
+
+1. **Making training data.** The slowest part of the project isn't training, it's playing the
+   thousands of turns we train on. Every machine that can serve a model is a seat for the
+   data-generating sessions, and several sessions can run at once.
+2. **Running experiments side by side.** Which starting model, how many passes over the data, how
+   strong an adapter — each is a separate run. Separate machines can try them at the same time.
+3. **Teaching and judging.** The Macs' large memory runs big teacher and judge models well, while
+   the NVIDIA cards train.
+
+| Machine                  | Memory                | Best use                                                                                   |
+| ------------------------ | --------------------- | ------------------------------------------------------------------------------------------ |
+| Ampere — RTX 3090        | 24 GB                 | Main training runs (Qwen3.5-9B, 16-bit LoRA).                                              |
+| Ampere — RTX 4070        | 12 GB                 | Serving a small model while the 3090 trains.                                               |
+| Linus — RTX 5060 Ti      | 16 GB                 | Small experiments (Gemma 4 E4B), and testing the result on the card size we're aiming for. |
+| Windows PC — RTX 5070 Ti | 16 GB                 | A second small-experiment card; same software as the 3090.                                 |
+| MacBook Pro — M5 Max     | 128 GB unified memory | Teacher and judge models; can also train (MLX) when memory matters more than speed.        |
+| Mac Studio — M2 Ultra    | 64 GB unified memory  | Teacher and judge models; data-generation sessions.                                        |
+
+**NVIDIA versus Apple for training.** NVIDIA cards train roughly two to four times faster than Apple
+chips on a model that fits in the card's memory: published figures for LoRA on an 8B model are about
+800–1,500 tokens a second on a 3090 against 250–400 on an M5 Max. Apple's strength is memory — a Mac's
+"unified" memory is shared by processor and graphics, so the M5 Max can hold 128 GB where the 3090
+holds 24 — which lets it train models or prompt lengths that would not fit on a card at all. Apple
+machines train with a different toolkit (MLX instead of Unsloth), so keeping the main runs on the
+NVIDIA cards means one set of training code; the Macs train only if we hit the 3090's memory limit.
+
+**Renting.** For a one-off large run, cloud providers rent an 80 GB data-centre card for a few dollars
+an hour. Not needed yet; noted in case a run outgrows the 3090.
+
 ### Two kinds of training we will use
 
 - **SFT (supervised fine-tuning):** show the model thousands of examples of a prompt and the ideal
