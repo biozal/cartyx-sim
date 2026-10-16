@@ -250,6 +250,56 @@ Findings 1–6 are fixed (`bc334ff..656f4ce`); finding 7 is still open.
 
 The batch had one review; its findings (a leak cut breaking quotes, over-broad `order of battle`/`0 hit points`/bulleted-name matches, titles splitting sentences, exact-only checker name matching, turn-order shapes missed) are fixed in the follow-up commit.
 
+## Eleventh 1-hour run (session 019, 2026-10-10) — prep, personas and ambient lore
+
+Sessions 015–019 are the first played with `sim prep` outlines, the avalon premise, and personas for
+all four PCs. 015–017 were 15-minute runs; 018 and 019 were 60 minutes. Session 019 is the first
+clean 1-hour run: no pauses, and an audit of 0 gaps, 0 inventions and 0 contradictions.
+
+| Measure                         | 015    | 016    | 017   | 018      | 019       |
+| ------------------------------- | ------ | ------ | ----- | -------- | --------- |
+| Target minutes                  | 15     | 15     | 15    | 60       | 60        |
+| Pauses                          | 4      | 0      | 0     | 1 (Kira) | **0**     |
+| Gaps / inventions / contradict. | 0/0/0  | 1/0/0  | 0/0/0 | 0/0/0    | **0/0/0** |
+| Lore entities covered           | 31     | 31     | 38    | 31       | 31        |
+| Words                           | —      | —      | 2431  | 9283     | 9224      |
+| DM share                        | 67–69% | 67–69% | 75%   | 63%      | 72%       |
+
+This answers the session-014 "No lore was used" finding: with the outline written from the opening
+location's write-up and each PC's ties, and lore fed to the DM by party and scene lookups, play draws
+on 31–38 lore entities a session and the DM invents nothing.
+
+What the runs taught us:
+
+- **A context window smaller than the prompt is silent on Ollama.** It drops the front of the prompt,
+  system prompt included, and the seat plays the wrong part (015, Tomas). The client now compares the
+  prompt tokens a server read with the request's size and fails the call with advice to raise
+  `num_ctx`; Tomas runs on a derived `qwen3:14b-8k`.
+- **A failed call that a fallback rescued is now visible:** the director logs a DM-only note naming
+  the target that answered and what failed before it.
+- **Prep named places the lore does not have** ("West Orchard", 016), which the DM then looked up and
+  found nothing for. The outline prompt now asks for lore place names only.
+- **Thinking is the main cause of failed replies.** Replies that spent their whole output budget
+  thinking: Kira's `qwen3.8-27b-mlx` on 2 of 8 turns at 4000 tokens (018, the pause), the DM's
+  `qwen3.6-35b-a3b` on 6 of 56 at 4000 against ~25k-token prompts, Bram's `gemma-4-12b` twice at
+  2000, and the GLM checker on 12 of 37 checks at 8000, reasoning sentence by sentence on a
+  ~1.5k-token prompt. LM Studio's MLX Qwen3.8-27B ignores `reasoning_effort: none`,
+  `chat_template_kwargs` and `/no_think` alike. GLM honours `none` (2 s a check) but then flags NPC
+  reactions as PC control.
+- **Ollama sometimes rejects GLM's own tool call** with HTTP 500 ("incomplete GLM tool call"); a
+  retry succeeded.
+- **The DM sometimes writes the tool's name ahead of its prose** (`[narrate] The morning bell…`,
+  019), which reached the public narration once.
+- **Tomas's share stays at 1–2%.** He gets equal turns; `qwen3:14b` with thinking off writes short
+  lines.
+
+### Fixes after these runs
+
+- `[narrate]` ahead of DM prose is cut like the other meta prefixes, keeping the prose.
+- Seat settings (`campaigns/avalon/campaign.json`, not in git): Kira 6000 tokens, a 420 s timeout and
+  a Gemma 26B fallback; DM 6000; Bram 4000; Mira a Gemma 26B fallback; the checker moved to
+  `qwen3.6-35b-a3b` with GLM as its fallback. None of these has been played yet.
+
 ## Tenth 1-hour run (session 014, 2026-10-07) — the first against real lore
 
 Run on HEAD `20ded41`, the first session with a lore index behind `lookup_lore`. It reached
