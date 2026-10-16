@@ -272,3 +272,88 @@ trusted to its memory.
   training examples.
 - **Baseline:** the scores of today's models, measured before any training, that later results are
   compared against.
+
+---
+
+## Chapter 3 — The rules as data (2026-10-15)
+
+This step turned the 2024 rules into files a model can be shown, and proved nothing was lost on the
+way.
+
+### What we built
+
+- **A pinned copy of the source.** The community conversion we chose is copied into
+  `data/srd-5.2.1/source/` exactly as published at one specific commit. "Pinned" means we name the
+  exact version, so the text can never change underneath us. If the upstream author edits or deletes
+  their repository, nothing here changes.
+- **A build script** (`npm run srd:build`) that turns those 13 large files into **50 area files**:
+  - the basics of play: abilities and d20 tests, actions, social interaction, exploration, combat,
+    damage and healing;
+  - character creation;
+  - each of the 12 classes;
+  - backgrounds and species;
+  - feats;
+  - equipment, in 7 files;
+  - spell-casting rules and spells by level, in 11 files;
+  - the rules glossary and gameplay toolbox;
+  - magic items, as rules and A–Z;
+  - monsters, as rules, four alphabetical files and animals.
+- **Tidier tables.** 331 monster and animal ability-score tables became single lines, such as
+  `STR 8 (−1, save −1) | DEX 15 (+2, save +2) | …`, in place of about 60 lines of HTML each. Another
+  229 tables became ordinary Markdown tables. 19 were kept as HTML because they have merged header
+  cells, such as the casters' "Spell Slots per Spell Level" tables, and flattening those would
+  misalign their columns.
+- **A rules search index**, separate from the Cartyx lore: 2,598 searchable pieces ("chunks"), built
+  in 15.5 seconds on the M5 Max.
+
+What's in it: 12 classes, 4 backgrounds, 9 species, 17 feats, 339 spells (27 of them cantrips), 260
+magic items, 235 monster stat blocks and 95 animals.
+
+### Why it's built this way
+
+**Reproducible from a pinned source.** Anyone can rerun the build and get byte-for-byte the same
+files, and a test in the suite does exactly that on every run. So the claim "our rules text is the
+SRD and nothing else" can be checked, not just trusted. That's also what the Creative Commons licence
+asks: say where the text came from and what you changed. The README in `data/srd-5.2.1/` does both.
+
+**A lossless check.** The build splits 1.9 MB of text. A mistake that silently dropped one paragraph
+would go unnoticed by any person, and a model trained or tested on it would learn a rule with a hole
+in it. So a test counts every word in the source and every word in the output, and fails if any word
+is missing or extra. The only allowed differences are the titles the build adds (such as "Level 2
+Spells"), the headings it removes, and the column headers MOD and SAVE that the one-line stat blocks
+replace. We checked that the test bites: changing one word in one file ("Three illusory duplicates"
+to "Two") made it fail.
+
+The build also refuses to guess. If the source ever gains a section the split doesn't know where to
+put, the build stops with an error naming it, rather than dropping it.
+
+### What an embedding index is
+
+To search the rules by meaning rather than exact words, each chunk of text is turned into an
+**embedding**: a list of 768 numbers that places the text in a "meaning space", where texts about
+similar things sit close together. A question is turned into numbers the same way, and the search
+returns the chunks closest to it. Our first test questions:
+
+| Question                                             | Top result                                                     |
+| ---------------------------------------------------- | -------------------------------------------------------------- |
+| "can I cast two spells with spell slots in one turn" | the rule "One Spell with a Spell Slot per Turn"                |
+| "what does the Grappled condition do"                | the Grappled condition in the Rules Glossary                   |
+| "goblin stat block armor class"                      | how Armor Class reads in a stat block, then the Goblin Warrior |
+
+None of those questions shares an exact phrase with the rule it found. That's the point: when the
+judge (and later the model) needs the rule for what a player just declared, it can find it from the
+player's own words.
+
+### Glossary additions
+
+- **Pinned source:** a dependency fixed to one exact version, so it can't change unnoticed.
+- **Reproducible build:** a process that produces identical output every time from the same input,
+  so anyone can verify the result.
+- **Embedding:** a list of numbers representing a text's meaning; similar texts get similar numbers.
+- **Vector index:** a database of embeddings that finds the texts closest in meaning to a question.
+- **Chunk:** one searchable piece of a document — here, one section under a heading.
+
+### Sources
+
+- SRD 5.2.1: https://www.dndbeyond.com/srd
+- The conversion we pinned: https://github.com/downfallx/dnd-5e-srd-markdown (commit `1b4b99d`)

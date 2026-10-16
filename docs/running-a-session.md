@@ -254,6 +254,14 @@ repository is now at e4f5061. Restore that lore commit and run `sim index` befor
 
 This is deliberate: re-indexing partway through a session would change the world underneath a half-finished story. To recover, check out the commit the message names in your `cartyx-lore` checkout, run `sim index --campaign avalon` to rebuild against it, and then `--resume` as usual.
 
+### Rules index
+
+```bash
+npm run sim -- index --rules --campaign avalon
+```
+
+Builds a separate search index of the SRD 5.2.1 rules in `data/srd-5.2.1/` (stored in `data/.cache/srd-index/`, rebuilt only when those files change), using the campaign's embed seat. It is kept apart from the lore index, so a lore lookup never returns rules text. No session reads it yet; the player scorecard's judge will be its first user. To rebuild the rules files themselves from the vendored source, run `npm run srd:build`.
+
 ### Review a session's lore use
 
 ```bash
