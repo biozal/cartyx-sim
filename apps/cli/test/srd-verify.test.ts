@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { wordCounts, wordDifference } from '../src/srd/verify';
 
 describe('wordCounts', () => {
-  it('counts words and numbers across texts, ignoring tags, case and mod/save', () => {
+  it('counts every word and number across texts, ignoring tags and case', () => {
     const counts = wordCounts(['<td><strong>STR</strong></td> 8 MOD SAVE', 'str save 8']);
-    expect(Object.fromEntries(counts)).toEqual({ str: 2, '8': 2 });
+    expect(Object.fromEntries(counts)).toEqual({ str: 2, '8': 2, mod: 1, save: 2 });
   });
   it('splits on apostrophes of both kinds', () => {
     expect(Object.fromEntries(wordCounts(["it’s it's"]))).toEqual({ it: 2, s: 2 });

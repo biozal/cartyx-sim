@@ -31,6 +31,11 @@ describe('data/srd-5.2.1', () => {
     for (const [word, n] of wordCounts(build.droppedHeadings)) {
       expected.set(word, (expected.get(word) ?? 0) - n);
     }
+    // Each one-line stat block drops its table's three MOD and three SAVE headers and writes
+    // "save" once per ability: six in all.
+    const blocks = build.tables.statBlocks;
+    expected.set('mod', (expected.get('mod') ?? 0) - 3 * blocks);
+    expected.set('save', (expected.get('save') ?? 0) + 3 * blocks);
     const actual = wordCounts(rendered.filter((file) => AREA(file.path)).map((file) => file.text));
     expect(wordDifference(expected, actual)).toEqual({ missing: [], extra: [] });
   });
@@ -42,7 +47,7 @@ describe('data/srd-5.2.1', () => {
       species: 9,
       feats: 17,
       spells: 339,
-      magicItems: 260,
+      magicItems: 259,
       monsters: 235,
       animals: 95,
     });

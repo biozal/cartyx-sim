@@ -1508,7 +1508,7 @@ _Throne._ You gain proficiency and Expertise in your choice of History, Insight,
 
 _Void._ Your soul is drawn from your body and contained in an object in a place of the GM's choice. One or more powerful beings guard the place. While your soul is trapped in this way, your body is inert, ceases aging, and requires no food, air, or water. A _Wish_ spell can't return your soul to your body, but the spell reveals the location of the object that holds your soul. You draw no more cards.
 
-### Avatar of Death
+#### Avatar of Death
 
 _Medium Undead, Neutral Evil_
 
@@ -1523,13 +1523,13 @@ STR 16 (+3, save +3) | DEX 16 (+3, save +3) | CON 16 (+3, save +3) | INT 16 (+3,
 **Languages** All languages known to its summoner
 **CR** None (XP 0; PB equals its summoner's)
 
-## Traits
+##### Traits
 
 <hr>
 
 **_Incorporeal Movement._** The avatar can move through other creatures and objects as if they were Difficult Terrain. It takes 5 (1d10) Force damage if it ends its turn inside an object.
 
-## Actions
+##### Actions
 
 <hr>
 

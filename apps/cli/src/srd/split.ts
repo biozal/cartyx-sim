@@ -249,6 +249,31 @@ function spells(text: string, out: Collector, counts: Record<string, number>): v
   }
 }
 
+/**
+ * The A–Z section promoted so each `####` item becomes `###`. One item (the Deck of Many Things)
+ * is followed by the stat block of the creature it summons: a `####` creature heading whose parts
+ * are `###` (Traits, Actions). Promoting that as-is would put every later item under "Actions", so
+ * the creature stays `####`, under its item, and its parts become `#####`.
+ */
+function itemsAZ(section: Section): string {
+  const lines = shiftHeadings(section.lines, -1);
+  let lastEntry: number | undefined;
+  for (let i = 1; i < section.lines.length; i++) {
+    const heading = headingOf(section.lines[i]!);
+    if (!heading) continue;
+    if (heading.level === 4) {
+      lastEntry = i;
+    } else if (heading.level === 3) {
+      if (lastEntry === undefined) {
+        throw new Error(`magic-items.md: "${heading.title}" comes before any item`);
+      }
+      lines[lastEntry] = section.lines[lastEntry]!;
+      lines[i] = `##### ${heading.title}`;
+    }
+  }
+  return toText(lines);
+}
+
 function magicItems(text: string, out: Collector): void {
   const from = 'magic-items.md';
   const { preamble, sections } = splitSections(text, 2);
@@ -260,7 +285,7 @@ function magicItems(text: string, out: Collector): void {
     path: 'magic-items/rules.md',
     text: grouped(preamble, sections.slice(0, index)),
   });
-  out.files.push({ path: 'magic-items/a-z.md', text: promoted(sections[index]!) });
+  out.files.push({ path: 'magic-items/a-z.md', text: itemsAZ(sections[index]!) });
 }
 
 const MONSTER_RANGES = [

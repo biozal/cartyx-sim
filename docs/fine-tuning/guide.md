@@ -300,13 +300,14 @@ way.
   - monsters, as rules, four alphabetical files and animals.
 - **Tidier tables.** 331 monster and animal ability-score tables became single lines, such as
   `STR 8 (−1, save −1) | DEX 15 (+2, save +2) | …`, in place of about 60 lines of HTML each. Another
-  229 tables became ordinary Markdown tables. 19 were kept as HTML because they have merged header
-  cells, such as the casters' "Spell Slots per Spell Level" tables, and flattening those would
-  misalign their columns.
+  229 tables became ordinary Markdown tables. 19 were kept as HTML. Most have merged cells, such as
+  the casters' "Spell Slots per Spell Level" tables, where flattening would misalign the columns.
+  Five are summoned creatures' ability tables laid out differently from the rest, so the one-line
+  rewrite doesn't recognize them; they read fine as they are.
 - **A rules search index**, separate from the Cartyx lore: 2,598 searchable pieces ("chunks"), built
   in 15.5 seconds on the M5 Max.
 
-What's in it: 12 classes, 4 backgrounds, 9 species, 17 feats, 339 spells (27 of them cantrips), 260
+What's in it: 12 classes, 4 backgrounds, 9 species, 17 feats, 339 spells (27 of them cantrips), 259
 magic items, 235 monster stat blocks and 95 animals.
 
 ### Why it's built this way
@@ -320,9 +321,16 @@ asks: say where the text came from and what you changed. The README in `data/srd
 would go unnoticed by any person, and a model trained or tested on it would learn a rule with a hole
 in it. So a test counts every word in the source and every word in the output, and fails if any word
 is missing or extra. The only allowed differences are the titles the build adds (such as "Level 2
-Spells"), the headings it removes, and the column headers MOD and SAVE that the one-line stat blocks
-replace. We checked that the test bites: changing one word in one file ("Three illusory duplicates"
+Spells"), the headings it removes, and exactly six words per one-line stat block: its three MOD and
+three SAVE column headers go, and the word "save" appears once per ability instead. We checked that the test bites: changing one word in one file ("Three illusory duplicates"
 to "Two") made it fail.
+
+A fresh reviewer then caught a flaw in the upstream text that the word check can't see, because no
+words were lost: one magic item, the Deck of Many Things, is followed by the stat block of the
+creature it summons (the Avatar of Death), with headings one level too high. That placed the 132
+items after it under the creature's "Actions" heading, which matters because each searchable piece
+carries its heading path. The build now keeps that creature inside its item, as it already did for
+spells that summon creatures, and the item count is 259, not 260.
 
 The build also refuses to guess. If the source ever gains a section the split doesn't know where to
 put, the build stops with an error naming it, rather than dropping it.

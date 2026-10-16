@@ -1,13 +1,9 @@
-/** Words the stat-block rewrite legitimately removes (`MOD`, `SAVE` headers) or adds (`save`). */
-export const IGNORED_WORDS: ReadonlySet<string> = new Set(['mod', 'save']);
-
-/** Lowercased word and number counts across `texts`, with HTML tags and ignored words left out. */
+/** Lowercased word and number counts across `texts`, with HTML tags left out. */
 export function wordCounts(texts: readonly string[]): Map<string, number> {
   const counts = new Map<string, number>();
   for (const text of texts) {
     const plain = text.replace(/<[^>]+>/g, ' ').toLowerCase();
     for (const word of plain.match(/[\p{L}\p{N}]+/gu) ?? []) {
-      if (IGNORED_WORDS.has(word)) continue;
       counts.set(word, (counts.get(word) ?? 0) + 1);
     }
   }

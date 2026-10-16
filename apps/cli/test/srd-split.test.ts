@@ -133,8 +133,36 @@ function fixture(): Record<string, string> {
     ].join('\n'),
     'rules-glossary.md': '# Rules Glossary\n\nTerms.\n',
     'gameplay-toolbox.md': '# Gameplay Toolbox\n\nTools.\n',
-    'magic-items.md':
-      '# Magic Items\n\n## Magic Item Rarity\n\nRare.\n\n## Magic Items A–Z\n\n#### Bag of Holding\n\nBig.\n',
+    'magic-items.md': [
+      '# Magic Items',
+      '',
+      '## Magic Item Rarity',
+      '',
+      'Rare.',
+      '',
+      '## Magic Items A–Z',
+      '',
+      '#### Bag of Holding',
+      '',
+      'Big.',
+      '',
+      '#### Deck of Many Things',
+      '',
+      'Cards.',
+      '',
+      '#### Avatar of Death',
+      '',
+      '_Medium Undead_',
+      '',
+      '### Actions',
+      '',
+      'Scythe.',
+      '',
+      '#### Necklace of Adaptation',
+      '',
+      'Neck.',
+      '',
+    ].join('\n'),
     'monsters.md': '# Monsters\n\n## Stat Block Overview\n\nRead it.\n',
     'monsters-A-Z.md': [
       '# Monsters A–Z',
@@ -202,6 +230,13 @@ describe('buildSrd', () => {
     expect(files.get('spells/level-3.md')).toMatch(/## Fireball/);
   });
 
+  it('keeps a stat block inside the magic item that summons it', () => {
+    const files = byPath(buildSrd(fixture()));
+    expect(files.get('magic-items/a-z.md')).toBe(
+      '# Magic Items A–Z\n\n### Bag of Holding\n\nBig.\n\n### Deck of Many Things\n\nCards.\n\n#### Avatar of Death\n\n_Medium Undead_\n\n##### Actions\n\nScythe.\n\n### Necklace of Adaptation\n\nNeck.\n'
+    );
+  });
+
   it('files monsters by letter and records generated and dropped headings', () => {
     const build = buildSrd(fixture());
     const files = byPath(build);
@@ -225,7 +260,7 @@ describe('buildSrd', () => {
       feats: 1,
       spells: 3,
       spellsByLevel: { '0': 1, '2': 1, '3': 1 },
-      magicItems: 1,
+      magicItems: 3,
       monsters: 4,
       animals: 2,
     });

@@ -28,5 +28,5 @@ differ from a fresh build or lose any word of the source.
 
 - 12 classes, 4 backgrounds, 9 species, 17 feats
 - 339 spells (27 cantrips)
-- 260 magic items, 235 monster stat blocks, 95 animals
-- Tables: 331 ability tables rewritten as lines, 229 converted to Markdown, 19 kept as HTML (merged cells)
+- 259 magic items, 235 monster stat blocks, 95 animals
+- Tables: 331 ability tables rewritten as lines, 229 converted to Markdown, 19 kept as HTML (merged cells or an unusual layout)

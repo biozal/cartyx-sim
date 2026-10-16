@@ -63,7 +63,7 @@ function readme(build: SrdBuild): string {
     `- ${c.classes} classes, ${c.backgrounds} backgrounds, ${c.species} species, ${c.feats} feats`,
     `- ${c.spells} spells (${c.spellsByLevel['0'] ?? 0} cantrips)`,
     `- ${c.magicItems} magic items, ${c.monsters} monster stat blocks, ${c.animals} animals`,
-    `- Tables: ${t.statBlocks} ability tables rewritten as lines, ${t.pipeTables} converted to Markdown, ${t.keptHtml} kept as HTML (merged cells)`,
+    `- Tables: ${t.statBlocks} ability tables rewritten as lines, ${t.pipeTables} converted to Markdown, ${t.keptHtml} kept as HTML (merged cells or an unusual layout)`,
     '',
   ].join('\n');
 }
