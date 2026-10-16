@@ -1,0 +1,25 @@
+{
+  "counts": {
+    "classes": 12,
+    "backgrounds": 4,
+    "species": 9,
+    "feats": 17,
+    "spells": 339,
+    "spellsByLevel": {
+      "0": 27,
+      "1": 57,
+      "2": 57,
+      "3": 42,
+      "4": 34,
+      "5": 38,
+      "6": 31,
+      "7": 20,
+      "8": 17,
+      "9": 16
+    },
+    "magicItems": 260,
+    "monsters": 235,
+    "animals": 95
+  },
+  "tables": { "pipeTables": 229, "statBlocks": 331, "keptHtml": 19 }
+}
