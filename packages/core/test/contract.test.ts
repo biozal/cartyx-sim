@@ -121,3 +121,81 @@ describe('idle hand-offs', () => {
     expect(recorder.state.idleHandOffs).toBe(0);
   });
 });
+
+const base = { seq: 1, ts: '2026-10-07T00:00:00.000Z', turnId: 't1' };
+// The real party helper, not a literal: Combatant has required fields a literal would miss.
+const party = [kira];
+
+describe('session_start.personas', () => {
+  it('is optional, so a log written before personas existed still parses', () => {
+    const parsed = SimEvent.safeParse({
+      ...base,
+      visibility: 'public',
+      type: 'session_start',
+      session: 1,
+      loreCommit: 'abc',
+      targetMinutes: 60,
+      party,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('round-trips a persona map keyed by pc id', () => {
+    const parsed = SimEvent.parse({
+      ...base,
+      visibility: 'public',
+      type: 'session_start',
+      session: 1,
+      loreCommit: 'abc',
+      targetMinutes: 60,
+      party,
+      personas: { kira: { motivation: 'Clear her name.', loreEntityIds: ['kanka-1'] } },
+    });
+    expect(parsed).toMatchObject({ personas: { kira: { motivation: 'Clear her name.' } } });
+  });
+});
+
+describe('lore_lookup.trigger', () => {
+  it('is optional, so sessions 001-014 still parse', () => {
+    const parsed = SimEvent.safeParse({
+      ...base,
+      visibility: 'dm',
+      type: 'lore_lookup',
+      query: 'q',
+      hits: [{ chunkId: 'c1', source: 'dm/a.md', score: 0.8 }],
+      used: ['c1'],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('accepts the three triggers and rejects anything else', () => {
+    for (const trigger of ['scene', 'party', 'tool']) {
+      const parsed = SimEvent.safeParse({
+        ...base,
+        visibility: 'dm',
+        type: 'lore_lookup',
+        query: 'q',
+        hits: [],
+        used: [],
+        trigger,
+      });
+      expect(parsed.success).toBe(true);
+    }
+    const bad = SimEvent.safeParse({
+      ...base,
+      visibility: 'dm',
+      type: 'lore_lookup',
+      query: 'q',
+      hits: [],
+      used: [],
+      trigger: 'guess',
+    });
+    expect(bad.success).toBe(false);
+  });
+});
+
+describe('the schema version', () => {
+  it('stays 1: both additions are optional, so no log format broke', () => {
+    expect(EVENT_SCHEMA_VERSION).toBe(1);
+  });
+});

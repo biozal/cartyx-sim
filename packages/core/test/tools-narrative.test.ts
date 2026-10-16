@@ -286,6 +286,12 @@ describe('lookup_lore', () => {
     });
   });
 
+  it('records the lookup as the DM’s own, trigger "tool"', async () => {
+    const harness = toolHarness();
+    await harness.run(lookupLore, { query: 'Sella Vaunt' });
+    expect(harness.recorder.events[0]).toMatchObject({ type: 'lore_lookup', trigger: 'tool' });
+  });
+
   it('logs a gap when nothing is relevant', async () => {
     const harness = toolHarness();
     const result = await harness.run(lookupLore, { query: 'Echor airship defenses' });

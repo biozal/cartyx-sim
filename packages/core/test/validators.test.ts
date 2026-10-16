@@ -263,6 +263,21 @@ describe('validateDmText', () => {
       ).toBe('the blade misses.');
     });
 
+    it('drops a [narrate] tag ahead of the prose, keeping the prose (session 019)', () => {
+      const violation = validateDmText(
+        '[narrate] The morning bell chimes through the crystal spires.\n\nThe banners sway.',
+        { pcNames, mechanicsToolCalled: true }
+      );
+      expect(violation?.strip).toEqual({
+        kept: 'The morning bell chimes through the crystal spires.\n\nThe banners sway.',
+        removed: ['[narrate]'],
+      });
+      expect(
+        validateDmText('**[narrate]** The bell chimes.', { pcNames, mechanicsToolCalled: true })
+          ?.strip?.kept
+      ).toBe('The bell chimes.');
+    });
+
     it.each([
       '"My apologies, traveller," the innkeeper says, bowing low.',
       'She lets me correct the ledger before the reeve arrives.',

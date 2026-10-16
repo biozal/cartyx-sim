@@ -197,6 +197,8 @@ describe('DM player-character control checker', () => {
       'narration',
       'hand_off',
       'turn_end',
+      // The DM's scene_change makes the engine fetch lore for the new location.
+      'lore_lookup',
     ]);
     expect(ofType(sink.events, 'narration')[0]).toMatchObject({ text: 'The runes pulse.' });
     expect(ofType(sink.events, 'validator_flag')[0]).toMatchObject({

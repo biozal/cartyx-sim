@@ -39,6 +39,16 @@ function request(overrides: Partial<ModelRequest> = {}): ModelRequest {
   };
 }
 
+/** About the size of session 015's player request: ~19,500 characters, ~4,300 tokens whole. */
+function bigRequest(): ModelRequest {
+  return request({
+    messages: [
+      { role: 'system', content: 'You are Tomas. '.repeat(1300) },
+      { role: 'user', content: 'Your turn.' },
+    ],
+  });
+}
+
 const servers: FakeOpenAIServer[] = [];
 async function server(...args: Parameters<typeof startFakeOpenAIServer>) {
   const started = await startFakeOpenAIServer(...args);
@@ -133,6 +143,131 @@ describe('OpenAICompatibleModelClient', () => {
       dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
     });
     await expect(client.complete(request())).rejects.toThrow('did not contain a tool call');
+  });
+
+  it('recovers a required tool call that Gemma wrote as text instead of failing', async () => {
+    const fake = await server(() => ({ text: 'narrate{text:<|"|>The lab hums.<|"|>}' }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+    expect(await client.complete(request())).toEqual({
+      text: '',
+      toolCalls: [{ id: 'text-call-1-0', name: 'narrate', args: { text: 'The lab hums.' } }],
+      model: 'm',
+    });
+  });
+
+  it('recovers a text-written call when tool calls are optional, rather than speaking it', async () => {
+    const fake = await server(() => ({ text: 'call:narrate{text:<|"|>The lab hums.<|"|>}' }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+    const response = await client.complete(request({ toolChoice: 'auto' }));
+    expect(response.text).toBe('');
+    expect(response.toolCalls).toEqual([
+      { id: 'text-call-1-0', name: 'narrate', args: { text: 'The lab hums.' } },
+    ]);
+  });
+
+  it('fails a reply whose server read far fewer prompt tokens than were sent, and falls back', async () => {
+    // Session 015: Ollama read 2050 tokens of a ~4300-token prompt and the model played the wrong PC.
+    // A well-formed call, so only the truncation check can explain the fallback.
+    const truncating = await server(() => ({
+      toolCalls: [{ name: 'narrate', arguments: { text: 'Kira steps forward.' } }],
+      promptTokens: 2050,
+    }));
+    const whole = await server(() => ({
+      toolCalls: [{ name: 'narrate', arguments: { text: 'Tomas acts.' } }],
+      promptTokens: 4300,
+    }));
+    const client = new OpenAICompatibleModelClient({
+      dm: {
+        endpoint: { baseURL: truncating.baseURL },
+        model: 'small-context',
+        fallbacks: [{ endpoint: { baseURL: whole.baseURL }, model: 'big-context' }],
+      },
+    });
+    const big = bigRequest();
+    const response = await client.complete(big);
+    expect(response.model).toBe('big-context');
+    expect(truncating.requests).toHaveLength(1);
+  });
+
+  it('names the truncation, not the missing tool call, when every target truncates', async () => {
+    const fake = await server(() => ({ text: 'Kira steps forward.', promptTokens: 2050 }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+    const big = bigRequest();
+    await expect(client.complete(big)).rejects.toThrow(/truncating the prompt.*num_ctx/);
+  });
+
+  it('numbers recovered calls per reply, so two replies never share an id', async () => {
+    const fake = await server(() => ({ text: 'narrate{text:<|"|>Again.<|"|>}' }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+    const first = await client.complete(request());
+    const second = await client.complete(request());
+    expect(first.toolCalls[0]!.id).not.toBe(second.toolCalls[0]!.id);
+  });
+
+  it('says why a reply needed a fallback', async () => {
+    const failing = await server(() => ({ status: 500 }));
+    const working = await server(() => ({
+      toolCalls: [{ name: 'narrate', arguments: { text: 'Fine.' } }],
+    }));
+    const client = new OpenAICompatibleModelClient({
+      dm: {
+        endpoint: { baseURL: failing.baseURL },
+        model: 'primary',
+        fallbacks: [{ endpoint: { baseURL: working.baseURL }, model: 'backup' }],
+      },
+    });
+    const response = await client.complete(request());
+    expect(response.model).toBe('backup');
+    expect(response.failedAttempts).toEqual([expect.stringMatching(/^primary at http.*500/)]);
+  });
+
+  it.each([
+    ['reports no prompt tokens', 0],
+    ['is small enough that framing skews the ratio', undefined],
+  ])('does not call a prompt truncated when the server %s', async (_, promptTokens) => {
+    const fake = await server(() => ({
+      toolCalls: [{ name: 'narrate', arguments: { text: 'Fine.' } }],
+      promptTokens: promptTokens ?? 1,
+    }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+    // The zero case needs a big request to prove it is ignored; the small case a small one.
+    const response = await client.complete(promptTokens === 0 ? bigRequest() : request());
+    expect(response.toolCalls).toHaveLength(1);
+    expect(response.failedAttempts).toBeUndefined();
+  });
+
+  it('adds cached tokens back when a server counts them apart from prompt_tokens', async () => {
+    const fake = await server(() => ({
+      toolCalls: [{ name: 'narrate', arguments: { text: 'Fine.' } }],
+      promptTokens: 300,
+      cachedTokens: 4000,
+    }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+    expect((await client.complete(bigRequest())).toolCalls).toHaveLength(1);
+  });
+
+  it('accepts a big prompt the server read in full', async () => {
+    const fake = await server(() => ({
+      toolCalls: [{ name: 'narrate', arguments: { text: 'Fine.' } }],
+      promptTokens: 4300,
+    }));
+    const client = new OpenAICompatibleModelClient({
+      dm: { endpoint: { baseURL: fake.baseURL }, model: 'm' },
+    });
+    const big = bigRequest();
+    expect((await client.complete(big)).toolCalls).toHaveLength(1);
   });
 
   it('gives malformed tool arguments empty args for the engine to reject', async () => {

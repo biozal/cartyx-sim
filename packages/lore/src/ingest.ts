@@ -25,7 +25,10 @@ export function isIndexable(relativePath: string): boolean {
   return true;
 }
 
-export async function readLoreFiles(repoPath: string): Promise<LoreFile[]> {
+export async function readLoreFiles(
+  repoPath: string,
+  include: (relativePath: string) => boolean = isIndexable
+): Promise<LoreFile[]> {
   const files: LoreFile[] = [];
   const walk = async (dir: string): Promise<void> => {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -37,7 +40,7 @@ export async function readLoreFiles(repoPath: string): Promise<LoreFile[]> {
         await walk(full);
         continue;
       }
-      if (!entry.isFile() || !isIndexable(rel)) continue;
+      if (!entry.isFile() || !include(rel)) continue;
       files.push({ path: rel, text: await readFile(full, 'utf8') });
     }
   };

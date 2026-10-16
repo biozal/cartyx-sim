@@ -1,5 +1,6 @@
 import { Combatant, InitiativeEntry } from '@cartyx-sim/rules';
 import { z } from 'zod';
+import { Persona } from './persona';
 
 export const EMOTIONS = [
   'neutral',
@@ -62,6 +63,12 @@ export const SimEvent = z.discriminatedUnion('type', [
     loreCommit: z.string(),
     targetMinutes: z.number().positive(),
     party: z.array(Combatant).min(1),
+    /**
+     * Who the party are, as opposed to what they can do. Copied in at session start so the log is
+     * self-contained: an audit of session 14 must read the personas session 14 was played with,
+     * not whatever the character files say months later. Optional, so older logs still parse.
+     */
+    personas: z.record(z.string(), Persona).optional(),
   }),
   z.object({
     ...base,
@@ -137,6 +144,13 @@ export const SimEvent = z.discriminatedUnion('type', [
       })
     ),
     used: z.array(z.string()),
+    /**
+     * What caused the lookup: a `scene_change`, the party's own lore ties at session start, or the
+     * DM calling `lookup_lore`. Optional, so sessions 001-014 still parse. Ambient retrieval emits
+     * the same event as a tool call so `sim audit` needs no changes and there is one definition of
+     * "lore was used".
+     */
+    trigger: z.enum(['scene', 'party', 'tool']).optional(),
   }),
   z.object({
     ...base,

@@ -6,3 +6,4 @@ campaigns/
 .cache/
 .vitest/
 coverage/
+data/srd-5.2.1/source/

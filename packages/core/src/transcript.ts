@@ -121,6 +121,11 @@ export function describeEvent(
     case 'combat_end':
       return '[combat] Combat ends';
     case 'lore_lookup':
+      // A party lookup's query is the party's backstory prose. The DM gets one line per PC and
+      // never that prose, so the query stays in the log for the audit but not in the transcript.
+      if (event.trigger === 'party') {
+        return `[lore] party ties: ${event.used.length} relevant result(s)`;
+      }
       return `[lore] "${event.query}": ${event.used.length} relevant result(s)`;
     case 'lore_invention':
       return `[invented] ${event.fact}`;

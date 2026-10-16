@@ -108,6 +108,8 @@ describe('runSession with campaign model seats', () => {
       'narration',
       'hand_off',
       'turn_end',
+      // The DM's scene_change makes the engine fetch lore for the new location.
+      'lore_lookup',
       'dialogue',
       'turn_end',
       'narration',
@@ -513,6 +515,123 @@ describe('runSession with lore', () => {
     expect(
       directorConfig(loaded, { campaignsDir, campaign, session: 1, resume: false }, 'lore-abc')
     ).not.toHaveProperty('loreThreshold');
+  });
+
+  it('passes the premise through and records the personas on session_start', async () => {
+    const { campaign } = await loreFixture({
+      premise: { world: 'Cartyx', region: 'The Atlanta metro area, Georgia.' },
+    });
+    await writeFile(
+      join(campaignsDir, campaign, 'characters', 'kira.json'),
+      JSON.stringify({
+        ...KIRA,
+        hp: 0,
+        persona: { motivation: 'Clear the workshop’s name.', ties: 'Owes Professor Vaunt.' },
+      })
+    );
+    const result = await runSession({
+      campaignsDir,
+      campaign,
+      session: 1,
+      resume: false,
+      embedder: new FakeEmbedder(16),
+    });
+    const events = await readEvents(result.eventsPath);
+    // The log is self-contained: an audit reads the personas this session was played with.
+    expect(events.find((event) => event.type === 'session_start')).toMatchObject({
+      personas: { kira: { motivation: 'Clear the workshop’s name.' } },
+    });
+    // The premise reached the DM seat.
+    const dmPrompt = fake.requests.find((request) => request.model === 'dm-model')!;
+    expect(JSON.stringify(dmPrompt)).toContain('World: Cartyx');
+  });
+
+  it('warns and plays when a lore campaign has no prep outline', async () => {
+    const { campaign } = await loreFixture();
+    const lines: string[] = [];
+    const result = await runSession({
+      campaignsDir,
+      campaign,
+      session: 1,
+      resume: false,
+      embedder: new FakeEmbedder(16),
+      log: (line) => lines.push(line),
+    });
+    // A prep failure must never block a session; the audit shows the difference.
+    expect(lines.join('\n')).toMatch(/no prep outline/i);
+    // The fixture's downed party pauses the session; what matters is that it started and played.
+    expect(result.status).toBe('paused');
+  });
+
+  it('injects an existing prep outline into the DM prompt', async () => {
+    const { campaign } = await loreFixture();
+    await mkdir(join(campaignsDir, campaign, 'prep'), { recursive: true });
+    await writeFile(
+      join(campaignsDir, campaign, 'prep', 'session-001.md'),
+      [
+        '---',
+        'session: 1',
+        'location: Alpharetta',
+        'locationEntityId: file:dm/avalon.md#avalon',
+        '---',
+        '',
+        '## Hook',
+        '',
+        'A prototype went missing from the workshop overnight.',
+      ].join('\n')
+    );
+    const lines: string[] = [];
+    await runSession({
+      campaignsDir,
+      campaign,
+      session: 1,
+      resume: false,
+      embedder: new FakeEmbedder(16),
+      log: (line) => lines.push(line),
+    });
+    expect(lines.join('\n')).not.toMatch(/no prep outline/i);
+    const dmPrompt = fake.requests.find((request) => request.model === 'dm-model')!;
+    expect(JSON.stringify(dmPrompt)).toContain('A prototype went missing');
+  });
+
+  it('refuses to start when an existing prep outline has a malformed header', async () => {
+    const { campaign } = await loreFixture();
+    await mkdir(join(campaignsDir, campaign, 'prep'), { recursive: true });
+    // Missing locationEntityId: a malformed header is an error, malformed prose is not.
+    await writeFile(
+      join(campaignsDir, campaign, 'prep', 'session-001.md'),
+      ['---', 'session: 1', 'location: Alpharetta', '---', '', '## Hook'].join('\n')
+    );
+    await expect(
+      runSession({
+        campaignsDir,
+        campaign,
+        session: 1,
+        resume: false,
+        embedder: new FakeEmbedder(16),
+      })
+    ).rejects.toThrow(/session-001\.md.*front-matter header is malformed.*locationEntityId/s);
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('refuses to start when the prep outline exists but cannot be read', async () => {
+    const { campaign } = await loreFixture();
+    // A directory where the outline belongs reads as EISDIR: not a missing outline, so playing
+    // on without it would hide a real problem behind a warning.
+    await mkdir(join(campaignsDir, campaign, 'prep', 'session-001.md'), { recursive: true });
+    const lines: string[] = [];
+    await expect(
+      runSession({
+        campaignsDir,
+        campaign,
+        session: 1,
+        resume: false,
+        embedder: new FakeEmbedder(16),
+        log: (line) => lines.push(line),
+      })
+    ).rejects.toThrow(/EISDIR/);
+    expect(lines.join('\n')).not.toMatch(/no prep outline/i);
+    expect(fake.requests).toHaveLength(0);
   });
 
   it('closes the lore index even when the session lock is already held', async () => {

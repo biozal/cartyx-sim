@@ -194,9 +194,11 @@ const SENTENCE_LEAK_PATTERNS = [
 // "2. Goblin: 12", "1. Kira Vale (Initiative 18)"). A bulleted name with no number is left alone,
 // since a notice or a roll call lists names that way too.
 // Meta-talk that introduces the corrected narration rather than replacing it: only the prefix
-// goes, so "Correction: the goblin dodges." keeps the goblin dodging.
+// goes, so "Correction: the goblin dodges." keeps the goblin dodging. The same goes for the tool's
+// name in brackets, which a DM answering in text sometimes writes ahead of its prose ("[narrate]
+// The morning bell chimes...", session 019).
 const META_PREFIX =
-  /^[`*_]{0,2}(?:correction|(?:my )?apologies[^.:\n]{0,40}\b(?:error|mistake|confusion|correction)\b[^.:\n]{0,20}|let me correct that|I['’]ll correct that)\s*:\s*/i;
+  /^(?:[`*_]{0,2}(?:correction|(?:my )?apologies[^.:\n]{0,40}\b(?:error|mistake|confusion|correction)\b[^.:\n]{0,20}|let me correct that|I['’]ll correct that)\s*:\s*|[`*_]{0,2}\[narrate\][`*_]{0,2}\s*)/i;
 
 const LINE_LEAK_PATTERNS = [/^\s*\*\*Current Status:?\*\*\s*$/i, /^\s*Current Status:?\s*$/i];
 const NUMBERED_ITEM = /^\s*\d{1,2}[.)]\s+/;

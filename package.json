@@ -16,7 +16,8 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p packages/rules/tsconfig.json && tsc -p packages/core/tsconfig.json && tsc -p packages/script/tsconfig.json && tsc -p packages/lore/tsconfig.json",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "sim": "tsx apps/cli/src/main.ts"
+    "sim": "tsx apps/cli/src/main.ts",
+    "srd:build": "tsx apps/cli/src/srd/build.ts"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",

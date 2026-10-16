@@ -1,6 +1,6 @@
 # Running a session with local models
 
-This guide covers what Plans 2A and 2B deliver: checking your model servers with `sim bench`, playing a session with `sim run`, indexing a `cartyx-lore` checkout with `sim index` so the DM can look real answers up instead of inventing them, and reviewing a finished session with `sim audit`. Generated characters and session prep (Plan 2C) and voices, art, and playback (Plans 3–4) come later.
+This guide covers what Plans 2A and 2B deliver: checking your model servers with `sim bench`, playing a session with `sim run`, indexing a `cartyx-lore` checkout with `sim index` so the DM can look real answers up instead of inventing them, reviewing a finished session with `sim audit`, and seeding a session in a real place with a premise, personas, and `sim prep`. Generated characters and the rest of Plan 2C and voices, art, and playback (Plans 3–4) come later.
 
 ## 1. Install
 
@@ -61,7 +61,9 @@ Seat options: `temperature`, `maxOutputTokens`, `timeoutMs` (default 120000), `t
 
 Give a seat `fallbacks` even when its primary server is otherwise reachable: a seat that keeps _answering_ without ever calling a tool exhausts its retries against the same stuck target just as surely as one that times out, and pauses the session either way. In one 1-hour run, a player seat answered four times running with no tool call and paused the session at 49 minutes; a fallback to a different model on a second endpoint means a repeat of that failure is retried somewhere that can actually respond, instead of against the same seat.
 
-**Thinking models need room.** `maxOutputTokens` counts the model's thinking as well as its reply, and current Qwen, Gemma, and GLM models think for hundreds of tokens before calling a tool. A seat whose limit is too small stops mid-thought with no tool call, and the session pauses on that seat. Starting points that work: `2000` for players and `4000` for the DM. LM Studio does not enforce required tool calls, and Qwen often narrates in plain text after a tool result, so give a DM seat on LM Studio `"toolChoice": "auto"`. Keep players on `required`, so a garbled tool call is retried rather than spoken. `sim bench` uses a simple dice-roll trial, which does not show this; a short `sim run` does.
+**Thinking models need room.** `maxOutputTokens` counts the model's thinking as well as its reply, and current Qwen, Gemma, and GLM models think for hundreds of tokens before calling a tool. A seat whose limit is too small stops mid-thought with no tool call, and the session pauses on that seat. Starting points that work: `2000` for players and `4000` for the DM. A heavy thinker needs more: Qwen3.8-27B used 1,800–3,600 tokens on ordinary player turns and ran out at `4000` on about one turn in four, so give such a seat `6000`, a `timeoutMs` long enough to generate that many tokens, and a fallback that thinks less. LM Studio does not enforce required tool calls, and Qwen often narrates in plain text after a tool result, so give a DM seat on LM Studio `"toolChoice": "auto"`. Keep players on `required`, so a reply with no tool call is retried rather than spoken. A call a Gemma model writes as text in its own syntax (`speak{text:<|"|>…<|"|>}`, which LM Studio sometimes passes through unparsed) is recovered as a real tool call, but only when the whole reply is such calls to tools that were offered. `sim bench` uses a simple dice-roll trial, which does not show any of this; a short `sim run` does.
+
+**Context windows must fit the prompt.** Ollama silently truncates a prompt longer than the model's loaded context, dropping the front, system prompt included, so the model plays the wrong part. Its OpenAI endpoint cannot raise the context per request; create a variant with a bigger `num_ctx` (for example `POST /api/create` with `{"model": "qwen3:14b-8k", "from": "qwen3:14b", "parameters": {"num_ctx": 8192}}`) and seat that, or set `OLLAMA_CONTEXT_LENGTH` on the server for every model. Player prompts run about 4,300 tokens with a premise and personas. The client catches the symptom: when a server reports far fewer prompt tokens than the request's size implies (under 0.15 per character on a request over 8,000 characters), that target fails with a message naming the truncation, and the seat moves to its fallback. Cached tokens are counted as part of the prompt, and a server that reports no prompt tokens is not checked. Whenever a reply needed a retry or a fallback, the log gets a DM-only `ooc_note` (`Seat <seat> answered on <model> after: …`), so a seat quietly running on its fallback shows up in the session log.
 
 Each party member is a file in `characters/` (for example `characters/kira.json`). Every party member needs a seat under `seats.players`, and every seat there needs a matching character. The example characters are placeholders until `sim chargen` arrives in Plan 2C.
 
@@ -134,7 +136,7 @@ Add it under `seats` in `campaign.json`:
 }
 ```
 
-The example leaves thinking on. Sessions are generated offline and the session clock counts spoken words, not wall time, so a slower check only makes the run take longer, and thinking checkers flag more precisely. Thinking counts against `maxOutputTokens`, so give the checker room. `timeoutMs` applies to the checker and to each fallback, so with a 5-minute timeout a hung checker can hold up one narration for up to 10 minutes; three failures in a row disable checking for the rest of the run. To trade precision for speed, add `"reasoningEffort": "none"` to turn thinking off; any seat accepts `reasoningEffort` (`none`, `low`, `medium`, or `high`). `sim bench` checks the checker seat's reachability and speed but runs no tool-call trials for it, so its tool-calls column shows `0/0`.
+The example leaves thinking on. Sessions are generated offline and the session clock counts spoken words, not wall time, so a slower check only makes the run take longer, and thinking checkers flag more precisely. Thinking counts against `maxOutputTokens`, so give the checker room. `timeoutMs` applies to the checker and to each fallback, so with a 5-minute timeout a hung checker can hold up one narration for up to 10 minutes; three failures in a row disable checking for the rest of the run. To trade precision for speed, add `"reasoningEffort": "none"` to turn thinking off; any seat accepts `reasoningEffort` (`none`, `low`, `medium`, or `high`). Not every server and model honours it: Ollama's `qwen3` does, but LM Studio's MLX Qwen3.8-27B thinks just as long with `none`, `chat_template_kwargs`, or `/no_think`, so check a seat's thinking tokens before relying on it. `sim bench` checks the checker seat's reachability and speed but runs no tool-call trials for it, so its tool-calls column shows `0/0`.
 
 ## 8. Make a script
 
@@ -252,6 +254,14 @@ repository is now at e4f5061. Restore that lore commit and run `sim index` befor
 
 This is deliberate: re-indexing partway through a session would change the world underneath a half-finished story. To recover, check out the commit the message names in your `cartyx-lore` checkout, run `sim index --campaign avalon` to rebuild against it, and then `--resume` as usual.
 
+### Rules index
+
+```bash
+npm run sim -- index --rules --campaign avalon
+```
+
+Builds a separate search index of the SRD 5.2.1 rules in `data/srd-5.2.1/` (stored in `data/.cache/srd-index/`, rebuilt only when those files change), using the campaign's embed seat. It is kept apart from the lore index, so a lore lookup never returns rules text. No session reads it yet; the player scorecard's judge will be its first user. To rebuild the rules files themselves from the vendored source, run `npm run srd:build`.
+
 ### Review a session's lore use
 
 ```bash
@@ -266,3 +276,85 @@ Reads that session's `events.jsonl` and writes `audit.md` (readable) and `audit.
 - **Possible contradictions** — narrations that followed a lore lookup, checked against the retrieved chunks by the campaign's `checker` seat for a stated fact the lore directly contradicts (never for detail the lore simply doesn't mention). This section only runs when the campaign has a `checker` seat and a lore index exists; otherwise, or with `--no-model`, it is skipped and the report says which condition was missing. `sim audit --no-model` skips just this section — the first three still run from the event log alone, with no lore index or model call needed, so an audit still works long after the lore has moved on.
 
 The audit does not yet cover backstory hooks or "prepped items never reached" — those need PC backstories and `sim prep`, both Plan 2C.
+
+## 10. Seed a session in the world: premise, personas, and prep
+
+Session 014 played against a full lore index and used none of it: nothing told the DM where the story was. Three optional pieces fix that. A campaign with none of them plays exactly as before.
+
+### Write a premise
+
+Add a `premise` to `campaign.json`. Every field is optional:
+
+```json
+{
+  "premise": {
+    "world": "Cartyx, a modern Georgia where magic is real but quiet.",
+    "region": "Alpharetta",
+    "party": "Four first-years at Avalon Academy, assigned to the same dorm.",
+    "tone": "Wry and warm, with real stakes."
+  }
+}
+```
+
+The premise sits at the top of the DM's system prompt. `region` also matters to `sim prep`: it anchors the search for an opening location when you don't name one.
+
+### Write personas
+
+A character file may carry a `persona` next to its stats:
+
+```json
+{
+  "id": "kira",
+  "name": "Kira Vale",
+  "persona": {
+    "backstory": "Raised above her family's shop in Alpharetta, she found a sealed ledger in the cellar.",
+    "motivation": "Learn who sealed the ledger and why.",
+    "personality": "Dry, curious, never says what she is afraid of.",
+    "ties": "Her aunt keeps the shop; she owes the Avalon librarian a favor.",
+    "loreEntityIds": ["kanka-2418574"]
+  }
+}
+```
+
+All fields are optional. Who sees what:
+
+- **Each player** sees only its own persona, in full.
+- **The DM** sees one line per party member (motivation and ties), enough to hook a character without being handed every secret.
+- **The DM's transcript** never carries the backstory. Each party lookup appears there only as "party ties: N relevant result(s)".
+
+**`loreEntityIds` do not drive the search.** At session start the engine queries the lore index once per party member, with that character's own persona prose (their `backstory`, `motivation`, and `ties`, joined), so write those fields in the lore's own vocabulary: a place or person the corpus names is far likelier to be found. An id in `loreEntityIds` does one narrower thing: if that character's search already surfaced that entity, its hit is kept even when its score is below `loreThreshold`. A character with ids but no prose gets no lookup, so the ids do nothing. It cannot pull in an entity the search did not return. It is a way to say "this match matters", not a way to name a document.
+
+**Finding an id.** A Kanka entity's id is `kanka-<number>`, where the number is the one in its export filename: `kanka-export/markdown/characters/2418574-2418574.md` is `kanka-2418574`. Look the file up in your `cartyx-lore` checkout (the Kanka wiki URL for the entity usually carries the same number, but verify against the export). An entity the index could not tie to a Kanka file, such as one listed as ambiguous by `sim index`, gets a path-based id of the form `file:<source path>#<heading path>`; that is only usable if you can reproduce it exactly, so prefer entities with a `kanka-` id.
+
+### Run `sim prep`
+
+```bash
+npm run sim -- prep --campaign avalon --session 15 --location "Alpharetta"
+npm run sim -- prep --campaign avalon --session 15
+```
+
+Writes `campaigns/avalon/prep/session-015.md`: a markdown outline (hook, scenes, NPCs with motives, secrets and clues, likely endings) behind a front-matter header with five fields: `session`, `location`, `locationEntityId`, `loreChunkIds` and `generatedAt`. Only `location` and `locationEntityId` are required by `sim run`. It needs a `lorePath` in `campaign.json`, and like `sim run` it builds or refreshes the lore index first.
+
+The DM writes the outline from two kinds of lore: up to eight chunks about the opening location (its own, then the best of what a search on its name finds, such as the sections of a DM write-up about the same place), and up to five entities per PC, found with the same query and ranking as the session's party lookups (that PC's persona prose, its `loreEntityIds` promoted), with the tied entities kept first so the cap never cuts them. Every chunk shown is listed in `loreChunkIds`. The outline call raises the DM seat's output limit to at least 16000 tokens, since an outline is much longer than a turn; the session itself plays at the configured limit.
+
+- **Places come first.** Whichever way the location is picked, prep considers only entities of type `location` when any clear `loreThreshold`, so a session does not open "at" a character, faction or document. Only when no location clears it does prep fall back to every type (a DM write-up in `dm/` that names no Kanka entity is typed `document`).
+- **With `--location "<name>"`:** the opening is the lore entity with that name, a location before any other type. An exact name is honoured even when only a non-location has it, and prep says what type it opened at. If none is named exactly, it opens at the best-scoring location (or best match of any type, if no location cleared the threshold) and says so.
+- **Without `--location`:** the engine searches for entities near `premise.region` (falling back to `premise.world`, then the campaign name), and the DM seat picks one of those candidates by name. If two candidates share a name, the name means the better-scoring one. If the seat names none of them, the best-scoring candidate is used.
+- **If nothing clears `loreThreshold`, it refuses and writes nothing.** That is deliberate: prep will not invent an opening location. Pass `--location` with a place the lore describes, or lower `loreThreshold` (see §9).
+- **If the outline already exists, it refuses** unless you pass `--force`.
+
+The outline is plain markdown; edit it freely, but keep the header's `location` and `locationEntityId` lines.
+
+### Play with it
+
+```bash
+npm run sim -- run --campaign avalon --session 15 --target-minutes 15
+```
+
+`sim run` puts the premise, personas, and outline in front of the DM. A session plays without prep: if no outline exists for that session number, `sim run` warns and plays on. If an outline exists but its header is malformed (it needs both `location` and `locationEntityId`), `sim run` refuses to start, and `--resume` is blocked the same way, until you fix the header or re-run `sim prep --force`. An outline that exists but cannot be read (a permissions error, or a directory at that path) also stops `sim run` with the error, rather than playing on without it. The outline is only read, and the missing-file warning only given, for campaigns with a `lorePath`.
+
+### Ambient lore
+
+The DM no longer has to ask. The engine retrieves lore on its own at session start (from the party's personas) and on every scene change (from the new location), and records each as a `lore_lookup` event with a `trigger`: `party`, `scene`, or `tool` for the DM's own `lookup_lore` calls. `sim audit` counts all three, so gaps and coverage include ambient lookups. Read coverage and scenes tied to lore, not the lookup count: ambient retrieval raises the count by itself.
+
+At session start each party member with persona prose gets their own `party` lookup, and the DM sees their hits combined, each chunk once. The hits stay in the DM's prompt until the next ambient lookup replaces them. A lore outage degrades to no ambient lore after the usual retries; it never pauses the session. Each skipped lookup leaves a DM-only note in the log (`Ambient lore lookup (party) skipped: the lore search failed (…)`), so "the lore has nothing" (a lookup with no hits) and "the lookup never ran" (the note) read differently. The note never appears in any prompt. If ambient prose crowds the prompt, or ambient queries report gaps for lore that exists, lower `loreThreshold` rather than editing the default.

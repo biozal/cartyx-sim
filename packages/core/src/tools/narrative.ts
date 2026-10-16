@@ -112,6 +112,51 @@ export const sceneChange = defineTool({
   },
 });
 
+/**
+ * The one ranking used by both `lookup_lore` and the director's ambient retrieval: sort, collapse
+ * duplicates of one entity (the Kanka stub and the dm writeup), keep what clears the threshold.
+ * Shared rather than copied so "lore was used" means the same thing however the lookup started.
+ */
+export function rankLoreHits(
+  hits: readonly LoreHit[],
+  loreThreshold: number,
+  /**
+   * Entity ids an author tied a character to. A hit on one of these is kept whatever it scored:
+   * a stated tie is intent, and intent outranks a similarity cutoff. Empty for `lookup_lore`,
+   * which has no authored ties to honour.
+   */
+  promote: ReadonlySet<string> = new Set()
+): { ranked: LoreHit[]; used: LoreHit[] } {
+  const ranked = [...hits].sort((a, b) => b.score - a.score);
+  const bestByEntity = new Map<string, LoreHit>();
+  for (const hit of ranked) {
+    if (!bestByEntity.has(hit.entityId)) bestByEntity.set(hit.entityId, hit);
+  }
+  const used = [...bestByEntity.values()]
+    .filter((hit) => hit.score >= loreThreshold || promote.has(hit.entityId))
+    .slice(0, LORE_RESULT_LIMIT);
+  return { ranked, used };
+}
+
+/** The DM-facing rendering of lore hits, identical whoever asked for them. */
+export function renderLoreHits(used: readonly LoreHit[]): string {
+  return used
+    .map((hit) => `[${hit.chunkId}] ${hit.title} (${hit.source})\n${hit.text}`)
+    .join('\n\n');
+}
+
+/** Every candidate, logged so the audit can see what was suppressed. */
+export function loreHitPayload(ranked: readonly LoreHit[]) {
+  return ranked.map(({ chunkId, source, score, entityId, entityName, entityType }) => ({
+    chunkId,
+    source,
+    score,
+    entityId,
+    entityName,
+    entityType,
+  }));
+}
+
 export const lookupLore = defineTool({
   name: 'lookup_lore',
   description:
@@ -121,29 +166,16 @@ export const lookupLore = defineTool({
     // Ask for more than the result limit: duplicates of one entity (the Kanka stub and the dm
     // writeup) collapse below, and the remaining slots should still be filled with other entities.
     const hits = await lore.search(args.query, LORE_RESULT_LIMIT * 4);
-    const ranked = [...hits].sort((a, b) => b.score - a.score);
-    const bestByEntity = new Map<string, LoreHit>();
-    for (const hit of ranked) {
-      if (!bestByEntity.has(hit.entityId)) bestByEntity.set(hit.entityId, hit);
-    }
-    const used = [...bestByEntity.values()]
-      .filter((hit) => hit.score >= loreThreshold)
-      .slice(0, LORE_RESULT_LIMIT);
+    const { ranked, used } = rankLoreHits(hits, loreThreshold);
     const usedIds = new Set(used.map((hit) => hit.chunkId));
     recorder.emit({
       type: 'lore_lookup',
       visibility: 'dm',
       query: args.query,
+      trigger: 'tool',
       // Every candidate is logged, collapsed ones included, so the audit can see what was
       // suppressed; `used` lists only what the DM was actually shown.
-      hits: ranked.map(({ chunkId, source, score, entityId, entityName, entityType }) => ({
-        chunkId,
-        source,
-        score,
-        entityId,
-        entityName,
-        entityType,
-      })),
+      hits: loreHitPayload(ranked),
       used: [...usedIds],
     });
     if (used.length === 0) {
@@ -152,11 +184,7 @@ export const lookupLore = defineTool({
           'No lore found. If the story needs this detail, invent something consistent with the setting and call record_invention.',
       };
     }
-    return {
-      result: used
-        .map((hit) => `[${hit.chunkId}] ${hit.title} (${hit.source})\n${hit.text}`)
-        .join('\n\n'),
-    };
+    return { result: renderLoreHits(used) };
   },
 });
 

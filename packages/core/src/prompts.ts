@@ -1,12 +1,27 @@
 import type { Combatant, DeathSaves } from '@cartyx-sim/rules';
 import type { ChatMessage } from './model';
-import type { GameState, NpcRecord } from './state';
+import {
+  renderPersona,
+  renderPersonaLine,
+  renderPremise,
+  type Persona,
+  type Premise,
+} from './persona';
+import { ownEntry, type GameState, type NpcRecord } from './state';
 import type { PlayerView } from './view';
 
 export interface PromptInput {
   state: GameState;
   transcript: string;
   instruction: string;
+  /** The campaign's standing premise, if it has one. */
+  premise?: Premise;
+  /** One persona per party member id. The DM sees a one-line summary of each, never the prose. */
+  personas?: Record<string, Persona>;
+  /** The session outline from `sim prep`, appended to the system message for this session. */
+  prepOutline?: string;
+  /** Lore the engine retrieved on the DM's behalf for the current scene or party. */
+  ambientLore?: string;
 }
 
 export interface PlayerPromptInput {
@@ -14,6 +29,8 @@ export interface PlayerPromptInput {
   view: PlayerView;
   transcript: string;
   instruction: string;
+  /** This player's own persona. A player never receives another player's. */
+  persona?: Persona;
 }
 
 export interface PcControlCheckInput {
@@ -99,17 +116,32 @@ function describeNpc(npc: NpcRecord): string {
 }
 
 export const basicPrompts: PromptBuilder = {
-  dm({ state, transcript, instruction }) {
+  dm({ state, transcript, instruction, premise, personas, prepOutline, ambientLore }) {
     const party = state.partyIds
       .map((id) => state.combatants[id])
       .filter((combatant) => combatant !== undefined)
-      .map(describeCombatant);
+      .map((combatant) => {
+        const line = describeCombatant(combatant);
+        // `ownEntry`, not bracket access: ids come from config and must never reach a plain read.
+        const persona = personas ? ownEntry(personas, combatant.id) : undefined;
+        const motive = renderPersonaLine(combatant.name, persona);
+        // renderPersonaLine returns "- <name>" when there is nothing to add; skip that case.
+        return motive === `- ${combatant.name}` ? line : `${line}\n  ${motive.slice(2)}`;
+      });
     const others = Object.values(state.combatants)
       .filter((combatant) => combatant.kind !== 'pc')
       .map(describeCombatant);
     const npcs = Object.values(state.npcs).map(describeNpc);
+    const world = renderPremise(premise);
+    const outline = prepOutline ?? '';
     return [
-      { role: 'system', content: DM_SYSTEM },
+      {
+        role: 'system',
+        // Premise first (what world this is), then the rules, then this session's outline. The
+        // premise leads because the model has to know what world it is in before it is told how
+        // dice work: session 014 ran with no premise at all and invented a setting from nothing.
+        content: [world, DM_SYSTEM, outline].filter((part) => part !== '').join('\n\n'),
+      },
       {
         role: 'user',
         content: [
@@ -117,6 +149,7 @@ export const basicPrompts: PromptBuilder = {
           `Other combatants:\n${others.join('\n') || '- none'}`,
           `NPCs:\n${npcs.join('\n') || '- none'}`,
           `Scene: ${state.scene?.location ?? 'not set'}`,
+          ambientLore ? `Lore for this scene:\n${ambientLore}` : '',
           // Said in the moment as well as in the system rules, since by the time it matters the
           // system message is far up a long prompt.
           state.fightsSoFar > 0
@@ -124,21 +157,25 @@ export const basicPrompts: PromptBuilder = {
             : 'This session has not had its fight yet. It has room for one.',
           `Recent events:\n${transcript || '(the session is just starting)'}`,
           instruction,
-        ].join('\n\n'),
+        ]
+          .filter((part) => part !== '')
+          .join('\n\n'),
       },
     ];
   },
-  player({ view, transcript, instruction }) {
+  player({ view, transcript, instruction, persona }) {
     const allies = view.allies.map((ally) => {
       const conditions = ally.conditions.length > 0 ? `, ${ally.conditions.join(', ')}` : '';
       return `- ${ally.name} (id: ${ally.id}) ${describeHealth(ally)}${conditions}`;
     });
     const others = view.others.map((other) => `- ${other.name} (id: ${other.id}): ${other.status}`);
+    const who = renderPersona(persona);
     return [
       {
         role: 'system',
         content: [
           `You are playing ${view.pc.name} (id: ${view.pc.id}) in a Dungeons & Dragons 5e session.`,
+          ...(who === '' ? [] : [who]),
           'Stay in character. Use speak for dialogue and act to declare what you attempt; use pass if your character does nothing.',
           'Only ever control your own character, and never describe the outcome of your actions: the DM decides what happens.',
           'Use fresh wording: do not reuse phrases or lines you have already said this session.',

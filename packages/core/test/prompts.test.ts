@@ -252,3 +252,116 @@ describe('basicPrompts.player in combat', () => {
     expect(system!.content).not.toContain('Say one short line in character');
   });
 });
+
+describe('dm prompt premise', () => {
+  it('puts the world before the mechanical rules, because a model needs to know where it is first', () => {
+    const { state } = startedState();
+    const [system] = basicPrompts.dm({
+      state,
+      transcript: '',
+      instruction: 'Open the scene.',
+      premise: { world: 'Cartyx, a fantasy Earth.', region: 'Atlanta metro.' },
+    });
+    const content = system!.content;
+    expect(content).toContain('World: Cartyx, a fantasy Earth.');
+    expect(content).toContain('Region: Atlanta metro.');
+    // The premise must precede the dice rules, not trail them.
+    expect(content.indexOf('World: Cartyx')).toBeLessThan(content.indexOf('All dice'));
+  });
+
+  it('is unchanged when a campaign has no premise', () => {
+    const { state } = startedState();
+    const without = basicPrompts.dm({ state, transcript: '', instruction: 'Go.' })[0]!.content;
+    expect(without).not.toContain('World:');
+    expect(without).toContain('You are the Dungeon Master');
+  });
+});
+
+describe('dm prompt outline and ambient lore', () => {
+  it('puts the session outline after the rules in the system message', () => {
+    const { state } = startedState();
+    const content = basicPrompts.dm({
+      state,
+      transcript: '',
+      instruction: 'Go.',
+      premise: { world: 'Cartyx, a fantasy Earth.' },
+      prepOutline: 'Outline: the heist at the academy.',
+    })[0]!.content;
+    expect(content.indexOf('World: Cartyx')).toBeLessThan(content.indexOf('All dice'));
+    expect(content.indexOf('All dice')).toBeLessThan(content.indexOf('Outline: the heist'));
+  });
+
+  it('shows ambient lore beside the scene, and nothing when there is none', () => {
+    const { state } = startedState();
+    const withLore = basicPrompts.dm({
+      state,
+      transcript: '',
+      instruction: 'Go.',
+      ambientLore: '[avalon#sella-vaunt] Professor Sella Vaunt',
+    })[1]!.content;
+    expect(withLore).toContain('Lore for this scene:\n[avalon#sella-vaunt] Professor Sella Vaunt');
+    expect(withLore.indexOf('Scene:')).toBeLessThan(withLore.indexOf('Lore for this scene:'));
+    const without = basicPrompts.dm({
+      state,
+      transcript: '',
+      instruction: 'Go.',
+      ambientLore: '',
+    })[1]!.content;
+    expect(without).not.toContain('Lore for this scene:');
+    // No blank section is left behind where the lore would have been.
+    expect(without).not.toContain('\n\n\n\n');
+  });
+});
+
+describe('personas in prompts', () => {
+  const personas = {
+    kira: {
+      motivation: 'Clear the shop’s name.',
+      ties: 'Owes Professor Vaunt.',
+      backstory: 'Alpharetta born.',
+    },
+    tomas: { motivation: 'Find his brother.', backstory: 'A long secret.' },
+  };
+
+  it('gives the DM one line per PC, not the full blocks', () => {
+    const { state } = startedState();
+    const user = basicPrompts.dm({ state, transcript: '', instruction: 'Go.', personas })[1]!
+      .content;
+    expect(user).toContain('Clear the shop’s name.');
+    expect(user).toContain('Owes Professor Vaunt.');
+    // The DM gets motives and ties, never the backstory prose.
+    expect(user).not.toContain('Alpharetta born.');
+    expect(user).not.toContain('A long secret.');
+  });
+
+  it('gives a player their own persona in full', () => {
+    const { state } = startedState();
+    const [system] = basicPrompts.player({
+      view: playerView(state, 'kira'),
+      transcript: '',
+      instruction: 'Say something.',
+      persona: personas.kira,
+    });
+    expect(system!.content).toContain('Alpharetta born.');
+    expect(system!.content).toContain('Clear the shop’s name.');
+  });
+
+  it('never shows one player another player’s persona', () => {
+    const { state } = startedState();
+    const messages = basicPrompts.player({
+      view: playerView(state, 'kira'),
+      transcript: '',
+      instruction: 'Go.',
+      persona: personas.kira,
+    });
+    const all = messages.map((message) => message.content).join('\n');
+    expect(all).not.toContain('Find his brother.');
+    expect(all).not.toContain('A long secret.');
+  });
+
+  it('is unchanged when no personas are given', () => {
+    const { state } = startedState();
+    const user = basicPrompts.dm({ state, transcript: '', instruction: 'Go.' })[1]!.content;
+    expect(user).toContain('Party:');
+  });
+});

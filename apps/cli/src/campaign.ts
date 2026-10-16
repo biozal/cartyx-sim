@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve as resolvePath } from 'node:path';
-import { ownEntry } from '@cartyx-sim/core';
+import { ownEntry, Persona, Premise } from '@cartyx-sim/core';
 import { Endpoint, type SeatConfigInput } from '@cartyx-sim/models';
 import { Combatant } from '@cartyx-sim/rules';
 import { z } from 'zod';
@@ -29,6 +29,8 @@ export const CampaignFile = z.object({
   loreCommit: z.string().min(1).default('unversioned'),
   /** Path to the cartyx-lore checkout, absolute or relative to the campaign directory. */
   lorePath: z.string().min(1).optional(),
+  /** What world this campaign is set in. Injected at the top of the DM system prompt. */
+  premise: Premise.optional(),
   /**
    * Minimum lore search score the DM is shown, overriding the engine's calibrated default
    * (`DEFAULT_LORE_THRESHOLD`). Scores are cosine similarities in [0, 1]. A campaign on a
@@ -72,6 +74,9 @@ export interface Campaign {
   /** Overrides the engine's default lore relevance threshold, when the campaign sets one. */
   loreThreshold?: number;
   party: Combatant[];
+  premise?: Premise;
+  /** Personas by party member id, for the prompts and for `session_start`. */
+  personas?: Record<string, Persona>;
   /** Seat ids for the director. */
   seats: { dm: string; players: Record<string, string>; checker?: string };
   /** Model configuration per seat id, for the model client and `sim bench`. */
@@ -80,7 +85,7 @@ export interface Campaign {
   scriptSeat?: string;
 }
 
-function isNotFound(error: unknown): boolean {
+export function isNotFound(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
@@ -99,7 +104,9 @@ async function readJson(path: string, missing: string): Promise<unknown> {
   }
 }
 
-async function loadParty(dir: string): Promise<Combatant[]> {
+async function loadParty(
+  dir: string
+): Promise<{ party: Combatant[]; personas: Record<string, Persona> }> {
   const charactersDir = join(dir, 'characters');
   let files: string[];
   try {
@@ -112,9 +119,15 @@ async function loadParty(dir: string): Promise<Combatant[]> {
     throw new Error(`${charactersDir}: no character files. Add one <id>.json per party member.`);
   }
   const party: Combatant[] = [];
+  // Entries rather than `personas[id] = ...`, for the same "__proto__" reason as `playerSeats` below.
+  const personas: [string, Persona][] = [];
   for (const file of files) {
     const path = join(charactersDir, file);
-    const parsed = Combatant.safeParse(await readJson(path, `${path} is missing`));
+    const raw = await readJson(path, `${path} is missing`);
+    // Split persona off before Combatant.parse: Combatant is mechanical and shared with monsters,
+    // and it is what lands in session_start.party.
+    const { persona, ...mechanical } = (raw ?? {}) as Record<string, unknown>;
+    const parsed = Combatant.safeParse(raw !== null && typeof raw === 'object' ? mechanical : raw);
     if (!parsed.success) {
       throw new Error(`${path}: invalid character\n${z.prettifyError(parsed.error)}`);
     }
@@ -124,9 +137,16 @@ async function loadParty(dir: string): Promise<Combatant[]> {
     if (party.some((pc) => pc.id === parsed.data.id)) {
       throw new Error(`${path}: duplicate party member id "${parsed.data.id}"`);
     }
+    if (persona !== undefined) {
+      const parsedPersona = Persona.safeParse(persona);
+      if (!parsedPersona.success) {
+        throw new Error(`${path}: invalid persona\n${z.prettifyError(parsedPersona.error)}`);
+      }
+      personas.push([parsed.data.id, parsedPersona.data]);
+    }
     party.push(parsed.data);
   }
-  return party;
+  return { party, personas: Object.fromEntries(personas) };
 }
 
 /** Loads and validates a campaign folder: its config, its party, and every seat's endpoints. */
@@ -160,7 +180,7 @@ export async function loadCampaign(campaignsDir: string, campaignId: string): Pr
         `cartyx-lore checkout, or remove the embed seat.`
     );
   }
-  const party = await loadParty(dir);
+  const { party, personas } = await loadParty(dir);
 
   const endpoint = (name: string, where: string) => {
     if (!Object.hasOwn(file.endpoints, name)) {
@@ -232,6 +252,8 @@ export async function loadCampaign(campaignsDir: string, campaignId: string): Pr
     targetMinutes: file.targetMinutes,
     loreCommit: file.loreCommit,
     party,
+    ...(file.premise ? { premise: file.premise } : {}),
+    ...(Object.keys(personas).length > 0 ? { personas } : {}),
     seats: { dm: DM_SEAT, players, ...(file.seats.checker ? { checker: CHECKER_SEAT } : {}) },
     models,
     ...(scriptSeat ? { scriptSeat } : {}),

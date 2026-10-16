@@ -27,9 +27,10 @@ export const SeatConfig = ModelTarget.extend({
    */
   toolChoice: z.enum(['auto', 'required']).optional(),
   /**
-   * Sent as `reasoning_effort`. "none" turns thinking off on servers that support it (LM Studio,
-   * Ollama), which makes short structured replies such as the checker's fast. Unset leaves the
-   * server's default.
+   * Sent as `reasoning_effort`. "none" turns thinking off where the server and model honour it
+   * (Ollama's qwen3 does), which makes short structured replies such as the checker's fast. Some
+   * do not: LM Studio's MLX Qwen3.8-27B thinks just as long with it. Unset leaves the server's
+   * default.
    */
   reasoningEffort: z.enum(['none', 'low', 'medium', 'high']).optional(),
   /** Tried in order when the primary target fails. */

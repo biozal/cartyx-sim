@@ -29,6 +29,7 @@ cartyx-sim is an autonomous D&D 5e simulation (one AI DM and four AI players on 
 - **Campaign config**: `campaign.json` (endpoints, seats) plus `characters/*.json`; an example lives in `apps/cli/examples/local-campaign/`.
 - **`sim script --campaign <id> --session <n>`**: turns an event log into `script.json` (speaker-attributed, TTS-ready lines and cues) and `script.md` (a readable script); see `docs/running-a-session.md` §8.
 - **`sim index --campaign <id> [--force] [--check]`**: builds or refreshes the lore index from the campaign's `cartyx-lore` checkout — chunks markdown by heading, resolves each chunk to its Kanka entity, embeds through the campaign's `embed` seat, stores it in LanceDB — and reports every ambiguous entity name it declined to guess. `--check` reports staleness and builds nothing. A fresh `sim run` rebuilds a stale index automatically; `--resume` never does. See `docs/running-a-session.md` §9.
+- **`sim prep --campaign <id> --session <n> [--location "<name>"] [--force]`**: writes a session outline to `campaigns/<id>/prep/session-NNN.md`, opening in a real indexed lore entity (named with `--location`, or chosen by the DM seat near `premise.region`); refuses rather than invent a location when nothing clears the lore threshold. `sim run` plays the outline, an optional `premise` in `campaign.json`, and per-character `persona` blocks, and the director retrieves lore at session start and on scene changes (`lore_lookup` events with a `trigger`). See `docs/running-a-session.md` §10.
 - **`sim audit --campaign <id> --session <n> [--no-model]`**: writes `audit.md` and `audit.json` for a session — gaps, inventions (linked to the narration each supports), coverage, and possible contradictions between narration and retrieved lore (skipped without a checker seat, a lore index, or with `--no-model`).
 
 Operator guide: `docs/running-a-session.md`.
@@ -48,7 +49,7 @@ The `avalon` campaign (git-ignored, under `campaigns/`) seats the DM and four pl
 What the runs taught us:
 
 - **Output tokens include thinking.** Qwen3.6 thinks 690–860 tokens before its first DM call, and Gemma 4 thinks 430–900 tokens on a player turn. At the original limits (800 and 400) those seats ran out mid-thought and paused the session.
-- **LM Studio does not enforce `tool_choice: required`.** After a tool result, Qwen often narrates in plain text, so the DM seat uses `auto` (text becomes narration). Players stay on `required`, so Gemma's occasional garbled tool call is retried rather than spoken.
+- **LM Studio does not enforce `tool_choice: required`.** After a tool result, Qwen often narrates in plain text, so the DM seat uses `auto` (text becomes narration). Players stay on `required`, so a reply with no tool call is retried rather than spoken; a call Gemma writes as text in its native syntax is recovered as a tool call (added after session 015).
 - **Rejected on the Ampere:** Gemma-4-31B-Storymaxxed (spills past 24 GB, ~4 tok/s), Cydonia-24B-v4 (writes Mistral tool calls Ollama cannot parse; no license), and Muse Glimmer (thinks past its limit on real turns unless `reasoning_effort` is `none`). GLM-4.7-Flash thinks briefly and calls tools reliably.
 - **Engine fixes from the runs:** DM prose that arrives alongside tool calls is narrated (after those calls, before `hand_off`) instead of dropped; identical narration within one beat is skipped and flagged `duplicate_narration`; quote marks wrapped around a whole spoken line are removed; a "Hand off to …" line written in DM narration is removed and, when the DM made no hand_off call, treated as one.
 - **The DM plays the players.** Session 001's DM wrote dialogue for three player characters; the verb-list validator missed it. An optional checker seat now reviews each narration (`docs/running-a-session.md` §7), and the verb-list rule yields to the checker once one is configured. Across three 10-minute sessions with the checker on (002–004) no narration wrote a player character's dialogue and every checker catch was a real violation; a checker-off control run reproduced the original failure, with the DM writing lines for three PCs and four later player turns building on them.
@@ -249,6 +250,56 @@ Findings 1–6 are fixed (`bc334ff..656f4ce`); finding 7 is still open.
 
 The batch had one review; its findings (a leak cut breaking quotes, over-broad `order of battle`/`0 hit points`/bulleted-name matches, titles splitting sentences, exact-only checker name matching, turn-order shapes missed) are fixed in the follow-up commit.
 
+## Eleventh 1-hour run (session 019, 2026-10-10) — prep, personas and ambient lore
+
+Sessions 015–019 are the first played with `sim prep` outlines, the avalon premise, and personas for
+all four PCs. 015–017 were 15-minute runs; 018 and 019 were 60 minutes. Session 019 is the first
+clean 1-hour run: no pauses, and an audit of 0 gaps, 0 inventions and 0 contradictions.
+
+| Measure                         | 015    | 016    | 017   | 018      | 019       |
+| ------------------------------- | ------ | ------ | ----- | -------- | --------- |
+| Target minutes                  | 15     | 15     | 15    | 60       | 60        |
+| Pauses                          | 4      | 0      | 0     | 1 (Kira) | **0**     |
+| Gaps / inventions / contradict. | 0/0/0  | 1/0/0  | 0/0/0 | 0/0/0    | **0/0/0** |
+| Lore entities covered           | 31     | 31     | 38    | 31       | 31        |
+| Words                           | —      | —      | 2431  | 9283     | 9224      |
+| DM share                        | 67–69% | 67–69% | 75%   | 63%      | 72%       |
+
+This answers the session-014 "No lore was used" finding: with the outline written from the opening
+location's write-up and each PC's ties, and lore fed to the DM by party and scene lookups, play draws
+on 31–38 lore entities a session and the DM invents nothing.
+
+What the runs taught us:
+
+- **A context window smaller than the prompt is silent on Ollama.** It drops the front of the prompt,
+  system prompt included, and the seat plays the wrong part (015, Tomas). The client now compares the
+  prompt tokens a server read with the request's size and fails the call with advice to raise
+  `num_ctx`; Tomas runs on a derived `qwen3:14b-8k`.
+- **A failed call that a fallback rescued is now visible:** the director logs a DM-only note naming
+  the target that answered and what failed before it.
+- **Prep named places the lore does not have** ("West Orchard", 016), which the DM then looked up and
+  found nothing for. The outline prompt now asks for lore place names only.
+- **Thinking is the main cause of failed replies.** Replies that spent their whole output budget
+  thinking: Kira's `qwen3.8-27b-mlx` on 2 of 8 turns at 4000 tokens (018, the pause), the DM's
+  `qwen3.6-35b-a3b` on 6 of 56 at 4000 against ~25k-token prompts, Bram's `gemma-4-12b` twice at
+  2000, and the GLM checker on 12 of 37 checks at 8000, reasoning sentence by sentence on a
+  ~1.5k-token prompt. LM Studio's MLX Qwen3.8-27B ignores `reasoning_effort: none`,
+  `chat_template_kwargs` and `/no_think` alike. GLM honours `none` (2 s a check) but then flags NPC
+  reactions as PC control.
+- **Ollama sometimes rejects GLM's own tool call** with HTTP 500 ("incomplete GLM tool call"); a
+  retry succeeded.
+- **The DM sometimes writes the tool's name ahead of its prose** (`[narrate] The morning bell…`,
+  019), which reached the public narration once.
+- **Tomas's share stays at 1–2%.** He gets equal turns; `qwen3:14b` with thinking off writes short
+  lines.
+
+### Fixes after these runs
+
+- `[narrate]` ahead of DM prose is cut like the other meta prefixes, keeping the prose.
+- Seat settings (`campaigns/avalon/campaign.json`, not in git): Kira 6000 tokens, a 420 s timeout and
+  a Gemma 26B fallback; DM 6000; Bram 4000; Mira a Gemma 26B fallback; the checker moved to
+  `qwen3.6-35b-a3b` with GLM as its fallback. None of these has been played yet.
+
 ## Tenth 1-hour run (session 014, 2026-10-07) — the first against real lore
 
 Run on HEAD `20ded41`, the first session with a lore index behind `lookup_lore`. It reached
@@ -302,6 +353,11 @@ Findings:
 3. **Four `dm_state_leak` strips and six checker catches**, in line with recent runs; the leak
    strip and the checker are both doing their jobs.
 4. **Death saves have still never fired live** — now eleven sessions without a PC reaching 0 HP.
+
+Finding 1 is answered by the prep, persona, and ambient-lore work (`sim prep`, `premise`, `persona`,
+and `lore_lookup` events with a `trigger`), delivered ahead of the rest of Plan 2C in response to the
+"No lore was used" result. It is unmeasured until session 015 reports entities covered and scenes
+tied to lore above zero.
 
 ### Hardware changed with this run
 

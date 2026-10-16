@@ -6,8 +6,10 @@ import { formatCommandError } from './command-errors';
 import { releaseHeldLocks } from './jsonl-sink';
 import { formatIndexSummary, runIndex } from './index-lore';
 import { formatPauseMessage } from './pause-message';
+import { formatPrepSummary, runPrep } from './prep';
 import { runSession } from './run';
 import { formatScriptSummary, makeScript } from './script';
+import { ensureRulesIndex } from './srd/rules-index';
 
 // An exit by signal skips `finally`, so release any session lock first; otherwise the lock stays
 // behind. Exit codes follow the shell convention of 128 + the signal number.
@@ -39,6 +41,7 @@ interface IndexCommandOptions {
   campaign: string;
   force: boolean;
   check: boolean;
+  rules: boolean;
   campaignsDir: string;
 }
 
@@ -48,6 +51,14 @@ interface ScriptCommandOptions {
   /** False with --no-model. */
   model: boolean;
   refresh: boolean;
+  campaignsDir: string;
+}
+
+interface PrepCommandOptions {
+  campaign: string;
+  session: number;
+  location?: string;
+  force: boolean;
   campaignsDir: string;
 }
 
@@ -135,9 +146,21 @@ program
   .requiredOption('--campaign <id>', 'campaign id (a folder under the campaigns directory)')
   .option('--force', 'rebuild even when the index is fresh', false)
   .option('--check', 'report freshness without building', false)
+  .option('--rules', 'build the SRD rules index instead of the lore index', false)
   .option('--campaigns-dir <path>', 'campaigns directory', 'campaigns')
   .action(
     action<IndexCommandOptions>(async (options) => {
+      if (options.rules) {
+        const result = await ensureRulesIndex({
+          campaignsDir: options.campaignsDir,
+          campaign: options.campaign,
+          force: options.force,
+          check: options.check,
+          log: (line) => console.log(line),
+        });
+        for (const line of formatIndexSummary(result, 'rules')) console.log(line);
+        return;
+      }
       const result = await runIndex({
         campaignsDir: options.campaignsDir,
         campaign: options.campaign,
@@ -190,6 +213,28 @@ program
         log: (line) => console.log(line),
       });
       for (const line of formatAuditSummary(result)) console.log(line);
+    })
+  );
+
+program
+  .command('prep')
+  .description("Write a session outline that opens in a real place from the campaign's lore")
+  .requiredOption('--campaign <id>', 'campaign id (a folder under the campaigns directory)')
+  .option('--session <n>', 'session number', parseNumber('integer'), 1)
+  .option('--location <name>', 'open at this lore entity instead of letting the DM seat choose')
+  .option('--force', 'overwrite an existing outline', false)
+  .option('--campaigns-dir <path>', 'campaigns directory', 'campaigns')
+  .action(
+    action<PrepCommandOptions>(async (options) => {
+      const result = await runPrep({
+        campaignsDir: options.campaignsDir,
+        campaign: options.campaign,
+        session: options.session,
+        location: options.location,
+        force: options.force,
+        log: (line) => console.log(line),
+      });
+      for (const line of formatPrepSummary(result)) console.log(line);
     })
   );
 
