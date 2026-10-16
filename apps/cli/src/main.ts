@@ -9,6 +9,7 @@ import { formatPauseMessage } from './pause-message';
 import { formatPrepSummary, runPrep } from './prep';
 import { runSession } from './run';
 import { formatScriptSummary, makeScript } from './script';
+import { ensureRulesIndex } from './srd/rules-index';
 
 // An exit by signal skips `finally`, so release any session lock first; otherwise the lock stays
 // behind. Exit codes follow the shell convention of 128 + the signal number.
@@ -40,6 +41,7 @@ interface IndexCommandOptions {
   campaign: string;
   force: boolean;
   check: boolean;
+  rules: boolean;
   campaignsDir: string;
 }
 
@@ -144,9 +146,21 @@ program
   .requiredOption('--campaign <id>', 'campaign id (a folder under the campaigns directory)')
   .option('--force', 'rebuild even when the index is fresh', false)
   .option('--check', 'report freshness without building', false)
+  .option('--rules', 'build the SRD rules index instead of the lore index', false)
   .option('--campaigns-dir <path>', 'campaigns directory', 'campaigns')
   .action(
     action<IndexCommandOptions>(async (options) => {
+      if (options.rules) {
+        const result = await ensureRulesIndex({
+          campaignsDir: options.campaignsDir,
+          campaign: options.campaign,
+          force: options.force,
+          check: options.check,
+          log: (line) => console.log(line),
+        });
+        for (const line of formatIndexSummary(result, 'rules')) console.log(line);
+        return;
+      }
       const result = await runIndex({
         campaignsDir: options.campaignsDir,
         campaign: options.campaign,

@@ -64,3 +64,14 @@ describe('contentDigest', () => {
     );
   });
 });
+
+describe('readLoreFiles include filter', () => {
+  it('reads only the files the filter accepts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'lore-include-'));
+    await mkdir(join(root, 'source'), { recursive: true });
+    await writeFile(join(root, 'a.md'), '# A\n');
+    await writeFile(join(root, 'source', 'b.md'), '# B\n');
+    const files = await readLoreFiles(root, (path) => !path.startsWith('source/'));
+    expect(files.map((file) => file.path)).toEqual(['a.md']);
+  });
+});

@@ -165,18 +165,20 @@ export async function runIndex(options: IndexOptions): Promise<IndexResult> {
   return ensureIndex(options);
 }
 
-export function formatIndexSummary(result: IndexResult): string[] {
+export function formatIndexSummary(result: IndexResult, kind: 'lore' | 'rules' = 'lore'): string[] {
   const lines: string[] = [];
+  const command = kind === 'rules' ? '`sim index --rules`' : '`sim index`';
+  const what = kind === 'rules' ? 'Rules' : 'Lore';
   if (!result.meta) {
-    lines.push(`No lore index at ${result.indexDir}. Run \`sim index\` to build one.`);
-    lines.push(`Lore is at ${result.loreCommit}.`);
+    lines.push(`No ${kind} index at ${result.indexDir}. Run ${command} to build one.`);
+    lines.push(`${kind === 'rules' ? 'Rules are' : 'Lore is'} at ${result.loreCommit}.`);
     return lines;
   }
   const meta = result.meta;
   if (!result.rebuilt && result.stale) {
     lines.push(
-      `Index is stale (indexed ${meta.loreCommit}, lore is now ${result.loreCommit}). ` +
-        'Run `sim index` to rebuild.'
+      `Index is stale (indexed ${meta.loreCommit}, ${kind} ${kind === 'rules' ? 'are' : 'is'} now ${result.loreCommit}). ` +
+        `Run ${command} to rebuild.`
     );
   } else {
     // Only a rebuild spent real build time; a fresh/--check result must never report one it
@@ -190,7 +192,7 @@ export function formatIndexSummary(result: IndexResult): string[] {
         meta.chunks === 1 ? '' : 's'
       } from ${meta.files} file${meta.files === 1 ? '' : 's'}${duration} (${meta.embedModel}, ${meta.dims} dims)`
     );
-    lines.push(`Lore commit: ${meta.loreCommit}`);
+    lines.push(`${what} commit: ${meta.loreCommit}`);
   }
   lines.push(`Index: ${result.indexDir}`);
   if (result.ambiguous.length > 0) {

@@ -61,6 +61,8 @@ export interface BuildOptions {
   lorePath: string;
   indexDir: string;
   embedder: Embedder;
+  /** Which files under `lorePath` to index; defaults to every lore Markdown file. */
+  include?: (relativePath: string) => boolean;
   log?: (line: string) => void;
   /** Overridden by tests; production uses `EMBED_RETRY_DELAYS_MS`. */
   retryDelaysMs?: readonly number[];
@@ -126,7 +128,7 @@ export async function buildIndex(options: BuildOptions): Promise<BuildResult> {
   await removeStaleSiblings(options.indexDir);
 
   const log = options.log ?? (() => {});
-  const files = await readLoreFiles(options.lorePath);
+  const files = await readLoreFiles(options.lorePath, options.include);
   log(`Read ${files.length} markdown files from ${options.lorePath}`);
 
   const entities = buildEntityIndex(files);
