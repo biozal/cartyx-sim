@@ -184,6 +184,70 @@ an hour. Not needed yet; noted in case a run outgrows the 3090.
 The scorecard comes first because "better" means nothing until we can measure it — and measuring
 today's models also tells us which one is the best starting point.
 
+---
+
+## Chapter 2 — Measuring "better" before changing anything (2026-10-15)
+
+Before training anything we need a way to score a player, for two reasons. First, "the trained model
+plays better" is only a claim until it's a number. Second, the same scores decide which turns are good
+enough to become training examples — a model trained on mediocre examples learns mediocrity.
+
+### Two kinds of measurement
+
+- **Measured scores** are counted straight from the logs: how often a reply was a valid tool call on
+  the first try, how long turns took, what share of the words each player spoke, how often the rules
+  engine refused a declaration, how many names a player used that exist nowhere in the lore. They are
+  exact and free, but they can't tell a witty line from a dull one.
+- **A judge model** reads a sample of turns and grades them 1–5 against a written rubric: does this
+  sound like the character, does it react to what just happened, does it give the scene somewhere to
+  go, is the declared action legal under the 2024 rules, does it fit the world. Using one model to
+  grade another is called **"LLM-as-a-judge"**. It's how most AI evaluation is done today, because
+  people can't read thousands of turns.
+
+Judges have biases — they tend to prefer longer answers, and answers that sound like their own style.
+So we **check the judge against a person**: you rate 30 turns yourself, the judge rates the same 30,
+and we measure how often it lands within one point of you. Only rubric fields where it agrees with you
+(within one point at least 80% of the time) count as trusted. This is the standard way to make a judge
+defensible when someone asks "says who?"
+
+### Recording every model call
+
+Until now the sim logged the story — lines spoken, rolls, lookups — but not the model calls behind it.
+We add a **call log**: for every call, the exact prompt and tools sent, the reply, the thinking,
+token counts, time taken, and any retry or fallback. Two payoffs:
+
+1. The "reliable and fast" scores come from it.
+2. **It is the training data.** A training example is "this exact prompt → this ideal reply". The call
+   log captures both, exactly as the model saw them, so good turns can later be lifted straight out.
+
+### The rules, as clean files
+
+To judge whether a declaration is legal, the judge needs the actual rules in front of it. We use the
+**SRD 5.2.1**, the free, Creative Commons part of the 2024 rules. Rather than convert the 364-page PDF
+ourselves, we start from an existing community conversion (downfallx/dnd-5e-srd-markdown) and check
+it: 98.9% of the PDF's 204,606 words appear in it, and the missing 1.1% is almost entirely the page
+footer "System Reference Document" repeated on every page.
+
+We then split it into one file per area — each class, spells by level, monsters by letter — tidy the
+monster stat blocks into compact lines, and add a test that proves the split lost no words. The rules
+get their **own search index**, separate from the Cartyx lore, so a lookup for a place in the world
+never returns a dragon's stat block. When the judge grades a player who casts _Mirror Image_, it is
+handed the actual Mirror Image rules text.
+
+This is retrieval again (Chapter 1): the rules are looked up and shown to the model, rather than
+trusted to its memory.
+
+### Glossary additions
+
+- **LLM-as-a-judge:** using a language model to grade another model's output against a rubric.
+- **Rubric:** the fixed list of questions and scale a grader uses, so grades are comparable.
+- **Inter-rater agreement:** how often two graders (here, you and the judge) give the same or close
+  scores; the evidence that a judge can be trusted.
+- **Call log:** the record of every prompt sent to a model and its reply — the raw material for
+  training examples.
+- **Baseline:** the scores of today's models, measured before any training, that later results are
+  compared against.
+
 ### Glossary
 
 - **Parameters / weights:** the numbers that make up a model. "9B" = 9 billion.
